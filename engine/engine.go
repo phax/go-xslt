@@ -48,6 +48,15 @@ func Transform(req Request) Result { return engine.Transform(req) }
 // memory on both sides. It never panics; errors are reported as Diagnostics.
 func TransformTo(w io.Writer, req Request) Result { return engine.TransformTo(w, req) }
 
+// TransformFromReader is Transform with the source document read from src
+// instead of req.Source (ignored), avoiding the extra copy a caller would
+// otherwise pay converting their own io.Reader into a string before calling
+// Transform. It never panics; errors (including a read failure on src) are
+// reported as Diagnostics.
+func TransformFromReader(src io.Reader, req Request) Result {
+	return engine.TransformFromReader(src, req)
+}
+
 // Validate validates an XML instance against XSD 1.0/1.1 schemas. It never
 // panics; errors are reported as Diagnostics with Valid=false.
 func Validate(req ValidateRequest) ValidateResult { return engine.Validate(req) }
