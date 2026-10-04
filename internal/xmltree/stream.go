@@ -96,6 +96,10 @@ type StreamReader struct {
 	attrDefaults map[string]map[string]attlistDefault
 	elemOnly     map[string]bool
 
+	// nameIntern dedupes element Local/Prefix strings across the stream, the
+	// same reasoning as parseRaw's identical table in parse.go.
+	nameIntern map[string]string
+
 	// incomplete records the nodes Drop has taken children away from. Only
 	// live ancestors accumulate here (an entry is removed when the node is
 	// itself dropped), so the map is bounded by the spine, not by the
@@ -132,11 +136,12 @@ func NewStreamReader(r io.Reader) (*StreamReader, error) {
 	dec.CharsetReader = charsetReader
 	doc := &Node{Kind: KindDocument}
 	s := &StreamReader{
-		dec:     dec,
-		doc:     doc,
-		stack:   []*Node{doc},
-		nsStack: []map[string]string{{"xml": "http://www.w3.org/XML/1998/namespace", "": ""}},
-		tree:    atomic.AddUint64(&treeSeq, 1),
+		dec:        dec,
+		doc:        doc,
+		stack:      []*Node{doc},
+		nsStack:    []map[string]string{{"xml": "http://www.w3.org/XML/1998/namespace", "": ""}},
+		tree:       atomic.AddUint64(&treeSeq, 1),
+		nameIntern: make(map[string]string),
 	}
 	s.stamp(doc)
 	// Priming. The DOCTYPE is the other place a document can turn out to be
@@ -318,17 +323,33 @@ func streamHasExternalEntity(sub string) bool {
 }
 
 func (s *StreamReader) startElement(t xml.StartElement) *Node {
-	frame := cloneNS(s.nsStack[len(s.nsStack)-1])
+	// Intern the tag's own name before anything retains it — see parse.go's
+	// identical gate in its StartElement case for why.
+	t.Name.Local = intern(s.nameIntern, t.Name.Local)
+	t.Name.Space = intern(s.nameIntern, t.Name.Space)
+	// Lazy-clone, same reasoning as the buffered parser's identical gate in
+	// parse.go: most elements declare no namespace of their own, so reuse the
+	// parent's frame reference until a decl actually forces a copy.
+	frame := s.nsStack[len(s.nsStack)-1]
+	cloned := false
 	var decls []*Node
 	for _, a := range t.Attr {
+		local, isNS := "", false
 		switch {
 		case a.Name.Space == "xmlns":
-			frame[a.Name.Local] = a.Value
-			decls = append(decls, &Node{Kind: KindNamespace, Name: Name{Local: a.Name.Local}, Value: a.Value})
+			local, isNS = a.Name.Local, true
 		case a.Name.Space == "" && a.Name.Local == "xmlns":
-			frame[""] = a.Value
-			decls = append(decls, &Node{Kind: KindNamespace, Name: Name{Local: ""}, Value: a.Value})
+			local, isNS = "", true
 		}
+		if !isNS {
+			continue
+		}
+		if !cloned {
+			frame = cloneNS(frame)
+			cloned = true
+		}
+		frame[local] = a.Value
+		decls = append(decls, &Node{Kind: KindNamespace, Name: Name{Local: local}, Value: a.Value})
 	}
 	el := &Node{Kind: KindElement, Name: resolveRawName(frame, t.Name, false), NS: decls}
 	// Stamping order is element, then its namespace nodes, then its

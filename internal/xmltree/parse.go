@@ -256,7 +256,7 @@ func parseRaw(src, baseDir string) (*Node, error) {
 	// an entity's replacement as character data, never as markup.
 	src, entSpans := expandExternalEntities(src, baseDir)
 	src = normalizeAttrWhitespace(src)
-	lines := lineOffsets(src)
+	lines := newLinePos(src)
 	dec := xml.NewDecoder(strings.NewReader(downgradeXMLVersion(src)))
 	dec.Strict = true
 	dec.CharsetReader = charsetReader
@@ -278,6 +278,14 @@ func parseRaw(src, baseDir string) (*Node, error) {
 	// rawNames holds each open element's name AS WRITTEN (prefix in Space),
 	// for the end-tag check RawToken leaves to its caller.
 	var rawNames []xml.Name
+	// nameIntern dedupes element Local/Prefix strings across the document: the
+	// decoder hands back a freshly allocated string for every single tag, but
+	// a structured document typically has only a handful of DISTINCT element
+	// names repeated many thousands of times (a UBL invoice's cac:InvoiceLine,
+	// cbc:ID, ...). Scoped to this one parse, not a package-level table —
+	// each parse gets its own, so there's no cross-document retention and no
+	// concurrency concern.
+	nameIntern := make(map[string]string)
 
 	for {
 		startOff := dec.InputOffset()
@@ -294,25 +302,52 @@ func parseRaw(src, baseDir string) (*Node, error) {
 			break
 		}
 		if err != nil {
-			line, col := posOf(lines, int(dec.InputOffset()))
+			line, col := lines.at(int(dec.InputOffset()))
 			return nil, &ParseError{Line: line, Col: col, Msg: err.Error()}
 		}
-		line, col := posOf(lines, int(startOff))
+		line, col := lines.at(int(startOff))
 		top := stack[len(stack)-1]
 
 		switch t := tok.(type) {
 		case xml.StartElement:
-			// Build a new namespace frame from the parent's, applying decls.
-			frame := cloneNS(nsStack[len(nsStack)-1])
+			// Intern the tag's own name before anything retains it: Local and
+			// the written prefix (Space, in RawToken's naming) both end up
+			// stored verbatim into the element's Name by resolveRawName below,
+			// and interning here is what makes every occurrence of the same
+			// name across the document share one backing byte array instead
+			// of each tag paying for its own copy.
+			t.Name.Local = intern(nameIntern, t.Name.Local)
+			t.Name.Space = intern(nameIntern, t.Name.Space)
+			// Build this element's namespace frame from the parent's, applying
+			// its own xmlns decls if any — but most elements in a real document
+			// declare none, so cloning the parent's map unconditionally (the
+			// map is Go-allocated and sized to its exact entry count) wastes an
+			// allocation+copy per element for no reason: clone lazily, only on
+			// the first decl actually found, and otherwise push the SAME map
+			// reference the parent used. Safe because every write below goes
+			// through this clone-before-first-write gate, so a shared frame is
+			// never mutated — a deeper element that itself needs to add a decl
+			// clones its own copy at that point instead.
+			frame := nsStack[len(nsStack)-1]
+			cloned := false
 			var decls []*Node
 			for _, a := range t.Attr {
-				if a.Name.Space == "xmlns" {
-					frame[a.Name.Local] = a.Value
-					decls = append(decls, &Node{Kind: KindNamespace, Name: Name{Local: a.Name.Local}, Value: a.Value})
-				} else if a.Name.Space == "" && a.Name.Local == "xmlns" {
-					frame[""] = a.Value
-					decls = append(decls, &Node{Kind: KindNamespace, Name: Name{Local: ""}, Value: a.Value})
+				local, isNS := "", false
+				switch {
+				case a.Name.Space == "xmlns":
+					local, isNS = a.Name.Local, true
+				case a.Name.Space == "" && a.Name.Local == "xmlns":
+					local, isNS = "", true
 				}
+				if !isNS {
+					continue
+				}
+				if !cloned {
+					frame = cloneNS(frame)
+					cloned = true
+				}
+				frame[local] = a.Value
+				decls = append(decls, &Node{Kind: KindNamespace, Name: Name{Local: local}, Value: a.Value})
 			}
 			el := &Node{
 				Kind: KindElement,
@@ -422,7 +457,13 @@ func parseRaw(src, baseDir string) (*Node, error) {
 		return nil, &ParseError{Msg: "unexpected end of document: unclosed elements"}
 	}
 	assignOrder(doc)
-	applyEntityBases(doc, entSpans, lines)
+	if len(entSpans) > 0 {
+		// Only an external-parsed-entity document needs the reverse (line,col)
+		// -> offset lookup applyEntityBases does, so only build its line-start
+		// table (one int per line — real memory on a large document) in that
+		// rare case, rather than unconditionally for every parse.
+		applyEntityBases(doc, entSpans, lineStartOffsets(src))
+	}
 	return doc, nil
 }
 
@@ -438,6 +479,16 @@ func RootElement(n *Node) *Node {
 		}
 	}
 	return nil
+}
+
+// intern returns the single shared copy of s held in m, recording s as that
+// copy on its first occurrence.
+func intern(m map[string]string, s string) string {
+	if v, ok := m[s]; ok {
+		return v
+	}
+	m[s] = s
+	return s
 }
 
 func cloneNS(m map[string]string) map[string]string {
@@ -457,15 +508,24 @@ func cloneNS(m map[string]string) map[string]string {
 // CDATA sections, processing instructions and the DOCTYPE are left alone;
 // every replacement is byte-for-byte so line/column offsets are unaffected
 // (a CRLF pair inside a value becomes two spaces rather than one).
+//
+// The initial ContainsAny check alone doesn't avoid much: it only screens out
+// a document with NO tab/LF/CR anywhere, but every pretty-printed document
+// has plenty of newlines between tags, tripping it true, while the actual
+// target — a literal control character INSIDE a quoted attribute value — is
+// rare. So the []byte copy itself is deferred to the first replacement
+// actually found, not done unconditionally up front: scanning stays on src
+// throughout (byte-indexing a string costs nothing), and only the specific
+// in-quote control-character positions ever touch the lazily-allocated b.
 func normalizeAttrWhitespace(src string) string {
 	if !strings.ContainsAny(src, "\t\n\r") {
 		return src
 	}
-	b := []byte(src)
-	changed := false
+	var b []byte
+	n := len(src)
 	i := 0
-	for i < len(b) {
-		if b[i] != '<' {
+	for i < n {
+		if src[i] != '<' {
 			i++
 			continue
 		}
@@ -475,21 +535,21 @@ func normalizeAttrWhitespace(src string) string {
 			if j := strings.Index(rest[4:], "-->"); j >= 0 {
 				i += 4 + j + 3
 			} else {
-				i = len(b)
+				i = n
 			}
 			continue
 		case strings.HasPrefix(rest, "<![CDATA["):
 			if j := strings.Index(rest[9:], "]]>"); j >= 0 {
 				i += 9 + j + 3
 			} else {
-				i = len(b)
+				i = n
 			}
 			continue
 		case strings.HasPrefix(rest, "<?"):
 			if j := strings.Index(rest[2:], "?>"); j >= 0 {
 				i += 2 + j + 2
 			} else {
-				i = len(b)
+				i = n
 			}
 			continue
 		case strings.HasPrefix(rest, "<!"):
@@ -498,8 +558,8 @@ func normalizeAttrWhitespace(src string) string {
 			depth := 0
 			var q byte
 			j := i + 2
-			for j < len(b) {
-				c := b[j]
+			for j < n {
+				c := src[j]
 				if q != 0 {
 					if c == q {
 						q = 0
@@ -521,14 +581,16 @@ func normalizeAttrWhitespace(src string) string {
 		// A start or end tag: whitespace inside quoted attribute values.
 		var q byte
 		j := i + 1
-		for j < len(b) {
-			c := b[j]
+		for j < n {
+			c := src[j]
 			if q != 0 {
 				if c == q {
 					q = 0
 				} else if c == '\n' || c == '\t' || c == '\r' {
+					if b == nil {
+						b = []byte(src)
+					}
 					b[j] = ' '
-					changed = true
 				}
 			} else if c == '"' || c == '\'' {
 				q = c
@@ -539,7 +601,7 @@ func normalizeAttrWhitespace(src string) string {
 		}
 		i = j + 1
 	}
-	if !changed {
+	if b == nil {
 		return src
 	}
 	return string(b)
@@ -641,29 +703,40 @@ func assignOrder(root *Node) {
 	walk(root)
 }
 
-func lineOffsets(s string) []int {
-	offs := []int{0}
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			offs = append(offs, i+1)
-		}
-	}
-	return offs
+// linePos converts byte offsets to 1-based (line, col) incrementally, as the
+// decoder advances, instead of precomputing every line-start offset up front
+// (an []int with one entry per line — tens of MB on a large, heavily
+// line-broken document for an array that exists only to serve this lookup).
+// Every caller in this package only ever asks about offsets in non-decreasing
+// order (parseRaw queries dec.InputOffset() once per token, which only moves
+// forward), so each byte of src needs scanning at most once across the
+// whole parse, with O(1) extra state instead of an O(line count) array and
+// no binary search per lookup.
+type linePos struct {
+	src       string
+	scanned   int // offset scanned up to so far (exclusive)
+	line      int // 1-based line number as of `scanned`
+	lineStart int // byte offset where `line` began
 }
 
-// posOf maps a byte offset to a 1-based (line, col).
-func posOf(lineStarts []int, off int) (int, int) {
-	// binary search for the last line start <= off
-	lo, hi := 0, len(lineStarts)-1
-	for lo < hi {
-		mid := (lo + hi + 1) / 2
-		if lineStarts[mid] <= off {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
+func newLinePos(src string) *linePos {
+	return &linePos{src: src, line: 1}
+}
+
+// at maps a byte offset to a 1-based (line, col). off must be >= every off
+// given to a previous call on the same linePos.
+func (p *linePos) at(off int) (int, int) {
+	if off > len(p.src) {
+		off = len(p.src)
 	}
-	return lo + 1, off - lineStarts[lo] + 1
+	for p.scanned < off {
+		if p.src[p.scanned] == '\n' {
+			p.line++
+			p.lineStart = p.scanned + 1
+		}
+		p.scanned++
+	}
+	return p.line, off - p.lineStart + 1
 }
 
 var _ = fmt.Sprintf
@@ -695,6 +768,20 @@ func applyEntityBases(doc *Node, spans []entitySpan, lines []int) {
 		}
 	}
 	walk(doc)
+}
+
+// lineStartOffsets builds the one-int-per-line table offsetOf needs for its
+// reverse (line,col) -> offset lookup. Only called for a document that
+// actually contains a spliced external parsed entity (applyEntityBases'
+// caller) — the common case never pays for this array at all.
+func lineStartOffsets(s string) []int {
+	offs := []int{0}
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			offs = append(offs, i+1)
+		}
+	}
+	return offs
 }
 
 // offsetOf converts a 1-based line/column back to a byte offset.
