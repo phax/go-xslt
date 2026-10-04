@@ -1248,26 +1248,46 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 
 // evalStep produces the nodes selected by step from context node cn.
 func evalStep(step *Step, cn *xmltree.Node, ctx *Context) (NodeSet, error) {
-	var candidates NodeSet
-	if step.Axis == "namespace" {
-		candidates = namespaceNodes(cn, ctxNSScope(ctx))
-	} else {
-		candidates = axisNodes(step.Axis, cn)
-	}
-	if ctx != nil && ctx.PatternTop != nil && cn == ctx.PatternTop &&
-		(step.Axis == "child" || step.Axis == "attribute") {
-		// child-or-top / attribute-or-top (see Context.PatternTop).
-		candidates = append(NodeSet{cn}, candidates...)
-	}
-	// node-test filter
 	var matched NodeSet
-	for _, c := range candidates {
-		ok, err := matchTest(step.Test, step.Axis, c, ctx)
-		if err != nil {
+	switch step.Axis {
+	case "descendant", "descendant-or-self":
+		// Fused walk+filter (collectDescendantsFiltered's doc comment) — the
+		// one axis where materializing every candidate before testing it is
+		// genuinely wasteful at scale, since a descendant walk's candidate
+		// count grows with the WHOLE subtree, not with one node's immediate
+		// neighborhood the way child/attribute/sibling do.
+		if step.Axis == "descendant-or-self" {
+			ok, err := matchTest(step.Test, step.Axis, cn, ctx)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				matched = append(matched, cn)
+			}
+		}
+		if err := collectDescendantsFiltered(cn, step.Test, step.Axis, ctx, &matched); err != nil {
 			return nil, err
 		}
-		if ok {
-			matched = append(matched, c)
+	default:
+		var candidates NodeSet
+		if step.Axis == "namespace" {
+			candidates = namespaceNodes(cn, ctxNSScope(ctx))
+		} else {
+			candidates = axisNodes(step.Axis, cn)
+		}
+		if ctx != nil && ctx.PatternTop != nil && cn == ctx.PatternTop &&
+			(step.Axis == "child" || step.Axis == "attribute") {
+			// child-or-top / attribute-or-top (see Context.PatternTop).
+			candidates = append(NodeSet{cn}, candidates...)
+		}
+		for _, c := range candidates {
+			ok, err := matchTest(step.Test, step.Axis, c, ctx)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				matched = append(matched, c)
+			}
 		}
 	}
 	// predicates

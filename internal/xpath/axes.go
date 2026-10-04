@@ -17,10 +17,20 @@ func isReverseAxis(axis string) bool {
 
 // axisNodes returns the nodes on the given axis from node n, in axis order
 // (document order for forward axes, reverse document order for reverse axes).
+//
+// The "child" and "attribute" cases return n.Children/n.Attrs DIRECTLY,
+// aliasing the live tree's own backing array rather than a defensive copy —
+// safe only because both of this function's two call sites (evalStep,
+// pattern.go's proximity-position computation) treat the result as strictly
+// local and read-only: they range over it to build an independently
+// append-from-nil-allocated result and never sort, append into, or retain
+// the slice axisNodes handed back. Any future caller MUST uphold that same
+// contract — sorting or appending into this return value in place would
+// corrupt the tree itself, not just the caller's own data.
 func axisNodes(axis string, n *xmltree.Node) NodeSet {
 	switch axis {
 	case "child":
-		return append(NodeSet{}, n.Children...)
+		return NodeSet(n.Children)
 	case "self":
 		return NodeSet{n}
 	case "parent":
@@ -29,7 +39,7 @@ func axisNodes(axis string, n *xmltree.Node) NodeSet {
 		}
 		return nil
 	case "attribute":
-		return append(NodeSet{}, n.Attrs...)
+		return NodeSet(n.Attrs)
 	case "namespace":
 		return namespaceNodes(n, nil)
 	case "descendant":
@@ -136,6 +146,35 @@ func collectDescendants(n *xmltree.Node, out *NodeSet) {
 		*out = append(*out, c)
 		collectDescendants(c, out)
 	}
+}
+
+// collectDescendantsFiltered is collectDescendants fused with the node-test
+// filter evalStep otherwise applies afterward: for a step like
+// "//cac:InvoiceLine" over a wide document (680,000 descendants, a handful of
+// matches), materializing every descendant first just to discard almost all
+// of them immediately is the one unconditional allocation this axis pays
+// regardless of how selective the test is. Applying the test as each
+// candidate is visited keeps the exact same document-order output
+// evalStep's separate filter loop would have produced (this walk visits
+// nodes in the identical pre-order collectDescendants does), without ever
+// holding the unfiltered list. docWalk (used by following/preceding, which
+// must see every node to compute position before any test) keeps using the
+// plain, unfiltered collectDescendants — this is a distinct function, not a
+// behavior change to that one.
+func collectDescendantsFiltered(n *xmltree.Node, test NodeTest, axis string, ctx *Context, out *NodeSet) error {
+	for _, c := range n.Children {
+		ok, err := matchTest(test, axis, c, ctx)
+		if err != nil {
+			return err
+		}
+		if ok {
+			*out = append(*out, c)
+		}
+		if err := collectDescendantsFiltered(c, test, axis, ctx, out); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func siblings(n *xmltree.Node, following bool) NodeSet {

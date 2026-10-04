@@ -205,6 +205,15 @@ func (ns NodeSet) normalize() NodeSet {
 	if len(ns) <= 1 {
 		return ns
 	}
+	if alreadyNormalized(ns) {
+		// Already strictly ordered with no duplicates: skip both the sort and
+		// the dedup map below. For a large axis-step result over one actually
+		// parsed document (this is the common, large case: assignOrder gives
+		// every node a genuinely unique, strictly ordered (Tree(),Order())
+		// pair, so adjacent pairs are never tied) this is the entire cost of
+		// normalize() — no O(n log n) sort, no len(ns)-sized map allocation.
+		return ns
+	}
 	sort.SliceStable(ns, func(i, j int) bool { return docOrderBefore(ns[i], ns[j]) })
 	out := ns[:0]
 	// A map-based "seen" check (not just comparing to the immediately
@@ -235,6 +244,36 @@ func (ns NodeSet) normalize() NodeSet {
 		out = dedupByIdentity(out)
 	}
 	return out
+}
+
+// alreadyNormalized reports whether ns is already in STRICT document order
+// with no duplicates: docOrderBefore(ns[i-1], ns[i]) holds for every adjacent
+// pair.
+//
+// This is deliberately stricter than "no adjacent inversion" (which would
+// also accept a TIE — docOrderBefore false in both directions — between two
+// adjacent elements). Two different nodes from unrelated trees genuinely do
+// tie this way (e.g. two separate RTFs' roots, or anything under them never
+// resolved by Tree()/Order() or by a shared ancestorPath prefix), and
+// tolerating a tie here would let a duplicate recur non-adjacently THROUGH
+// it undetected — exactly the bug the map-based dedup below exists to catch
+// (select-2016/2037: "$var//* union $var/*" duplicates num1/num4/num5 at
+// non-adjacent positions, with other tied elements sitting between the
+// repeats). Requiring STRICT order throughout rules that out by
+// transitivity instead: if the same node appeared twice, docOrderBefore of
+// it against itself is false by definition, breaking strictness right there.
+//
+// The common, large case this exists for — an axis step's result over one
+// actually-parsed document — is never affected by the stricter requirement:
+// assignOrder gives every node of a parsed tree a genuinely unique, totally
+// ordered (Tree(),Order()) pair, so two distinct nodes from it never tie.
+func alreadyNormalized(ns NodeSet) bool {
+	for i := 1; i < len(ns); i++ {
+		if !docOrderBefore(ns[i-1], ns[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // hasDistinctRoots reports whether ns spans more than one tree.

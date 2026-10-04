@@ -2484,7 +2484,15 @@ func stripEmptyLiteralText(el *xmltree.Node) {
 	if len(el.Children) == 0 {
 		return
 	}
-	kept := el.Children[:0]
+	// Three-index, not el.Children[:0]: that would keep the ORIGINAL backing
+	// array (same capacity), so the append below would overwrite el.Children's
+	// own storage in place — harmless only because nothing retains an
+	// uncopied alias to it across this call today, but xpath.axisNodes' child
+	// axis now hands out exactly such an alias to its own two (currently
+	// careful) callers. Forcing cap==0 makes append allocate fresh, so this
+	// rebuild can never corrupt anyone else's outstanding reference to the
+	// pre-strip slice.
+	kept := el.Children[:0:0]
 	for _, c := range el.Children {
 		if c.Kind == xmltree.KindText && !c.Atomic() && c.Value == "" {
 			continue
