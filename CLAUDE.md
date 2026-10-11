@@ -317,7 +317,7 @@ Desktop GUI (**run from `desktop/`**):
     one — the typed value doesn't need to be *stored*, only computed when
     asked for); a handful of `XTTE1545`/`1555`/AVT-schema-awareness edge cases.
 - 🟢 **QT3/FOTS (XPath+XQuery) conformance** (`test/conformance/qt3_test.go`,
-  `TestQT3`): **99.6% (22,066/22,153 applicable), 87 fails**.
+  `TestQT3`): **99.8% (22,099/22,153 applicable), 54 fails**.
   - **Harness philosophy**: this engine is a real XP31 processor (also
     embedding a real XT30 one), not an XQuery processor — the **only**
     category-level exclusion is a spec dependency this declared identity
@@ -355,12 +355,22 @@ Desktop GUI (**run from `desktop/`**):
     the raw count; the `m` flag's exact F&O 3.1 §5.6.2 carve-out (neither
     `^` nor `$` may match right after a string's own trailing newline,
     unlike Go's native `(?m)`) is implemented.
+  - Collation: `caseFirst=upper`, `caseLevel=yes`, `backwards=yes` (and
+    fr-CA's default backwards) are real, layered over x/text's collators in
+    `collLayered` (x/text cannot express them); `reorder=` is not applied and
+    is FOCH0002 under `fallback=no`; a `numeric=yes` substring match may not
+    cut a digit run (`splitsNumber`). `format-*` `$place` honors Olson
+    `Region/City` names via the embedded `time/tzdata` (DST and `[ZN]`
+    abbreviations). `fn:analyze-string`'s result elements/`@nr` carry their
+    schema type annotations. The QT3 harness honors an environment's
+    `<collation default="true">`. German, French and Italian integer spellout
+    (cardinal + ordinal, `format-integer` `Ww`/`o(...)` and the same tokens in
+    `format-date*` for `de`) is native, in `internal/xpath/words_lang.go`
+    (CLDR spellings, < 10^12; any other language stays English).
   - **Permanent residual, do not re-attempt**: XQuery module loading
-    (`fn-load-xquery-module-*`, no XQuery grammar exists at all); deep UCA
-    tailoring (case-level, reorder codes, secondary-strength diacritics —
-    documented in `internal/xpath/UNSUPPORTED.md`); ordinal-word spellout
-    (French/Italian, and German beyond the month/day names above) + an
-    IANA timezone-abbreviation database; a live network fetch
+    (`fn-load-xquery-module-*`, no XQuery grammar exists at all); UCA
+    `reorder=` codes (documented in `internal/xpath/UNSUPPORTED.md`);
+    a live network fetch
     (`fn-unparsed-text-054a`); `fn-transform-901/902/err-14` (each wants
     `fn:transform` to be *unavailable* — a genuine implementation
     necessarily contradicts them, the same shape as streaming-fallback

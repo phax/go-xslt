@@ -75,6 +75,8 @@ func resolveCollator(uri string) (func(a, b string) int, error) {
 	// levels above tertiary, which the Option API cannot express).
 	ext := map[string]string{}
 	alternate, level4, identical := "", false, false
+	level := 3 // strength as 1..5
+	caseUpper, caseLevel, backwards, backwardsSet := false, false, false, false
 	for k, v := range params {
 		if k == "fallback" {
 			continue
@@ -97,7 +99,13 @@ func resolveCollator(uri string) (func(a, b string) int, error) {
 			}
 			continue
 		}
-		if k == "reorder" { // accepted, not applied
+		if k == "reorder" {
+			// Script/group reordering is not applied. fallback=yes may ignore
+			// a parameter the implementation lacks; fallback=no must not
+			// (F&O 3.1 §5.3.4): that is FOCH0002.
+			if !fallback {
+				return nil, fmt.Errorf("err:FOCH0002: unsupported collation keyword reorder=%s", v)
+			}
 			continue
 		}
 		allowed, known := collValues[k]
@@ -112,15 +120,23 @@ func resolveCollator(uri string) (func(a, b string) int, error) {
 			switch v {
 			case "primary", "1":
 				opts = append(opts, collate.Loose)
+				level = 1
 			case "secondary", "2":
 				opts = append(opts, collate.IgnoreCase, collate.IgnoreWidth)
+				level = 2
 			case "quaternary", "4":
 				ext["ks"] = "level4"
 				level4 = true
+				level = 4
 			case "identical", "5":
 				ext["ks"] = "identic"
 				level4, identical = true, true
+				level = 5
 			}
+		case "caseLevel":
+			caseLevel = v == "yes"
+		case "backwards":
+			backwards, backwardsSet = v == "yes", true
 		case "alternate":
 			if v != "non-ignorable" {
 				alternate = v
@@ -133,6 +149,16 @@ func resolveCollator(uri string) (func(a, b string) int, error) {
 			// No collate.Option expresses case ordering; the collator reads it
 			// from the tag's BCP 47 "kf" extension.
 			ext["kf"] = v
+			caseUpper = v == "upper"
+		}
+	}
+	// French as written in Canada orders accents from the END of the word
+	// unless the URI says otherwise (UCA-misc-lang-003).
+	if !backwardsSet {
+		if base, _ := tag.Base(); base.String() == "fr" {
+			if reg, conf := tag.Region(); conf != 0 && reg.String() == "CA" {
+				backwards = true
+			}
 		}
 	}
 	for k, v := range ext {
@@ -141,8 +167,12 @@ func resolveCollator(uri string) (func(a, b string) int, error) {
 		}
 	}
 	col := collate.New(tag, opts...)
+	cmp1 := func(a, b string) int { return col.CompareString(a, b) }
+	if caseUpper || caseLevel || backwards {
+		cmp1 = collLayered(tag, numericOpts(params["numeric"]), col, level, caseUpper, caseLevel, backwards)
+	}
 	if alternate == "" {
-		return func(a, b string) int { return col.CompareString(a, b) }, nil
+		return cmp1, nil
 	}
 	// alternate=blanked|shifted|shift-trimmed: the "variable" characters —
 	// the maxVariable group and every group before it — are ignorable below
@@ -162,7 +192,7 @@ func resolveCollator(uri string) (func(a, b string) int, error) {
 	}
 	quaternary := level4 && alternate != "blanked"
 	return func(a, b string) int {
-		if c := col.CompareString(strip(a), strip(b)); c != 0 {
+		if c := cmp1(strip(a), strip(b)); c != 0 {
 			return c
 		}
 		if quaternary {
@@ -249,6 +279,22 @@ func collCompareVariables(a, b string, variable func(rune) bool) int {
 type strMatcher struct {
 	fold bool                  // html-ascii-case-insensitive: ASCII case fold
 	cmp  func(a, b string) int // any other collation
+	// numeric: the collation compares digit runs by value. A substring match
+	// may then not cut a digit run in two ("Chapter-10" is not inside
+	// "Chapter-100": F&O 3.1 §5.4.1 leaves partial-number matches undefined,
+	// and the catalog accepts "no match" or FOCH0004 there).
+	numeric bool
+}
+
+func isASCIIDigit(b byte) bool { return b >= '0' && b <= '9' }
+
+// splitsNumber reports whether the span s[a:b] begins or ends inside a run of
+// digits that continues past it.
+func splitsNumber(s string, a, b int) bool {
+	if b > a && b < len(s) && isASCIIDigit(s[b-1]) && isASCIIDigit(s[b]) {
+		return true
+	}
+	return b > a && a > 0 && isASCIIDigit(s[a]) && isASCIIDigit(s[a-1])
 }
 
 // strMatcherArg resolves the optional $collation argument at index i (an
@@ -282,7 +328,7 @@ func strMatcherArg(c *Context, a []Object, i int) (*strMatcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &strMatcher{cmp: cmp}, nil
+	return &strMatcher{cmp: cmp, numeric: strings.Contains(uri, "numeric=yes")}, nil
 }
 
 // asciiFold lowers the ASCII letters of s and nothing else, so byte offsets
@@ -333,7 +379,7 @@ func (m *strMatcher) find(s, sub string) (start, end int, ok bool) {
 			continue
 		}
 		for bi := ai + 1; bi < len(bounds); bi++ {
-			if m.cmp(s[a:bounds[bi]], sub) == 0 {
+			if m.cmp(s[a:bounds[bi]], sub) == 0 && !(m.numeric && splitsNumber(s, a, bounds[bi])) {
 				return a, bounds[bi], true
 			}
 		}
@@ -354,7 +400,7 @@ func (m *strMatcher) hasPrefix(s, sub string) bool {
 		return true
 	}
 	for i := range s {
-		if i > 0 && m.cmp(s[:i], sub) == 0 {
+		if i > 0 && m.cmp(s[:i], sub) == 0 && !(m.numeric && splitsNumber(s, 0, i)) {
 			return true
 		}
 	}
@@ -374,7 +420,7 @@ func (m *strMatcher) hasSuffix(s, sub string) bool {
 		return true
 	}
 	for i := range s {
-		if m.cmp(s[i:], sub) == 0 {
+		if m.cmp(s[i:], sub) == 0 && !(m.numeric && splitsNumber(s, i, len(s))) {
 			return true
 		}
 	}
@@ -515,10 +561,114 @@ func resolveCollationKeyer(uri string) (func(string) []byte, error) {
 	}
 	col := collate.New(tag, opts...)
 	var buf collate.Buffer
+	if collKeyCaseUpper(query) {
+		// caseFirst=upper: x/text cannot order case, so the key is the
+		// case-blind key, then one byte per letter (0 upper, 1 lower), then
+		// the full key — byte order then equals the layered comparison.
+		blind := collate.New(tag, append(append([]collate.Option{}, opts...), collate.IgnoreCase)...)
+		return func(s string) []byte {
+			out := append([]byte{}, blind.KeyFromString(&buf, s)...)
+			buf.Reset()
+			out = append(out, 0, 1)
+			for _, r := range s {
+				if unicode.IsUpper(r) {
+					out = append(out, 0)
+				} else if unicode.IsLower(r) {
+					out = append(out, 1)
+				}
+			}
+			out = append(out, 0, 1)
+			out = append(out, col.KeyFromString(&buf, s)...)
+			buf.Reset()
+			return out
+		}, nil
+	}
 	return func(s string) []byte {
 		k := col.KeyFromString(&buf, s)
 		out := append([]byte{}, k...)
 		buf.Reset()
 		return out
 	}, nil
+}
+
+func collKeyCaseUpper(query string) bool {
+	for _, kv := range strings.Split(query, ";") {
+		if kv == "caseFirst=upper" {
+			return true
+		}
+	}
+	return false
+}
+
+func numericOpts(v string) []collate.Option {
+	if v == "yes" {
+		return []collate.Option{collate.Numeric}
+	}
+	return nil
+}
+
+// collLayered compares in UCA level order for the three parameters x/text's
+// collator cannot express — caseFirst=upper, caseLevel=yes and backwards=yes —
+// by combining collators that each ignore a different set of differences:
+// primary (everything ignored), secondary (accents kept, case ignored), then a
+// case comparison, then the full collator. level is the strength (1..5); full
+// is the ordinary collator for this URI, consulted last for strength >= tertiary.
+func collLayered(tag language.Tag, num []collate.Option, full *collate.Collator, level int, upperFirst, caseLevel, backwards bool) func(a, b string) int {
+	primary := collate.New(tag, append([]collate.Option{collate.Loose}, num...)...)
+	secondary := collate.New(tag, append([]collate.Option{collate.IgnoreCase, collate.IgnoreWidth}, num...)...)
+	return func(a, b string) int {
+		if c := primary.CompareString(a, b); c != 0 {
+			return c
+		}
+		if level >= 2 {
+			var c int
+			if backwards {
+				c = secondary.CompareString(collReverse(a), collReverse(b))
+			} else {
+				c = secondary.CompareString(a, b)
+			}
+			if c != 0 {
+				return c
+			}
+		}
+		if level >= 3 || caseLevel {
+			if c := collCaseCompare(a, b, upperFirst); c != 0 {
+				return c
+			}
+		}
+		if level >= 3 {
+			return full.CompareString(a, b)
+		}
+		return 0
+	}
+}
+
+func collReverse(s string) string {
+	r := []rune(s)
+	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
+		r[i], r[j] = r[j], r[i]
+	}
+	return string(r)
+}
+
+// collCaseCompare orders two strings by the first position at which one has an
+// upper-case letter and the other a lower-case one: lower case first by UCA
+// default, upper case first under caseFirst=upper.
+func collCaseCompare(a, b string, upperFirst bool) int {
+	ra, rb := []rune(a), []rune(b)
+	for i := 0; i < len(ra) && i < len(rb); i++ {
+		ua, ub := unicode.IsUpper(ra[i]), unicode.IsUpper(rb[i])
+		if ua == ub {
+			continue
+		}
+		c := 1 // a upper, b lower: lower first => a after b
+		if !ua {
+			c = -1
+		}
+		if upperFirst {
+			c = -c
+		}
+		return c
+	}
+	return 0
 }

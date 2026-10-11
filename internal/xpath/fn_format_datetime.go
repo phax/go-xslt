@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata" // the Olson database, embedded: $place must not depend on the host having zoneinfo
 	"unicode"
 )
 
@@ -68,6 +69,20 @@ func formatDTArgs(a []Object) (Object, error) {
 		}
 		opts.calPrefix = p
 	}
+	// $place (§9.8.4.3): an Olson name the implementation knows moves a value
+	// that carries a timezone into that zone, DST included — 2015-08-15T12:00Z
+	// at America/New_York is 08:00 -04:00. Only the Region/City form counts as
+	// an Olson name (time.LoadLocation would also accept "UTC" or "Local").
+	if len(a) > 4 && !numIsEmpty(a[4]) && at.hasTZ {
+		if place := ToString(a[4]); strings.Contains(place, "/") {
+			if loc, err := time.LoadLocation(place); err == nil {
+				moved := *at
+				moved.ext = &atomExt{tm: at.tmv().In(loc)}
+				at = &moved
+				opts.zoned = true
+			}
+		}
+	}
 	return formatDateTimePicture(at, ToString(arg(a, 1)), &opts)
 }
 
@@ -77,6 +92,7 @@ type dtOptions struct {
 	calPrefix    string // "[Calendar: AD]" for a known but unsupported calendar
 	usedLang     bool   // a name, word, ordinal or era was emitted
 	lang         string // "" (English, the default) or "de" (German month/weekday names)
+	zoned        bool   // an Olson $place moved the value: [ZN] shows the zone's abbreviation
 }
 
 // knownCalendars are the calendar designators of F&O §9.8.4.5; AD and ISO
@@ -285,6 +301,11 @@ func formatComponent(at *Atomic, tm time.Time, marker string, opts *dtOptions) (
 	case 'f':
 		return formatFractional(tm.Nanosecond(), mod, wmin, wmax)
 	case 'Z', 'z':
+		if mod == "N" && opts.zoned {
+			if name, _ := tm.Zone(); name != "" && name[0] != '+' && name[0] != '-' {
+				return name, nil
+			}
+		}
 		return formatTimezone(at, tm, comp, mod, wmax), nil
 	case 'E':
 		opts.usedLang = true
@@ -409,7 +430,7 @@ func presentNumberOrName(comp rune, num int, name, mod string, wmin, wmax int, o
 		}
 	case mod == "w" || mod == "W" || mod == "Ww":
 		opts.usedLang = true
-		return numberWords(int64(num), mod, ordinal), nil
+		return numberWordsLang(int64(num), mod, ordinal, opts.lang, ""), nil
 	}
 	if ordinal {
 		opts.usedLang = true

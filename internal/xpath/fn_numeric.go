@@ -1218,7 +1218,7 @@ func numFormatInteger(c *Context, a []Object) (Object, error) {
 	if primary == "" {
 		return nil, fmt.Errorf("err:FODF1310: format-integer primary format token must not be empty")
 	}
-	ordinal, err := parseIntegerModifier(modifier)
+	ordinal, variant, err := parseIntegerModifier(modifier)
 	if err != nil {
 		return nil, err
 	}
@@ -1245,7 +1245,16 @@ func numFormatInteger(c *Context, a []Object) (Object, error) {
 		}
 	case "w", "W", "Ww":
 		if fits {
-			return sign + numberWords(n64, primary, ordinal), nil
+			// $lang (or the dynamic default language) picks the spellout:
+			// German, French and Italian are native, any other language is
+			// English.
+			lang := ""
+			if len(a) > 2 && !numIsEmpty(a[2]) {
+				lang = ToString(a[2])
+			} else if c != nil {
+				lang = c.DefaultLanguage
+			}
+			return sign + numberWordsLang(n64, primary, ordinal, lang, variant), nil
 		}
 	case "Α", "α": // Greek Α/α alphabetic sequence (format-integer-049/050)
 		if fits && n64 > 0 {
@@ -1294,7 +1303,7 @@ func numFormatInteger(c *Context, a []Object) (Object, error) {
 // parseIntegerModifier validates a format-integer modifier against
 // ^([co](\(.+\))?)?[at]?$ (FODF1310 otherwise: 'o(-er)z', 'o()(', 'o(' in
 // format-integer-034/037/067) and reports whether it requests ordinals.
-func parseIntegerModifier(m string) (ordinal bool, err error) {
+func parseIntegerModifier(m string) (ordinal bool, variant string, err error) {
 	rest := m
 	if rest != "" && (rest[0] == 'c' || rest[0] == 'o') {
 		ordinal = rest[0] == 'o'
@@ -1302,18 +1311,20 @@ func parseIntegerModifier(m string) (ordinal bool, err error) {
 		if strings.HasPrefix(rest, "(") {
 			switch {
 			case len(rest) >= 3 && strings.HasSuffix(rest, ")"):
+				variant = rest[1 : len(rest)-1]
 				rest = ""
 			case len(rest) >= 4 && (strings.HasSuffix(rest, ")a") || strings.HasSuffix(rest, ")t")):
+				variant = rest[1 : len(rest)-2]
 				rest = rest[len(rest)-1:]
 			default:
-				return false, fmt.Errorf("err:FODF1310: invalid format-integer modifier %q", m)
+				return false, "", fmt.Errorf("err:FODF1310: invalid format-integer modifier %q", m)
 			}
 		}
 	}
 	if rest != "" && rest != "a" && rest != "t" {
-		return false, fmt.Errorf("err:FODF1310: invalid format-integer modifier %q", m)
+		return false, "", fmt.Errorf("err:FODF1310: invalid format-integer modifier %q", m)
 	}
-	return ordinal, nil
+	return ordinal, variant, nil
 }
 
 // unicodeNumberSeq reports whether primary is the first member of a supported
@@ -1792,9 +1803,7 @@ func titleCaseWords(s string) string {
 			upNext = true
 			b.WriteRune(r)
 		case upNext:
-			if r >= 'a' && r <= 'z' {
-				r -= 32
-			}
+			r = unicode.ToUpper(r)
 			b.WriteRune(r)
 			upNext = false
 		default:

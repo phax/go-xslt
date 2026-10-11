@@ -163,6 +163,13 @@ type fotsEnv struct {
 	} `xml:"schema"`
 	DecimalFormats []fotsDecimalFormat `xml:"decimal-format"`
 	Collections    []fotsCollection    `xml:"collection"`
+	// Collations are the environment's <collation uri=".." default="true"/>
+	// declarations; the one marked default="true" is the static context's
+	// default collation (fo-test-fn-compare-002/004).
+	Collations []struct {
+		URI     string `xml:"uri,attr"`
+		Default string `xml:"default,attr"`
+	} `xml:"collation"`
 	// Packages are the library packages an xslt30-test environment makes
 	// available to xsl:use-package (always empty for QT3 environments).
 	Packages []fotsPackage `xml:"package"`
@@ -1279,11 +1286,19 @@ func runCase(tc fotsCase, env fotsEnv, loadDoc func(string, string) (*xmltree.No
 			defaultLanguage = d.Value
 		}
 	}
+	var defaultCollation func(a, b string) int
+	for _, c := range env.Collations {
+		if c.Default == "true" {
+			if fn, err := xpath.ResolveCollator(c.URI); err == nil {
+				defaultCollation = fn
+			}
+		}
+	}
 	baseCtx := func() *xpath.Context {
 		// An environment without a "." source (the catalog's "empty" env) has
 		// NO focus: '.', position() and the context-defaulting functions raise
 		// XPDY0002 there (fn-local-name-1a/73, fn-name-23, fn-node-name-32).
-		return &xpath.Context{Node: ctxNode, NoFocus: ctxNode == nil, Pos: 1, Size: 1, NS: ns, Vars: vars, Resolver: resolver, BaseURI: baseURI, DecimalFormats: decFmts, SchemaTypes: schemaTypes, DefaultElemNS: defaultElemNS, XMLVersion: xmlVersion, XSDVersion: xsdVersion, BC10: bc10, DefaultLanguage: defaultLanguage}
+		return &xpath.Context{Node: ctxNode, NoFocus: ctxNode == nil, Pos: 1, Size: 1, NS: ns, Vars: vars, Resolver: resolver, BaseURI: baseURI, DecimalFormats: decFmts, SchemaTypes: schemaTypes, DefaultElemNS: defaultElemNS, XMLVersion: xmlVersion, XSDVersion: xsdVersion, BC10: bc10, DefaultLanguage: defaultLanguage, DefaultCollation: defaultCollation}
 	}
 	for _, p := range env.Params {
 		if p.Select == "" {
