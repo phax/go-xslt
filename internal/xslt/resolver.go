@@ -111,14 +111,20 @@ func (r *fileResolver) ResolveDoc(uri string) (*xmltree.Node, bool) {
 	// Parsed with its OWN directory as the base, so a DOCTYPE naming an
 	// external subset (a local .dtd of entity declarations) resolves relative
 	// to the retrieved document, not to the stylesheet (catalog-004).
-	doc, err := xmltree.ParseLenient11WithBase(string(b), filepath.Dir(p))
-	if err != nil {
-		return nil, false
-	}
+	//
 	// xsl:strip-space is a whitespace-stripping rule for every tree the
 	// stylesheet processes, not just the principal source document — a
 	// document() / fn:doc() result is subject to it exactly like the primary
-	// input (document-1502).
+	// input (document-1502), so this parse gets the same stripSpaceHook
+	// early-skip transformEntryInto's own source-document parse does.
+	var strip xmltree.StripSpaceHook
+	if r.ss != nil {
+		strip = r.ss.stripSpaceHook()
+	}
+	doc, err := xmltree.ParseLenient11WithBaseStripSpace(string(b), filepath.Dir(p), strip)
+	if err != nil {
+		return nil, false
+	}
 	// Validation first, whitespace stripping second — the same order (and for
 	// the same reasons) as the primary source document, whose own comment in
 	// transformEntryInto spells them out.

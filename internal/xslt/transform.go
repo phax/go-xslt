@@ -757,7 +757,7 @@ func bracedName(s string) (uri, local string, ok bool) {
 func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string, tgt ...*outTarget) (*engine, *xmltree.Node, error) {
 	var doc *xmltree.Node
 	if strings.TrimSpace(srcXML) != "" {
-		d, err := xmltree.ParseLenient11WithBase(srcXML, baseDir)
+		d, err := xmltree.ParseLenient11WithBaseStripSpace(srcXML, baseDir, ss.stripSpaceHook())
 		if err != nil {
 			if pe, ok := err.(*xmltree.ParseError); ok {
 				return nil, nil, &CompileError{Line: pe.Line, Col: pe.Col, Msg: "source: " + pe.Msg}
@@ -1244,7 +1244,7 @@ func autoMethod(root *xmltree.Node) string {
 // redirects the result to a writer instead of a string — variadic so the
 // ordinary two call sites stay as they are.
 func (ss *Stylesheet) transformInto(srcXML string, params map[string]string, baseDir string, tgt ...*outTarget) (*engine, *xmltree.Node, error) {
-	doc, err := xmltree.ParseLenient11WithBase(srcXML, baseDir)
+	doc, err := xmltree.ParseLenient11WithBaseStripSpace(srcXML, baseDir, ss.stripSpaceHook())
 	if err != nil {
 		if pe, ok := err.(*xmltree.ParseError); ok {
 			return nil, nil, &CompileError{Line: pe.Line, Col: pe.Col, Msg: "source: " + pe.Msg}
@@ -3814,6 +3814,28 @@ func (ss *Stylesheet) applyStripSpace(doc *xmltree.Node) {
 		return
 	}
 	ss.stripWalk(doc, false)
+}
+
+// stripSpaceHook builds the xmltree.StripSpaceHook a source-document parse
+// can consult to skip allocating a whitespace-only text node it already
+// knows applyStripSpace would remove a moment later — ss.spaceStripped IS
+// exactly that decision (strip-space vs preserve-space, by import precedence
+// and specificity), bound as a method value, so no wrapping is needed. nil
+// when there is nothing to strip (len(ss.strip)==0, applyStripSpace's own
+// early-out) or when this run is schema-aware: simpleContentTyped's
+// exemption (§4.4: simple-content elements keep their whitespace regardless
+// of xsl:strip-space) needs a type annotation that validation — which runs
+// AFTER parsing — hasn't produced yet, so a schema-aware run must see every
+// candidate node and make that call itself, in applyStripSpace, same as
+// today. The hook only ever answers the stylesheet-rule half of the
+// decision; the xml:space="preserve" half is tracked independently by the
+// parser itself, and applyStripSpace still runs afterward regardless of this
+// hook's answers, as a safety net.
+func (ss *Stylesheet) stripSpaceHook() xmltree.StripSpaceHook {
+	if len(ss.strip) == 0 || schemaAwareRun() {
+		return nil
+	}
+	return ss.spaceStripped
 }
 
 func (ss *Stylesheet) stripWalk(n *xmltree.Node, preserve bool) {

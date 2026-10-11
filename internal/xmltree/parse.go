@@ -15,6 +15,21 @@ type ParseError struct {
 	Msg       string
 }
 
+// StripSpaceHook reports whether an xsl:strip-space declaration (net of any
+// xsl:preserve-space override, by import precedence and specificity — NOT
+// including an xml:space="preserve" scope, which the parser itself tracks
+// independently of this hook, nor the schema-aware simple-content-typed
+// exemption, which cannot be known until the whole tree is validated) would
+// strip a whitespace-only text child of an element with this expanded name.
+// A caller that compiled a stylesheet (internal/xslt) builds this from its
+// own xsl:strip-space/xsl:preserve-space tables — this package cannot import
+// that one (xmltree <- xpath <- xslt is a real cycle constraint), so this is
+// an injected hook, mirroring the pattern internal/xpath's Context already
+// uses for its own cross-package seams (SchemaTypes, TransformFunc, ...).
+// nil (every plain Parse*/ParseLenient11WithBase entry point) means "nothing
+// to ask" — no stripping happens at parse time, identical to today.
+type StripSpaceHook func(name Name) bool
+
 func (e *ParseError) Error() string { return e.Msg }
 
 // downgradeXMLVersion rewrites a leading `<?xml version="1.1"?>` declaration to
@@ -47,7 +62,7 @@ func downgradeXMLVersion(src string) string {
 // entry point — fn:parse-xml must NOT get the leniency, the QT3 suite expects
 // 1.0-processor errors there).
 func Parse(src string) (*Node, error) {
-	return parseRaw(src, "")
+	return parseRaw(src, "", nil)
 }
 
 // ParseWithBase parses like Parse, but also resolves a DOCTYPE's external
@@ -57,7 +72,7 @@ func Parse(src string) (*Node, error) {
 // local .dtd of character entities like &egrave;). baseDir == "" behaves
 // exactly like Parse (no external subset is ever fetched).
 func ParseWithBase(src, baseDir string) (*Node, error) {
-	return parseRaw(src, baseDir)
+	return parseRaw(src, baseDir, nil)
 }
 
 // ParseLenient11 parses like Parse but bridges declared XML 1.1 documents to
@@ -76,14 +91,35 @@ func ParseLenient11(src string) (*Node, error) {
 // XML 1.1 (the misc/xml-version test set). fn:parse-xml deliberately keeps the
 // strict 1.0 Parse.
 func ParseLenient11WithBase(src, baseDir string) (*Node, error) {
+	return parseLenient11WithBaseStrip(src, baseDir, nil)
+}
+
+// ParseLenient11WithBaseStripSpace is ParseLenient11WithBase with a
+// StripSpaceHook consulted at parse time: a whitespace-only text run
+// directly inside an element the hook (net of this element's own xml:space
+// scope, tracked here regardless of whether strip is nil) reports true for
+// is never allocated as a Node at all — for a source document with hundreds
+// of thousands of such runs, the ones that will certainly be thrown away a
+// moment later by the caller's own post-parse applyStripSpace walk are the
+// one allocation this skips entirely. strip == nil behaves identically to
+// ParseLenient11WithBase. This is additive, not a replacement: a caller
+// still runs its own whole-tree stripping pass afterward regardless, as a
+// safety net for anything this hook doesn't cover (import-precedence ties
+// this engine resolves one way today, a future schema-aware simple-content
+// exemption the hook can't see at parse time, ...).
+func ParseLenient11WithBaseStripSpace(src, baseDir string, strip StripSpaceHook) (*Node, error) {
+	return parseLenient11WithBaseStrip(src, baseDir, strip)
+}
+
+func parseLenient11WithBaseStrip(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 	src = decodeBOM(src) // UTF-16 sources become UTF-8 before any tokenizing
 	if !declaresXML11(src) {
-		return parseRaw(src, baseDir)
+		return parseRaw(src, baseDir, strip)
 	}
 	prepped, restore := substC0Refs(src)
 	tokens := map[string]rune{} // ASCII name-safe token -> original 5e name char
 	for attempt := 0; ; attempt++ {
-		doc, err := parseRaw(prepped, baseDir)
+		doc, err := parseRaw(prepped, baseDir, strip)
 		if err == nil {
 			if len(restore) > 0 || len(tokens) > 0 {
 				restoreSentinels(doc, restore, tokens)
@@ -245,7 +281,7 @@ func restoreSentinels(n *Node, runes map[rune]rune, tokens map[string]rune) {
 	walk(n)
 }
 
-func parseRaw(src, baseDir string) (*Node, error) {
+func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 	// A byte-order mark is an encoding signature, not document content: Go's
 	// decoder would otherwise hand back a U+FEFF character-data token ahead of
 	// the root element, which then rides through the transform into the result
@@ -286,6 +322,71 @@ func parseRaw(src, baseDir string) (*Node, error) {
 	// each parse gets its own, so there's no cross-document retention and no
 	// concurrency concern.
 	nameIntern := make(map[string]string)
+	// preserveSpace mirrors stack 1:1 (one entry per open element, plus the
+	// document-level seed): xml:space="preserve" on an element forces true
+	// for it and every descendant until overridden; any other explicit
+	// xml:space value (including "default") resets to false; absent, it's
+	// inherited unchanged. Needed here — not just by internal/xslt's own
+	// post-parse stripWalk, which does the identical thing — because the
+	// strip hook below must net out against it at the exact point a
+	// whitespace-only run would otherwise be discarded, before stripWalk
+	// ever gets a tree to walk.
+	preserveSpace := []bool{false}
+
+	// pendingText/pendingOpen/pendingLine/pendingCol accumulate consecutive
+	// CharData tokens (plain text and/or CDATA sections — the decoder reports
+	// a CDATA section as a separate CharData token, but in the XML data
+	// model it forms ONE text node with surrounding chardata: the existing
+	// coalescing comment below, now in flushPending, gives the exact case)
+	// into one run, deferring the decision of whether it becomes a Node (and
+	// with what content) until the run actually closes. This matters
+	// specifically for the strip hook: a run's early tokens looking
+	// whitespace-only is not the same as the WHOLE run being whitespace-only
+	// once it closes (e.g. "<a>   <![CDATA[x]]></a>" opens looking
+	// strippable and only three tokens later turns out to be " x") — an
+	// eager per-token decision would permanently lose content a deferred one
+	// never sees as anything but the complete, correct run.
+	var pendingText strings.Builder
+	var pendingOpen bool
+	var pendingLine, pendingCol int
+	flushPending := func() {
+		if !pendingOpen {
+			return
+		}
+		pendingOpen = false
+		s := pendingText.String()
+		pendingText.Reset()
+		top := stack[len(stack)-1]
+		// Whitespace outside the document element (prolog/epilog "Misc") is
+		// not character data in the infoset: a document node has no
+		// whitespace text children (fn-innermost-029: //text() counts).
+		if top == doc && strings.Trim(s, " \t\r\n") == "" {
+			return
+		}
+		if top.Kind == KindElement {
+			// A validating processor treats whitespace-only text directly in
+			// an element the DTD declares with ELEMENT CONTENT (no #PCDATA
+			// alternative) as ignorable whitespace, stripped by default even
+			// with no xsl:strip-space in the stylesheet (id-003/id-036).
+			if elemOnly[top.Name.Local] && strings.Trim(s, " \t\r\n") == "" {
+				return
+			}
+			// xsl:strip-space, net of this element's xml:space scope. Uses
+			// strings.TrimSpace, not the 4-char XML-whitespace Trim above —
+			// deliberately, to match internal/xslt's own stripWalk check
+			// byte-for-byte: that function still runs over the finished tree
+			// regardless of this early-skip (a safety net, not a
+			// replacement), and the two must agree on what "whitespace"
+			// means here or a run they disagree about would be stripped by
+			// one and survive the other depending purely on which happened
+			// to run first.
+			if strip != nil && !preserveSpace[len(preserveSpace)-1] &&
+				strip(top.Name) && strings.TrimSpace(s) == "" {
+				return
+			}
+		}
+		top.Append(&Node{Kind: KindText, Value: s, Line: pendingLine, Col: pendingCol})
+	}
 
 	for {
 		startOff := dec.InputOffset()
@@ -310,6 +411,10 @@ func parseRaw(src, baseDir string) (*Node, error) {
 
 		switch t := tok.(type) {
 		case xml.StartElement:
+			// A new child starting is a run boundary: any pending text run
+			// belongs to the PARENT (top, before this element is pushed) and
+			// must close now, not merge with anything that follows.
+			flushPending()
 			// Intern the tag's own name before anything retains it: Local and
 			// the written prefix (Space, in RawToken's naming) both end up
 			// stored verbatim into the element's Name by resolveRawName below,
@@ -405,8 +510,25 @@ func parseRaw(src, baseDir string) (*Node, error) {
 			stack = append(stack, el)
 			nsStack = append(nsStack, frame)
 			rawNames = append(rawNames, t.Name)
+			// xml:space="preserve" forces true for this element and its
+			// descendants until overridden; any other explicit value
+			// (including "default") resets to false; absent, inherit the
+			// parent's scope unchanged. Checked via the RESOLVED namespace
+			// URI (el.Attr), exactly like internal/xslt's own stripWalk, not
+			// the written prefix — "xml" is reserved and always bound to
+			// this URI, but matching the same way the rest of this engine
+			// already does keeps the two checks provably in agreement.
+			preserve := preserveSpace[len(preserveSpace)-1]
+			if v, ok := el.Attr(xmlNS, "space"); ok {
+				preserve = v == "preserve"
+			}
+			preserveSpace = append(preserveSpace, preserve)
 
 		case xml.EndElement:
+			// The closing element's own pending text run must close before
+			// it does — flushPending reads stack's CURRENT top, so this must
+			// run before stack/preserveSpace are popped below.
+			flushPending()
 			if len(rawNames) == 0 {
 				return nil, &ParseError{Line: line, Col: col, Msg: "unexpected end element </" + rawQName(t.Name) + ">"}
 			}
@@ -416,42 +538,32 @@ func parseRaw(src, baseDir string) (*Node, error) {
 			rawNames = rawNames[:len(rawNames)-1]
 			stack = stack[:len(stack)-1]
 			nsStack = nsStack[:len(nsStack)-1]
+			preserveSpace = preserveSpace[:len(preserveSpace)-1]
 
 		case xml.CharData:
-			// Whitespace outside the document element (prolog/epilog "Misc")
-			// is not character data in the infoset: a document node has no
-			// whitespace text children (fn-innermost-029: //text() counts).
-			if top == doc && strings.Trim(string(t), " \t\r\n") == "" {
-				continue
+			// Accumulate; the decision of whether/how this becomes a Node is
+			// deferred to flushPending, called at the next run boundary (see
+			// its own doc comment on pendingText above for why eagerly
+			// deciding per-token would be wrong).
+			if !pendingOpen {
+				pendingOpen = true
+				pendingLine, pendingCol = line, col
 			}
-			// A validating processor treats whitespace-only text directly in
-			// an element the DTD declares with ELEMENT CONTENT (no #PCDATA
-			// alternative) as ignorable whitespace, stripped by default even
-			// with no xsl:strip-space in the stylesheet (id-003/id-036).
-			if top.Kind == KindElement && elemOnly[top.Name.Local] && strings.Trim(string(t), " \t\r\n") == "" {
-				continue
-			}
-			// Coalesce adjacent character data — the decoder reports a CDATA
-			// section as a separate CharData token, but in the XML data model
-			// it forms one text node with the surrounding chardata (so e.g.
-			// "<a> <![CDATA[x]]> </a>" is the single non-whitespace node " x ",
-			// not two strippable whitespace nodes around "x").
-			if k := len(top.Children); k > 0 && top.Children[k-1].Kind == KindText && !top.Children[k-1].Atomic() {
-				top.Children[k-1].Value += string(t)
-			} else {
-				top.Append(&Node{Kind: KindText, Value: string(t), Line: line, Col: col})
-			}
+			pendingText.WriteString(string(t))
 
 		case xml.Comment:
+			flushPending()
 			top.Append(&Node{Kind: KindComment, Value: string(t), Line: line, Col: col})
 
 		case xml.ProcInst:
+			flushPending()
 			if t.Target == "xml" {
 				continue // XML declaration, not a PI node
 			}
 			top.Append(&Node{Kind: KindPI, Name: Name{Local: t.Target}, Value: string(t.Inst), Line: line, Col: col})
 		}
 	}
+	flushPending()
 
 	if len(stack) != 1 {
 		return nil, &ParseError{Msg: "unexpected end of document: unclosed elements"}
