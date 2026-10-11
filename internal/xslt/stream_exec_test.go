@@ -541,11 +541,19 @@ func strbPeakHeap(fn func()) uint64 {
 	go func() {
 		defer close(done)
 		var m runtime.MemStats
-		for {
+		for tick := 0; ; tick++ {
 			select {
 			case <-stop:
 				return
 			default:
+			}
+			// Collect on a clock of our own: with GOGC=20 the runtime's pacing
+			// is all that bounds the garbage in HeapAlloc, and on a slow or
+			// busy CI runner it lags enough to make a bounded run look like a
+			// growing one. A forced collection every ~30ms caps that noise
+			// without hiding retention (retained data survives it).
+			if tick%15 == 14 {
+				runtime.GC()
 			}
 			runtime.ReadMemStats(&m)
 			if m.HeapAlloc > peak {
