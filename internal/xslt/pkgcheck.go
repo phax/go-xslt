@@ -291,6 +291,9 @@ func acceptTokenMatches(ac *xmltree.Node, tok string, comp pkgComponent) bool {
 		}
 		return clark == local
 	case strings.HasPrefix(tok, "Q{") && strings.HasSuffix(tok, "}*"):
+		if uri := tok[2 : len(tok)-2]; uri == "" {
+			return !strings.HasPrefix(clark, "{") // Q{}* : names in no namespace
+		}
 		return strings.HasPrefix(clark, "{"+tok[2:len(tok)-2]+"}")
 	}
 	return clarkName(resolveQName(ac, tok)) == clark
@@ -413,6 +416,9 @@ func checkUsePackage(el *xmltree.Node, usedAbs string, exports []pkgComponent, a
 	// --- XTSE3050: homonymous components accepted from two used packages ---
 	for _, comp := range exports {
 		sym := comp.symbolic()
+		if final, _ := acceptFinal(el, comp); final == "hidden" {
+			continue // not part of what this package accepts, so no homonym
+		}
 		if prev, dup := accepted[sym]; dup && prev != usedAbs {
 			return errAt(el, "err:XTSE3050: %s %q is accepted from more than one used package", comp.kind, comp.name)
 		}

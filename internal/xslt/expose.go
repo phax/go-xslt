@@ -310,6 +310,10 @@ func applyExposure(ss *Stylesheet, root *xmltree.Node) error {
 // package, as symbolic-name sets.
 type usedVisibility struct {
 	hidden, visible map[string]bool
+	// abstract: components accepted AS abstract (an explicit accept said so);
+	// explicit: components some xsl:accept names explicitly or by a wildcard
+	// that applies, i.e. whose visibility here was stated rather than defaulted.
+	abstract, explicit map[string]bool
 }
 
 // noteUsedVisibility records the hidden/visible split of the package usedRoot
@@ -320,40 +324,20 @@ func (c *compiler) noteUsedVisibility(use, usedRoot *xmltree.Node, exports []pkg
 	if using == nil {
 		return
 	}
-	uv := usedVisibility{hidden: map[string]bool{}, visible: map[string]bool{}}
+	uv := usedVisibility{hidden: map[string]bool{}, visible: map[string]bool{}, abstract: map[string]bool{}, explicit: map[string]bool{}}
 	exported := map[string]bool{}
 	for _, comp := range exports {
 		exported[comp.symbolic()] = true
 		uv.visible[comp.symbolic()] = true
 	}
-	// An xsl:accept that lowers an exported component to hidden removes it. As
-	// with xsl:expose, an accept naming the component explicitly beats a
-	// wildcard one, and the last of equals wins.
+	// An xsl:accept that lowers an exported component to hidden removes it.
 	for _, comp := range exports {
-		explicit, wild := "", ""
-		for _, ac := range elementChildren(use) {
-			if ac.Name.Space != NS || ac.Name.Local != "accept" {
-				continue
-			}
-			vis := strings.TrimSpace(attrOr(ac, "visibility", ""))
-			if !acceptMatches(ac, comp) {
-				continue
-			}
-			explicitHit := false
-			for _, tok := range strings.Fields(attrOr(ac, "names", "")) {
-				if !isWildcardToken(tok) && acceptTokenMatches(ac, tok, comp) {
-					explicitHit = true
-				}
-			}
-			if explicitHit {
-				explicit = vis
-			} else {
-				wild = vis
-			}
+		final, stated := acceptFinal(use, comp)
+		if stated {
+			uv.explicit[comp.symbolic()] = true
 		}
-		final := explicit
-		if final == "" {
-			final = wild
+		if final == "abstract" {
+			uv.abstract[comp.symbolic()] = true
 		}
 		if final == "hidden" {
 			delete(uv.visible, comp.symbolic())
@@ -398,6 +382,26 @@ func (c *compiler) finishHidden(root *xmltree.Node, own, incRoots []*xmltree.Nod
 	for _, uv := range infos {
 		for sym := range uv.visible {
 			visible[sym] = true
+		}
+	}
+	// XTSE3080: a top-level package may not contain an abstract component,
+	// referenced or not: neither one accepted as abstract and left unoverridden
+	// nor one it declares abstract itself.
+	if root == c.principalRoot {
+		for _, uv := range infos {
+			for sym := range uv.abstract {
+				if !ownDeclared[sym] {
+					return errAt(root, "err:XTSE3080: a top-level package cannot contain the abstract component %s", sym)
+				}
+			}
+		}
+	}
+	if root == c.principalRoot {
+		c.acceptedExplicit = map[string]bool{}
+		for _, uv := range infos {
+			for sym := range uv.explicit {
+				c.acceptedExplicit[sym] = true
+			}
 		}
 	}
 	// XTSE3050: a component this package declares OUTSIDE xsl:override may not
@@ -545,4 +549,74 @@ func (ss *Stylesheet) originalVar(el *xmltree.Node) *VarDef {
 		}
 	}
 	return nil
+}
+
+// checkOwnAbstract is XTSE3080 for the components the principal package declares
+// itself: it may not declare one abstract, referenced or not.
+func checkOwnAbstract(roots []*xmltree.Node) error {
+	for _, r := range roots {
+		for _, ch := range elementChildren(r) {
+			if comp, ok := componentOf(ch); ok && ch.Name.Local != "param" {
+				if v, has := ch.AttrLocal("visibility"); has && strings.TrimSpace(v) == "abstract" {
+					return errAt(ch, "err:XTSE3080: a top-level package cannot declare the abstract %s %q", comp.kind, comp.name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// acceptFinal is the visibility a used package's exported component ends up
+// with under the xsl:accept children of use ("" = the component's own, kept):
+// as with xsl:expose an accept naming the component explicitly beats a wildcard
+// one, and the last of equals wins. An abstract component is only accepted as
+// abstract — any other accepted visibility is an invalid combination that
+// counts as no match (accept-911) — and with no usable accept it becomes
+// hidden (accept-910). stated reports whether an accept applied.
+func acceptFinal(use *xmltree.Node, comp pkgComponent) (final string, stated bool) {
+	explicit, partial, all := "", "", ""
+	for _, ac := range elementChildren(use) {
+		if ac.Name.Space != NS || ac.Name.Local != "accept" {
+			continue
+		}
+		vis := strings.TrimSpace(attrOr(ac, "visibility", ""))
+		if !acceptMatches(ac, comp) {
+			continue
+		}
+		// The most specific token of this accept that matches decides its class.
+		class := 2
+		for _, tok := range strings.Fields(attrOr(ac, "names", "")) {
+			if !acceptTokenMatches(ac, tok, comp) {
+				continue
+			}
+			switch {
+			case tok == "*":
+			case isWildcardToken(tok):
+				if class > 1 {
+					class = 1
+				}
+			default:
+				class = 0
+			}
+		}
+		switch class {
+		case 0:
+			explicit = vis
+		case 1:
+			partial = vis
+		default:
+			all = vis
+		}
+	}
+	final = explicit
+	if final == "" {
+		final = partial
+	}
+	if final == "" {
+		final = all
+	}
+	if comp.visibility == "abstract" && final != "abstract" {
+		return "hidden", false
+	}
+	return final, final != ""
 }

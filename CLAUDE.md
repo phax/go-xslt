@@ -193,8 +193,8 @@ Desktop GUI (**run from `desktop/`**):
   `XSLT30_BYVER=1` for a per-version breakdown; `XSLT30_FULL=1` additionally
   claims streaming + schema-awareness + backwards-compatibility together —
   see below):
-  - **Default (basic processor): 99.4% (8,089/8,138)**. **Combined
-    (`XSLT30_FULL=1`): 99.4% (11,733/11,808)**.
+  - **Default (basic processor): 99.6% (8,104/8,138)**. **Combined
+    (`XSLT30_FULL=1`): 99.5% (11,748/11,808)**.
   - `<test><package role="principal"></test>` catalog entries (347 cases)
     used to be hard-skipped unconditionally; the engine already accepted a
     top-level `xsl:package` as a module root and already fully implemented
@@ -203,7 +203,7 @@ Desktop GUI (**run from `desktop/`**):
     packages are **not** one of the six optional features (schema-awareness,
     serialization, backwards-compatibility, streaming, dynamic evaluation,
     XQuery invocation) — so unskipping them genuinely widens the **default**
-    denominator too, not just the combined one; 8,089 of the 8,138 now pass.
+    denominator too, not just the combined one; 8,104 of the 8,138 now pass.
   - `xsl:expose` is real (`internal/xslt/expose.go`): the §3.5.3.1 precedence
     (explicit name > declared `@visibility` > partial wildcard > `*` >
     private), XTSE0020/3010/3020/3022/3025, implicit modes, and it feeds
@@ -221,7 +221,14 @@ Desktop GUI (**run from `desktop/`**):
     attribute sets (an override REPLACES the set). Still open: per-package
     scoping of keys/decimal-formats/namespace-aliases/output/character-maps/
     accumulators, XTSE3070 signature compatibility beyond declared types,
-    XTDE3052 (evaluating abstract components), diamond package graphs.
+    diamond package graphs. Abstract components: a top-level package may
+    contain none (XTSE3080 — declared abstract, or accepted as abstract and
+    not overridden); an abstract component not accepted *as* abstract becomes
+    hidden; evaluating an unoverridden abstract attribute set is XTDE3052; a
+    used package's template is an entry point only if an `xsl:accept` said so.
+    Accept precedence is explicit name > partial wildcard > `*`, last wins;
+    `Q{}*` means no-namespace names. A global of a used package that fails to
+    evaluate is only an error once read (lazy).
   - Genuine XSLT 1.0/pre-2.0 **backwards-compatible processing** (an
     `[xsl:]version` below 2.0 anywhere in scope — XSLT 3.0 §3.9.1) is real,
     not a flat XTDE0160 rejection: a claim switch
@@ -249,7 +256,7 @@ Desktop GUI (**run from `desktop/`**):
     reference fixtures vs. a live SaxonJS check; `copy-3002`'s own catalog
     entry says "the test should fail"); `copy-1220/1221`'s
     ambient-namespace-on-copy gap (the only known fix is measured
-    net-negative, repeatedly) — plus ~35 remaining from the package-entry
+    net-negative, repeatedly) — plus ~25 remaining from the package-entry
     unskip, all genuine gaps in the current **flattened** package execution
     model (packages compile and run, but cross-package isolation is only
     partial): hiding is enforced only at name-resolution points (not for

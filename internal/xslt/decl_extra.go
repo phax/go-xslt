@@ -34,6 +34,9 @@ func init() {
 			return err
 		}
 		decl := attrSetDecl{body: body}
+		if v, ok := el.AttrLocal("visibility"); ok && strings.TrimSpace(v) == "abstract" {
+			decl.abstract = true
+		}
 		if v, ok := el.AttrLocal("streamable"); ok {
 			decl.streamable = isXSLTTrue(strings.TrimSpace(v))
 		}
@@ -145,6 +148,9 @@ func (eng *engine) applyAttrSetsRec(names []string, r rt, el *xmltree.Node, acti
 		// than hoisting every declaration's use-attribute-sets ahead of every
 		// declaration's body (attribute-set-1512).
 		for _, decl := range decls {
+			if decl.abstract {
+				return errAt(nil, "err:XTDE3052: the abstract xsl:attribute-set %q was never overridden and cannot be evaluated", name)
+			}
 			if len(decl.uses) > 0 {
 				var plain []string
 				for _, u := range decl.uses {

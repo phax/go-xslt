@@ -941,6 +941,18 @@ entryKind:
 			// form (call-template-0109).
 			tmpl, ok = ss.namedClark[e.Template]
 		}
+		// A template that lives in a USED package is an entry point of this
+		// package only if an xsl:accept said so: otherwise the component is not
+		// part of what this package makes available (accept-913).
+		if ok && ss.principalRoot != nil && tmpl.el != nil {
+			top := tmpl.el
+			for top.Parent != nil && top.Parent.Kind == xmltree.KindElement {
+				top = top.Parent
+			}
+			if top != ss.principalRoot && !ss.principalMods[top] && !ss.acceptedExplicit["template#"+clarkName(resolveQName(tmpl.el, tmpl.name))] {
+				ok = false
+			}
+		}
 		if ok && (e.RequirePublicEntry || ss.isPackage) && tmpl.visibility != "public" && tmpl.visibility != "final" &&
 			!ss.exposedIgnored["template#"+clarkName(resolveQName(tmpl.el, tmpl.name))] {
 			// Reached across a package boundary (RequirePublicEntry), or the
@@ -1588,11 +1600,28 @@ func (eng *engine) resolveGlobals(params map[string]string) error {
 		}
 		val, err := eng.evalGlobal(key, vd)
 		if err != nil {
+			// A global of a USED package that fails to evaluate is only an
+			// error if something actually reads it (globals may be evaluated
+			// lazily): an abstract variable nobody overrode makes its proxies
+			// fail, and that must stay silent while they are unreferenced
+			// (accept-042/043a). Not stored, so a later reference re-evaluates
+			// it and reports the error then.
+			if top := topElement(vd.el); eng.sheet.principalRoot != nil && top != eng.sheet.principalRoot && !eng.sheet.principalMods[top] {
+				continue
+			}
 			return err
 		}
 		eng.globals[key] = val
 	}
 	return nil
+}
+
+// topElement is the root element of the tree el belongs to.
+func topElement(el *xmltree.Node) *xmltree.Node {
+	for el != nil && el.Parent != nil && el.Parent.Kind == xmltree.KindElement {
+		el = el.Parent
+	}
+	return el
 }
 
 // evalGlobal evaluates a global variable with circularity detection (XTDE0640).

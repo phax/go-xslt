@@ -352,6 +352,11 @@ type Stylesheet struct {
 	// originalFuncs maps an overriding xsl:function declaration to the function
 	// it overrides, for xsl:original() calls written inside it.
 	originalFuncs map[*xmltree.Node]*FuncDef
+	// principalRoot is the principal package's root element; acceptedExplicit
+	// the symbolic names some xsl:accept stated a visibility for.
+	principalRoot    *xmltree.Node
+	principalMods    map[*xmltree.Node]bool
+	acceptedExplicit map[string]bool
 	// originalVars is the same for an overriding global variable/param, read
 	// as $xsl:original.
 	originalVars map[*xmltree.Node]*VarDef
@@ -376,6 +381,8 @@ type attrSetDecl struct {
 	// a used package's attribute set; use-attribute-sets="xsl:original"
 	// expands to it (XSLT 3.0 §3.6.3.2).
 	original []attrSetDecl
+	// abstract: declared visibility="abstract" — it has no body to run.
+	abstract bool
 }
 
 // KeyDef is a compiled xsl:key declaration. Its value is produced either by a
@@ -814,12 +821,18 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 	}
 
 	// Gather modules in import-precedence order (lowest first), then compile.
+	c.principalRoot = root
 	mods, err := c.gatherModules(root, baseDir, map[string]bool{})
 	if err != nil {
 		return nil, err
 	}
 	ss.hiddenAt = c.hiddenAt
-	c.principalRoot = root
+	ss.principalRoot = root
+	ss.principalMods = map[*xmltree.Node]bool{root: true}
+	for _, r := range c.incRoots[root] {
+		ss.principalMods[r] = true
+	}
+	ss.acceptedExplicit = c.acceptedExplicit
 	// Shadow attributes ("_select" etc — resolveShadowAttrs' own doc comment
 	// carries the full rationale) are resolved here: every module's static
 	// params (c.staticParams) are now fully populated (gatherModules calls
@@ -894,7 +907,7 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 				roots = append(roots, mod.children[0].Parent)
 			}
 		}
-		if err := checkAbstractRefs(roots); err != nil {
+		if err := checkOwnAbstract(append([]*xmltree.Node{root}, c.incRoots[root]...)); err != nil {
 			return nil, err
 		}
 		declared := true
@@ -1419,8 +1432,9 @@ type compiler struct {
 	incRoots map[*xmltree.Node][]*xmltree.Node
 	// principalRoot is the root of the module being compiled as the principal
 	// package/stylesheet; globalCtxDecls the xsl:global-context-item seen.
-	principalRoot  *xmltree.Node
-	globalCtxDecls []globalCtxDecl
+	principalRoot    *xmltree.Node
+	acceptedExplicit map[string]bool
+	globalCtxDecls   []globalCtxDecl
 	// staticDecls records the effective binding of each static variable/param
 	// established by the cross-module tree-order pass (staticdecl.go), with
 	// the import precedence that set it. A name present here is already
