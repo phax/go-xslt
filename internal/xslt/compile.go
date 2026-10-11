@@ -261,13 +261,14 @@ type Stylesheet struct {
 	strip       []spaceTest // xsl:strip-space element name-tests
 	preserve    []spaceTest // xsl:preserve-space element name-tests
 	keys        []*KeyDef
-	functions   map[string]*FuncDef            // by funcKey(name, arity) — see funcKey
-	modes       map[string]*ModeDef            // mode name ("" = unnamed) -> EFFECTIVE declaration (populated by resolveModeDecls)
-	modeDecls   map[string][]*ModeDef          // every raw xsl:mode declaration, by name, before precedence resolution
-	attrSets    map[string][]attrSetDecl       // xsl:attribute-set name -> its declarations, in document order
-	decFmts     map[string]xpath.DecimalFormat // xsl:decimal-format name ("" = default) — final, resolved values (checkDecimalFormatConflicts)
-	decFmtDecls map[string][]decFmtDecl        // every raw declaration seen, by name, before precedence resolution
-	charMaps    map[string]*xmltree.Node       // xsl:character-map declarations by name (resolved lazily)
+	functions   map[string]*FuncDef                       // by funcKey(name, arity) — see funcKey
+	modes       map[string]*ModeDef                       // mode name ("" = unnamed) -> EFFECTIVE declaration (populated by resolveModeDecls)
+	modeDecls   map[string][]*ModeDef                     // every raw xsl:mode declaration, by name, before precedence resolution
+	attrSets    map[string][]attrSetDecl                  // xsl:attribute-set name -> its declarations, in document order
+	decFmts     map[string]xpath.DecimalFormat            // xsl:decimal-format name ("" = default) — final, resolved values (checkDecimalFormatConflicts)
+	decFmtsPkg  map[string]map[string]xpath.DecimalFormat // per-package formats when several packages take part (scope.go)
+	decFmtDecls map[string][]decFmtDecl                   // every raw declaration seen, by name, before precedence resolution
+	charMaps    map[string]*xmltree.Node                  // xsl:character-map declarations by name (resolved lazily)
 	// schema is the components xsl:import-schema brought in, nil when none
 	// were (or when the run is not schema-aware). Every OTHER consumer reaches
 	// them through schemaForElement, keyed by the stylesheet element an
@@ -354,8 +355,14 @@ type Stylesheet struct {
 	originalFuncs map[*xmltree.Node]*FuncDef
 	// principalRoot is the principal package's root element; acceptedExplicit
 	// the symbolic names some xsl:accept stated a visibility for.
-	principalRoot    *xmltree.Node
-	principalMods    map[*xmltree.Node]bool
+	principalRoot *xmltree.Node
+	principalMods map[*xmltree.Node]bool
+	// pkgOf maps each module root to the root of the package it belongs to;
+	// multiPkg is set when more than one package takes part, which is when
+	// keys, decimal formats, accumulators, aliases and character maps must be
+	// scoped to their package (scope.go).
+	pkgOf            map[*xmltree.Node]*xmltree.Node
+	multiPkg         bool
 	acceptedExplicit map[string]bool
 	// originalVars is the same for an overriding global variable/param, read
 	// as $xsl:original.
@@ -828,6 +835,13 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 	}
 	ss.hiddenAt = c.hiddenAt
 	ss.principalRoot = root
+	ss.pkgOf = c.pkgOf
+	distinct := map[*xmltree.Node]bool{}
+	for _, p := range c.pkgOf {
+		distinct[p] = true
+	}
+	ss.multiPkg = len(distinct) > 1
+	c.multiPkg = ss.multiPkg
 	ss.principalMods = map[*xmltree.Node]bool{root: true}
 	for _, r := range c.incRoots[root] {
 		ss.principalMods[r] = true
@@ -1023,6 +1037,15 @@ func validateCharacterMaps(ss *Stylesheet, el *xmltree.Node) error {
 	if err := checkList(ss.output.UseCharacterMaps); err != nil {
 		return err
 	}
+	// Character maps are local to a package: the principal package's xsl:output
+	// cannot use one declared only in a package it uses (use-package-106).
+	if ss.multiPkg {
+		for _, ref := range ss.output.UseCharacterMaps {
+			if decl := ss.charMaps[ref]; decl != nil && !ss.inPrincipal(decl) {
+				return errAt(el, "err:XTSE1590: use-character-maps references the character-map %q, which belongs to another package", ref)
+			}
+		}
+	}
 	for _, o := range ss.namedOutputs {
 		if err := checkList(o.UseCharacterMaps); err != nil {
 			return err
@@ -1064,21 +1087,20 @@ func (c *compiler) addNamespaceAlias(el *xmltree.Node, prec int) {
 	if pfx == "#default" {
 		pfx = ""
 	}
-	if c.nsAlias == nil {
-		c.nsAlias = map[string]xmltree.Name{}
-		c.nsAliasPrec = map[string]int{}
-	}
+	// Aliases are local to a package (use-package-103): with several packages
+	// each keeps its own table.
+	aliases, precs := c.nsAliasTables(el)
 	styURI := lookup(sp)
 	target := xmltree.Name{Space: lookup(rp), Prefix: pfx}
-	if prev, ok := c.nsAlias[styURI]; ok && prev != target {
-		if c.nsAliasPrec[styURI] == prec {
+	if prev, ok := aliases[styURI]; ok && prev != target {
+		if precs[styURI] == prec {
 			c.nsAliasErr = errAt(el, "err:XTSE0810: conflicting xsl:namespace-alias declarations for prefix %q", sp)
 		}
 		// A different precedence always means prec is HIGHER (modules are
 		// scanned lowest-first), so it overrides below with no error.
 	}
-	c.nsAlias[styURI] = target
-	c.nsAliasPrec[styURI] = prec
+	aliases[styURI] = target
+	precs[styURI] = prec
 }
 
 // principalVersionIsOne reports whether root — the outermost element of the
@@ -1245,6 +1267,13 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 				ss.named[t.name] = t // higher precedence compiled later overrides
 			}
 		case "output":
+			// xsl:output of a used library package does not shape THIS
+			// package's result (use-package-108/108b).
+			if name, ok := child.AttrLocal("name"); ok && name == "" || !ok {
+				if c.multiPkg && !c.inPrincipalPackage(topElement(child)) {
+					continue // only the principal package's UNNAMED format is the result format
+				}
+			}
 			if name, ok := child.AttrLocal("name"); ok && name != "" {
 				// Keyed by the expanded {uri}local QName (not the literal
 				// prefix text) so xsl:result-document/@format can resolve it
@@ -1308,6 +1337,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 			if err != nil {
 				return err
 			}
+			kd.name = scopedName(c.pkgKey(child), kd.name) // keys are local to a package
 			for _, prev := range ss.keys {
 				if prev.name == kd.name && prev.collURI != kd.collURI {
 					return errAt(child, "err:XTSE1220: xsl:key %q declared with different collations", kd.name)
@@ -1386,7 +1416,8 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 			if ss.decFmtDecls == nil {
 				ss.decFmtDecls = map[string][]decFmtDecl{}
 			}
-			ss.decFmtDecls[name] = append(ss.decFmtDecls[name], decFmtDecl{prec: c.importPrec, el: child})
+			dk := scopedName(c.pkgKey(child), name) // decimal formats are local to a package
+			ss.decFmtDecls[dk] = append(ss.decFmtDecls[dk], decFmtDecl{prec: c.importPrec, el: child})
 		case "character-map":
 			if name, ok := child.AttrLocal("name"); ok {
 				key := clarkName(resolveQName(child, name))
@@ -1430,6 +1461,8 @@ type compiler struct {
 	hiddenAt map[*xmltree.Node]map[string]bool
 	// incRoots: the included/imported module roots of each package module root.
 	incRoots map[*xmltree.Node][]*xmltree.Node
+	pkgOf    map[*xmltree.Node]*xmltree.Node
+	multiPkg bool
 	// principalRoot is the root of the module being compiled as the principal
 	// package/stylesheet; globalCtxDecls the xsl:global-context-item seen.
 	principalRoot    *xmltree.Node
@@ -1452,16 +1485,18 @@ type compiler struct {
 	importPrec  int
 	// importLo is the lowest import precedence the module now being compiled
 	// transitively imports; see modChildren.importLo.
-	importLo     int
-	order        int
-	staticParams map[string]xpath.Object              // static="yes" parameters, for use-when (clark name -> value)
-	staticRes    xpath.ResourceResolver               // fn:doc resolver for static expressions (see staticResolver)
-	nsAlias      map[string]xmltree.Name              // xsl:namespace-alias: stylesheet URI -> result {Space, Prefix}
-	nsAliasPrec  map[string]int                       // stylesheet URI -> import precedence of the recorded alias
-	nsAliasErr   error                                // conflicting alias declarations (XTSE0810)
-	inputTypeAnn string                               // first explicit input-type-annotations value seen across all modules (XTSE0265)
-	outputSeen   map[string]map[string]outputAttrSeen // xsl:output conflict tracking (XTSE1560): output key ("" = unnamed) -> attr name -> last seen value/precedence
-	decFmtSeen   map[string]map[string]outputAttrSeen // xsl:decimal-format merge/conflict tracking (XTSE1290), same shape as outputSeen
+	importLo       int
+	order          int
+	staticParams   map[string]xpath.Object            // static="yes" parameters, for use-when (clark name -> value)
+	staticRes      xpath.ResourceResolver             // fn:doc resolver for static expressions (see staticResolver)
+	nsAlias        map[string]xmltree.Name            // xsl:namespace-alias: stylesheet URI -> result {Space, Prefix}
+	nsAliasPkg     map[string]map[string]xmltree.Name // per-package tables when several packages take part (scope.go)
+	nsAliasPrecPkg map[string]map[string]int
+	nsAliasPrec    map[string]int                       // stylesheet URI -> import precedence of the recorded alias
+	nsAliasErr     error                                // conflicting alias declarations (XTSE0810)
+	inputTypeAnn   string                               // first explicit input-type-annotations value seen across all modules (XTSE0265)
+	outputSeen     map[string]map[string]outputAttrSeen // xsl:output conflict tracking (XTSE1560): output key ("" = unnamed) -> attr name -> last seen value/precedence
+	decFmtSeen     map[string]map[string]outputAttrSeen // xsl:decimal-format merge/conflict tracking (XTSE1290), same shape as outputSeen
 	// overrideNodes marks the top-level declaration nodes that are direct
 	// children of an xsl:override (gatherUsedPackage) — the population that
 	// may legitimately call xsl:original (XSLT 3.0 §3.6.3.2).
@@ -1867,7 +1902,8 @@ func checkDecimalFormatConflicts(ss *Stylesheet) error {
 	if ss.decFmts == nil {
 		ss.decFmts = map[string]xpath.DecimalFormat{}
 	}
-	for name, decls := range ss.decFmtDecls {
+	for dk, decls := range ss.decFmtDecls {
+		pk, name := splitScoped(dk)
 		merged, errEl, err := mergeDecimalFormatDecls(name, decls)
 		if err != nil {
 			return err
@@ -1875,7 +1911,17 @@ func checkDecimalFormatConflicts(ss *Stylesheet) error {
 		if err := checkDecimalFormat(errEl, merged); err != nil {
 			return err
 		}
-		ss.decFmts[name] = merged
+		if pk == "" {
+			ss.decFmts[name] = merged
+			continue
+		}
+		if ss.decFmtsPkg == nil {
+			ss.decFmtsPkg = map[string]map[string]xpath.DecimalFormat{}
+		}
+		if ss.decFmtsPkg[pk] == nil {
+			ss.decFmtsPkg[pk] = map[string]xpath.DecimalFormat{}
+		}
+		ss.decFmtsPkg[pk][name] = merged
 	}
 	return nil
 }
@@ -3196,16 +3242,17 @@ func ambientResultNamespaces(el *xmltree.Node, already []*xmltree.Node, nsAlias 
 
 func (c *compiler) compileLiteralElement(el *xmltree.Node) (instruction, error) {
 	name := el.Name
+	nsAlias := c.aliasesFor(el)
 	nsNodes := el.NSDecls()
-	if alias, ok := c.nsAlias[name.Space]; ok {
+	if alias, ok := nsAlias[name.Space]; ok {
 		name = xmltree.Name{Local: name.Local, Space: alias.Space, Prefix: alias.Prefix}
 	}
-	if len(c.nsAlias) > 0 && len(nsNodes) > 0 {
+	if len(nsAlias) > 0 && len(nsNodes) > 0 {
 		// Drop namespace nodes for aliased stylesheet URIs (the result
 		// namespace is declared via the rewritten names instead).
 		kept := nsNodes[:0:0]
 		for _, ns := range nsNodes {
-			if _, aliased := c.nsAlias[ns.Value]; !aliased {
+			if _, aliased := nsAlias[ns.Value]; !aliased {
 				kept = append(kept, ns)
 			}
 		}
@@ -3237,7 +3284,7 @@ func (c *compiler) compileLiteralElement(el *xmltree.Node) (instruction, error) 
 		}
 		aSpace := a.Name.Space
 		aPrefix := a.Name.Prefix
-		if alias, ok := c.nsAlias[aSpace]; ok {
+		if alias, ok := nsAlias[aSpace]; ok {
 			aSpace = alias.Space
 			aPrefix = alias.Prefix
 		}
@@ -3271,7 +3318,7 @@ func (c *compiler) compileLiteralElement(el *xmltree.Node) (instruction, error) 
 		}
 		nsNodes = kept
 	}
-	nsNodes = append(nsNodes, ambientResultNamespaces(el, nsNodes, c.nsAlias, usedURIs, neededPrefix)...)
+	nsNodes = append(nsNodes, ambientResultNamespaces(el, nsNodes, nsAlias, usedURIs, neededPrefix)...)
 	leVal, err := compileValidation(el, vkElement)
 	if err != nil {
 		return nil, err
@@ -3293,7 +3340,7 @@ func (c *compiler) compileLiteralElement(el *xmltree.Node) (instruction, error) 
 			return nil, errAt(el, "bad attribute value template %q: %v", a.Value, err)
 		}
 		aname := a.Name
-		if alias, ok := c.nsAlias[aname.Space]; ok && aname.Space != "" {
+		if alias, ok := nsAlias[aname.Space]; ok && aname.Space != "" {
 			aname = xmltree.Name{Local: aname.Local, Space: alias.Space, Prefix: alias.Prefix}
 		}
 		le.attrs = append(le.attrs, litAttr{name: aname, value: av})

@@ -193,8 +193,8 @@ Desktop GUI (**run from `desktop/`**):
   `XSLT30_BYVER=1` for a per-version breakdown; `XSLT30_FULL=1` additionally
   claims streaming + schema-awareness + backwards-compatibility together —
   see below):
-  - **Default (basic processor): 99.6% (8,104/8,138)**. **Combined
-    (`XSLT30_FULL=1`): 99.5% (11,748/11,808)**.
+  - **Default (basic processor): 99.8% (8,119/8,138)**. **Combined
+    (`XSLT30_FULL=1`): 99.6% (11,763/11,808)**.
   - `<test><package role="principal"></test>` catalog entries (347 cases)
     used to be hard-skipped unconditionally; the engine already accepted a
     top-level `xsl:package` as a module root and already fully implemented
@@ -203,7 +203,7 @@ Desktop GUI (**run from `desktop/`**):
     packages are **not** one of the six optional features (schema-awareness,
     serialization, backwards-compatibility, streaming, dynamic evaluation,
     XQuery invocation) — so unskipping them genuinely widens the **default**
-    denominator too, not just the combined one; 8,104 of the 8,138 now pass.
+    denominator too, not just the combined one; 8,119 of the 8,138 now pass.
   - `xsl:expose` is real (`internal/xslt/expose.go`): the §3.5.3.1 precedence
     (explicit name > declared `@visibility` > partial wildcard > `*` >
     private), XTSE0020/3010/3020/3022/3025, implicit modes, and it feeds
@@ -218,10 +218,15 @@ Desktop GUI (**run from `desktop/`**):
     (`xsl:use-package` reached through `xsl:import`), XTSE3087/XTTE0590/
     XTSE3088 for `xsl:global-context-item`, and `xsl:original` for
     functions (`originalFuncs`), global variables (`originalVars`) and
-    attribute sets (an override REPLACES the set). Still open: per-package
-    scoping of keys/decimal-formats/namespace-aliases/output/character-maps/
-    accumulators, XTSE3070 signature compatibility beyond declared types,
-    diamond package graphs. Abstract components: a top-level package may
+    attribute sets (an override REPLACES the set). Package-local declarations (`scope.go`): when more than one package
+    takes part (`multiPkg`), keys, decimal formats and namespace aliases are
+    filed per package, only the principal package's UNNAMED `xsl:output`
+    counts, and the principal's `xsl:output` cannot use a character map of a
+    used package. XTSE3070 covers `as`, parameters (name/tunnel/required/
+    type), context item and function `new-each-time`. Still open:
+    accumulators/private attribute sets/named outputs of the same name in two
+    packages, the `xs:`/result-prefix namespace nodes `use-package-108*`
+    expect, diamond package graphs, per-package `xsl:strip-space`. Abstract components: a top-level package may
     contain none (XTSE3080 — declared abstract, or accepted as abstract and
     not overridden); an abstract component not accepted *as* abstract becomes
     hidden; evaluating an unoverridden abstract attribute set is XTDE3052; a
@@ -256,7 +261,7 @@ Desktop GUI (**run from `desktop/`**):
     reference fixtures vs. a live SaxonJS check; `copy-3002`'s own catalog
     entry says "the test should fail"); `copy-1220/1221`'s
     ambient-namespace-on-copy gap (the only known fix is measured
-    net-negative, repeatedly) — plus ~25 remaining from the package-entry
+    net-negative, repeatedly) — plus ~10 remaining from the package-entry
     unskip, all genuine gaps in the current **flattened** package execution
     model (packages compile and run, but cross-package isolation is only
     partial): hiding is enforced only at name-resolution points (not for

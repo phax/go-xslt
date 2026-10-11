@@ -1953,7 +1953,7 @@ func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOver
 	if eng.sheet.hasBackwardsCompat && backwardsCompatRun() {
 		bc10 = inBackwardsCompatScope(el)
 	}
-	v, err := p.Eval(&xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: eng.resolveNamedFunction(env), Resolver: eng.resolver, DecimalFormats: eng.sheet.decFmts, DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10})
+	v, err := p.Eval(&xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: eng.resolveNamedFunction(env), Resolver: eng.resolver, DecimalFormats: eng.sheet.decimalFormatsFor(el), DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10})
 	if err != nil && eng.errEl == nil {
 		eng.errEl = el
 	}

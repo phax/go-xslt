@@ -524,8 +524,25 @@ func checkOverrideSignature(d *xmltree.Node, target pkgComponent) error {
 		return errAt(d, "err:XTSE3070: overriding %s %q declares as=%q but the overridden component declares as=%q",
 			d.Name.Local, target.name, a, b)
 	}
+	if d.Name.Local == "template" {
+		return checkTemplateOverrideSignature(d, target)
+	}
 	if d.Name.Local != "function" {
 		return nil
+	}
+	// An overriding function must promise the same determinism as the one it
+	// replaces: new-each-time yes / no / maybe (the default) must agree.
+	nonDet := func(n *xmltree.Node) string {
+		switch strings.TrimSpace(attrOr(n, "new-each-time", "maybe")) {
+		case "yes", "true", "1":
+			return "yes"
+		case "no", "false", "0":
+			return "no"
+		}
+		return "maybe"
+	}
+	if nonDet(d) != nonDet(target.el) {
+		return errAt(d, "err:XTSE3070: overriding function %q declares new-each-time=%q but the overridden function declares %q", target.name, nonDet(d), nonDet(target.el))
 	}
 	params := func(n *xmltree.Node) []string {
 		var out []string
@@ -595,6 +612,77 @@ func checkNoApplyImports(d *xmltree.Node) error {
 		if err := walk(ch); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkTemplateOverrideSignature is XTSE3070 for a named template: every
+// parameter of the overridden template must reappear with the same tunnel flag,
+// the same declared type and the same required-ness; any additional parameter
+// must be optional; and the context-item declaration (use, as) must agree.
+func checkTemplateOverrideSignature(d *xmltree.Node, target pkgComponent) error {
+	typ := func(n *xmltree.Node) string {
+		v, ok := n.AttrLocal("as")
+		if !ok {
+			return "item()*"
+		}
+		return strings.Join(strings.Fields(v), " ")
+	}
+	flag := func(n *xmltree.Node, name string) bool {
+		v, ok := n.AttrLocal(name)
+		return ok && isXSLTTrue(strings.TrimSpace(v))
+	}
+	params := func(n *xmltree.Node) map[string]*xmltree.Node {
+		out := map[string]*xmltree.Node{}
+		for _, ch := range elementChildren(n) {
+			if ch.Name.Space == NS && ch.Name.Local == "param" {
+				out[clarkName(resolveQName(ch, attrOr(ch, "name", "")))] = ch
+			}
+		}
+		return out
+	}
+	newP, oldP := params(d), params(target.el)
+	for name, op := range oldP {
+		np, ok := newP[name]
+		if !ok && flag(op, "tunnel") {
+			continue // a tunnel parameter need not be redeclared; if it is, it must agree
+		}
+		if !ok {
+			return errAt(d, "err:XTSE3070: overriding template %q lacks the parameter %q of the overridden template", target.name, name)
+		}
+		if flag(np, "tunnel") != flag(op, "tunnel") {
+			return errAt(np, "err:XTSE3070: parameter %q of overriding template %q differs in tunnel", name, target.name)
+		}
+		if typ(np) != typ(op) {
+			return errAt(np, "err:XTSE3070: parameter %q of overriding template %q is declared as=%q, overridden as=%q", name, target.name, typ(np), typ(op))
+		}
+		if flag(np, "required") != flag(op, "required") {
+			return errAt(np, "err:XTSE3070: parameter %q of overriding template %q differs in required", name, target.name)
+		}
+	}
+	for name, np := range newP {
+		if _, ok := oldP[name]; !ok && flag(np, "required") {
+			return errAt(np, "err:XTSE3070: overriding template %q adds the required parameter %q", target.name, name)
+		}
+	}
+	ctx := func(n *xmltree.Node) (use, as string) {
+		use, as = "optional", "item()"
+		for _, ch := range elementChildren(n) {
+			if ch.Name.Space == NS && ch.Name.Local == "context-item" {
+				if v, ok := ch.AttrLocal("use"); ok {
+					use = strings.TrimSpace(v)
+				}
+				if v, ok := ch.AttrLocal("as"); ok {
+					as = strings.Join(strings.Fields(v), " ")
+				}
+			}
+		}
+		return
+	}
+	nu, na := ctx(d)
+	ou, oa := ctx(target.el)
+	if nu != ou || strings.ReplaceAll(na, " ", "") != strings.ReplaceAll(oa, " ", "") {
+		return errAt(d, "err:XTSE3070: overriding template %q declares a different context item (use/as)", target.name)
 	}
 	return nil
 }

@@ -115,6 +115,7 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 			}
 			keyName = clarkName(resolveQName(env.el, keyLex))
 		}
+		keyName = scopedName(eng.sheet.pkgKey(env.el), keyName)
 		// The key must be declared (XTDE1260). A composite key ties its
 		// second argument's items together as ONE compound tuple to look up,
 		// rather than searching for any one of them separately (key-096/097)
@@ -831,9 +832,33 @@ func (eng *engine) evalFuncBody(fd *FuncDef, r rt) (result xpath.Object, confide
 			if b.sel == nil { // body (content) form falls through to general handling
 				break
 			}
-			s, err := eng.evalString(b.sel, b.el, r)
+			// The string value of the selected SEQUENCE, joined by the
+			// separator (default a single space) — not just its first item,
+			// which is all evalString takes (use-package-101: a value-of over
+			// two format-number() calls inside a function).
+			sep := " "
+			hasSep := b.sep != nil
+			if hasSep {
+				var serr error
+				if sep, serr = eng.evalAVT(b.sep, b.el, r); serr != nil {
+					return nil, true, serr
+				}
+			}
+			sv, err := eng.eval(b.sel, b.el, r)
 			if err != nil {
 				return nil, true, err
+			}
+			for _, it := range xpath.Flatten(xpath.Items(sv)) {
+				switch it.(type) {
+				case *xpath.Map, *xpath.Function:
+					return nil, true, errAt(b.el, "err:FOTY0013: xsl:value-of cannot compute the string value of a map or function item")
+				}
+			}
+			var s string
+			if !hasSep && eng.bc10At(b.el) {
+				s = xpath.ToString(sv)
+			} else {
+				s = joinSeq(sv, sep)
 			}
 			if fd.as == "" {
 				return s, true, nil

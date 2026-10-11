@@ -172,6 +172,13 @@ func (c *compiler) gatherModules(root *xmltree.Node, baseDir string, seen map[st
 		c.incRoots = map[*xmltree.Node][]*xmltree.Node{}
 	}
 	c.incRoots[root] = incRoots
+	if c.pkgOf == nil {
+		c.pkgOf = map[*xmltree.Node]*xmltree.Node{}
+	}
+	c.pkgOf[root] = root
+	for _, r := range incRoots {
+		c.pkgOf[r] = root
+	}
 	if err := c.finishHidden(root, own, incRoots); err != nil {
 		return nil, err
 	}

@@ -746,6 +746,11 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 			Version: p.Version,
 			Path:    filepath.Join(srcBase, p.File),
 		})
+		// The catalog's @uri/@package-version are only a hint: a package IS
+		// what its own xsl:package says it is (override-f-024's catalog entry
+		// says 1.0.0 for a module that declares 0.0.1; override-t-003a's names
+		// a different URI than the module). Register that identity as well.
+		pkgs = append(pkgs, xslt.PackageSource{Path: filepath.Join(srcBase, p.File)})
 	}
 	// A <test> can also name library packages directly (role="secondary"),
 	// rather than (or in addition to) via its <environment> — package-100/101
@@ -765,6 +770,7 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 			Version: p.Version,
 			Path:    filepath.Join(dir, p.File),
 		})
+		pkgs = append(pkgs, xslt.PackageSource{Path: filepath.Join(dir, p.File)})
 	}
 	// Schema documents the environment offers to the STYLESHEET's own
 	// xsl:import-schema (role="stylesheet-import"). XSLT 3.0 §3.16 makes
