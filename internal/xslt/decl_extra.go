@@ -160,6 +160,9 @@ func checkAttributeSetRefs(ss *Stylesheet, mods []modChildren) error {
 			}
 			for _, name := range resolveAttrSetNames(el, strings.Fields(v)) {
 				decls, exists := ss.attrSets[name]
+				if exists && ss.hiddenRef(el, "attribute-set#"+name) {
+					exists = false // hidden by the used package
+				}
 				if !exists {
 					return errAt(el, "err:XTSE0710: no xsl:attribute-set named %q", name)
 				}

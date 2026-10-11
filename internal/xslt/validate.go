@@ -42,6 +42,7 @@ var xsltElemSpecs = map[string]vSpec{
 	// module, and xsl:accept only adjusts accepted visibility.
 	"use-package": {attrs: "name package-version", required: "name", children: "accept override", noText: true},
 	"accept":      {attrs: "component names visibility", required: "component names visibility", children: "empty", noText: true},
+	"expose":      {attrs: "component names visibility", required: "component names visibility", children: "empty", noText: true},
 	"override":    {children: "template function variable param attribute-set", noText: true},
 
 	"template":        {attrs: "match name priority mode as visibility"},
@@ -560,6 +561,7 @@ var vAllowedParents = map[string]map[string]bool{
 	"context-item":           {"template": true},
 	"function":               {"stylesheet": true, "transform": true, "package": true, "override": true},
 	"accept":                 {"use-package": true},
+	"expose":                 {"package": true},
 	"override":               {"use-package": true},
 	"key":                    {"stylesheet": true, "transform": true, "package": true},
 	"attribute-set":          {"stylesheet": true, "transform": true, "package": true, "override": true},

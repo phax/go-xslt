@@ -33,6 +33,7 @@ type modChildren struct {
 func (c *compiler) gatherModules(root *xmltree.Node, baseDir string, seen map[string]bool) ([]modChildren, error) {
 	var mods []modChildren
 	var own []*xmltree.Node
+	var incRoots []*xmltree.Node
 	// Components accepted by the xsl:use-package elements of THIS package
 	// manifest, for XTSE3050: symbolic name -> the abs path of the used
 	// package it came from. Keyed by PACKAGE IDENTITY rather than by which
@@ -118,6 +119,12 @@ func (c *compiler) gatherModules(root *xmltree.Node, baseDir string, seen map[st
 				subRoot = simplifiedModuleRoot(subRoot)
 			}
 			sub, err := c.gatherModules(subRoot, subBase, seen)
+			// An included/imported module is part of THIS package: what its
+			// own xsl:use-package elements hide counts for the whole package,
+			// and the hiding applies to code written in that module too.
+			incRoots = append(incRoots, subRoot)
+			incRoots = append(incRoots, c.incRoots[subRoot]...)
+			c.useVis = mergeUseVis(c.useVis, root, subRoot)
 			// Un-mark abs once this subtree is fully gathered: "seen" guards
 			// against a TRUE cycle (a module transitively importing/including
 			// itself, still on the current load stack), not against the same
@@ -148,6 +155,11 @@ func (c *compiler) gatherModules(root *xmltree.Node, baseDir string, seen map[st
 		}
 		own = append(own, child)
 	}
+	if c.incRoots == nil {
+		c.incRoots = map[*xmltree.Node][]*xmltree.Node{}
+	}
+	c.incRoots[root] = incRoots
+	c.finishHidden(root, own, incRoots)
 	// This module sits above everything gathered so far, all of which it
 	// imported (directly, or indirectly through an xsl:include).
 	mods = append(mods, modChildren{children: own, baseDir: baseDir, importLo: 0})
@@ -208,6 +220,7 @@ func (c *compiler) gatherUsedPackage(el *xmltree.Node, seen map[string]bool, acc
 	if err := checkUsePackage(el, abs, exports, accepted); err != nil {
 		return nil, nil, err
 	}
+	c.noteUsedVisibility(el, root, exports)
 	var overrides []*xmltree.Node
 	for _, ch := range elementChildren(el) {
 		if ch.Name.Space != NS {

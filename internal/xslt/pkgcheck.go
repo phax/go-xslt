@@ -138,6 +138,10 @@ func (c *compiler) packageExports(abs string, root *xmltree.Node, stack map[stri
 	stack[abs] = true
 	defer delete(stack, abs)
 
+	exposure, _, err := packageExposure(root)
+	if err != nil {
+		return nil, err
+	}
 	var out []pkgComponent
 	for _, ch := range elementChildren(root) {
 		if ch.Name.Space != NS {
@@ -170,7 +174,13 @@ func (c *compiler) packageExports(abs string, root *xmltree.Node, stack map[stri
 			continue
 		}
 		comp, ok := componentOf(ch)
-		if !ok || !isExposed(comp.visibility) {
+		if !ok {
+			continue
+		}
+		if v, has := exposure[ch]; has {
+			comp.visibility = v // xsl:expose decided (expose.go)
+		}
+		if !isExposed(comp.visibility) {
 			continue
 		}
 		out = append(out, comp)

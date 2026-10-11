@@ -344,6 +344,12 @@ type Stylesheet struct {
 	// non-effect forwards-compatible processing promises). Consulted only
 	// by the one check this narrowly needs — see its use in TransformEntry.
 	exposedIgnored map[string]bool
+	// hiddenAt: per package manifest root, the symbolic names of used-package
+	// components that code in that package may not reference (expose.go).
+	hiddenAt map[*xmltree.Node]map[string]bool
+	// implicitPrivateModes: modes named only by a template's @mode that an
+	// xsl:expose made private (so they are not eligible initial modes).
+	implicitPrivateModes map[string]bool
 }
 
 // attrSetDecl is one xsl:attribute-set declaration's own use-attribute-sets
@@ -800,6 +806,7 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 	if err != nil {
 		return nil, err
 	}
+	ss.hiddenAt = c.hiddenAt
 	// Shadow attributes ("_select" etc — resolveShadowAttrs' own doc comment
 	// carries the full rationale) are resolved here: every module's static
 	// params (c.staticParams) are now fully populated (gatherModules calls
@@ -865,6 +872,9 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 	// XTSE3085: inside an xsl:package, declared-modes defaults to "yes" and
 	// every mode used must then be declared by an xsl:mode declaration.
 	if root.Name.Local == "package" {
+		if err := applyExposure(ss, root); err != nil {
+			return nil, err
+		}
 		var roots []*xmltree.Node
 		for _, mod := range mods {
 			if len(mod.children) > 0 && mod.children[0].Parent != nil {
@@ -1377,6 +1387,12 @@ type compiler struct {
 	// pkgExports caches each library package's component manifest by absolute
 	// path (pkgcheck.go) — a package graph is commonly a diamond.
 	pkgExports map[string][]pkgComponent
+	// useVis / hiddenAt: what each package's xsl:use-package elements keep
+	// from their using package (expose.go).
+	useVis   map[*xmltree.Node][]usedVisibility
+	hiddenAt map[*xmltree.Node]map[string]bool
+	// incRoots: the included/imported module roots of each package module root.
+	incRoots map[*xmltree.Node][]*xmltree.Node
 	// staticDecls records the effective binding of each static variable/param
 	// established by the cross-module tree-order pass (staticdecl.go), with
 	// the import precedence that set it. A name present here is already

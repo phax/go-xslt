@@ -1050,6 +1050,9 @@ entryKind:
 			if !wasDeclared {
 				md = &ModeDef{name: e.Mode, onNoMatch: "text-only-copy"}
 			}
+			if !wasDeclared && ss.implicitPrivateModes[e.Mode] {
+				return nil, nil, fmt.Errorf("err:XTDE0045: initial mode %q is exposed as private; an entry-point mode must be public or final", e.Mode)
+			}
 			switch md.visibility {
 			case "private", "abstract":
 				return nil, nil, fmt.Errorf("err:XTDE0045: initial mode %q has visibility %q; an entry-point mode must be public or final",
@@ -1795,6 +1798,9 @@ func (e *evalEnv) ResolveVar(prefix, local string) (xpath.Object, bool) {
 		uri = prefix[2 : len(prefix)-1]
 	} else if prefix != "" {
 		uri, _ = e.el.LookupPrefix(prefix)
+	}
+	if e.eng.sheet.hiddenRef(e.el, "variable#"+clark(uri, local)) {
+		return nil, false // hidden by the used package: undeclared here (XPST0008)
 	}
 	if e.scopes != nil {
 		return e.eng.lookupVarIn(e.scopes, clark(uri, local))
@@ -3099,6 +3105,9 @@ func (eng *engine) execCallTemplate(n *callTemplate, r rt, out *xmltree.Node) er
 	}
 	if !ok {
 		return errAt(n.el, "no template named %q", n.name)
+	}
+	if eng.sheet.hiddenRef(n.el, "template#"+clarkName(resolveQName(n.el, n.name))) {
+		return errAt(n.el, "err:XTSE0650: no template named %q is visible here (it is hidden by the used package)", n.name)
 	}
 	// XTSE0680: every non-tunnel xsl:with-param must name a parameter the
 	// called template actually declares (error-0680a) — unless backwards-

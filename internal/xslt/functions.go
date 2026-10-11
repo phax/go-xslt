@@ -61,6 +61,9 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 			uri = prefix
 		}
 		if fd, ok := eng.sheet.functions[funcKey(uri, local, len(args))]; ok {
+			if eng.sheet.hiddenRef(env.el, "function#"+clark(uri, local)+"#"+itoa(len(args))) {
+				return nil, false, nil // hidden by the used package: undeclared here (XPST0017)
+			}
 			if err := eng.checkEvaluateVisibility(fd); err != nil {
 				return nil, true, err
 			}

@@ -34,7 +34,14 @@ func (c *compiler) compileTopLevelExtra(ss *Stylesheet, el *xmltree.Node) error 
 	// xsl:import-schema has moved to declRegistry (decl_import_schema.go): it
 	// is really compiled when the run claims schema-awareness, and re-raises
 	// this exact rejection when it does not.
-	case "package", "expose":
+	case "expose":
+		// A version-recognized xsl:expose belongs to the package manifest; its
+		// rules are applied once the whole package is compiled (applyExposure).
+		if p := el.Parent; p != nil && p.Name.Space == NS && p.Name.Local == "package" {
+			return nil
+		}
+		return errAt(el, "err:XTSE0010: xsl:expose is only allowed as a child of xsl:package")
+	case "package":
 		return errAt(el, "xsl:%s is an optional feature (packages/schema-awareness) not supported by this processor", el.Name.Local)
 	}
 	// An XSLT instruction is never permitted as a top-level declaration (a direct
