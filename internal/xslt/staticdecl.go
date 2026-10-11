@@ -1,6 +1,7 @@
 package xslt
 
 import (
+	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"os"
 	"path/filepath"
 	"strings"
@@ -251,7 +252,7 @@ func (c *compiler) loadStaticModule(el *xmltree.Node, baseDir string, seen map[s
 	}
 	hrefBase := baseDir
 	if el.Base() != "" {
-		hrefBase = filepath.Dir(strings.TrimPrefix(el.Base(), "file://"))
+		hrefBase = filepath.Dir(fileuri.StripFile(el.Base()))
 	}
 	path := href
 	if strings.IndexByte(path, '#') >= 0 {

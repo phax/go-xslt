@@ -3,6 +3,7 @@ package xmltree
 import (
 	"encoding/xml"
 	"fmt"
+	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"io"
 	"strconv"
 	"strings"
@@ -875,7 +876,7 @@ func applyEntityBases(doc *Node, spans []entitySpan, lines []int) {
 			for _, sp := range spans {
 				if off >= sp.start && off < sp.end {
 					if n.EntityBase() == "" {
-						n.SetEntityBase("file://" + sp.path)
+						n.SetEntityBase(fileuri.FromPath(sp.path))
 					}
 					break
 				}

@@ -1,8 +1,8 @@
 package xslt
 
 import (
+	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,8 +70,8 @@ func (r *fileResolver) path(uri string) string {
 		u = u[:i]
 	}
 	if strings.HasPrefix(u, "file:") {
-		if pu, err := url.Parse(u); err == nil && pu.Path != "" {
-			u = pu.Path
+		if p, ok := fileuri.ToPath(u); ok {
+			u = p
 		}
 	}
 	if filepath.IsAbs(u) {

@@ -6,6 +6,7 @@ package xslt
 
 import (
 	"fmt"
+	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -1180,7 +1181,7 @@ func fileURI(absPath string) string {
 	if absPath == "" || strings.HasPrefix(absPath, "file:") {
 		return absPath
 	}
-	return "file://" + absPath
+	return fileuri.FromPath(absPath)
 }
 
 func newStylesheet() *Stylesheet {

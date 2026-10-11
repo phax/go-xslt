@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"net/url"
+	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,11 +40,11 @@ func baseDirURI(dir string) string {
 	if err != nil {
 		abs = dir
 	}
-	abs = filepath.ToSlash(abs)
-	if !strings.HasSuffix(abs, "/") {
-		abs += "/"
+	uri := fileuri.FromPath(abs)
+	if !strings.HasSuffix(uri, "/") {
+		uri += "/"
 	}
-	return "file://" + abs
+	return uri
 }
 
 func (r *standaloneResolver) path(uri string) string {
@@ -53,8 +53,8 @@ func (r *standaloneResolver) path(uri string) string {
 		u = u[:i]
 	}
 	if strings.HasPrefix(u, "file:") {
-		if pu, err := url.Parse(u); err == nil && pu.Path != "" {
-			u = pu.Path
+		if p, ok := fileuri.ToPath(u); ok {
+			u = p
 		}
 	}
 	if filepath.IsAbs(u) {
@@ -81,7 +81,7 @@ func (r *standaloneResolver) ResolveDoc(uri string) (*xmltree.Node, bool) {
 	if err != nil {
 		return nil, false
 	}
-	doc.SetBase("file://" + filepath.ToSlash(p))
+	doc.SetBase(fileuri.FromPath(p))
 	return doc, true
 }
 

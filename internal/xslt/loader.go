@@ -1,6 +1,7 @@
 package xslt
 
 import (
+	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,7 +103,7 @@ func (c *compiler) gatherModules(root *xmltree.Node, baseDir string, seen map[st
 				// directory, not the enclosing module's (include-0101:
 				// xinc01c.xsl's own <xsl:import href="xinc01d.xsl"/> must find
 				// x/xinc01d.xsl, not a sibling of the outer include-0101b.xsl).
-				hrefBase = filepath.Dir(strings.TrimPrefix(ownBase, "file://"))
+				hrefBase = filepath.Dir(fileuri.StripFile(ownBase))
 			}
 			subRoot, subBase, abs, err := c.loadFile(href, hrefBase, seen)
 			if err != nil {

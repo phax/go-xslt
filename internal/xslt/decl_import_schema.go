@@ -2,6 +2,7 @@ package xslt
 
 import (
 	"errors"
+	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"os"
 	"path/filepath"
 	"strings"
@@ -290,10 +291,10 @@ func (c *compiler) importSchemaSource(el *xmltree.Node, baseDir string) (src, ba
 	if own := el.Base(); own == "" {
 		own = el.EntityBase()
 		if own != "" {
-			dir = filepath.Dir(strings.TrimPrefix(own, "file://"))
+			dir = filepath.Dir(fileuri.StripFile(own))
 		}
 	} else {
-		dir = filepath.Dir(strings.TrimPrefix(own, "file://"))
+		dir = filepath.Dir(fileuri.StripFile(own))
 	}
 	// §3.16: "The base URI of the xs:import element is the same as the base
 	// URI of the xsl:import-schema declaration" — so an xml:base written on

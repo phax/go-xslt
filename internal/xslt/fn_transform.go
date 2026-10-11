@@ -2,6 +2,7 @@ package xslt
 
 import (
 	"fmt"
+	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"os"
 	"path/filepath"
 	"strings"
@@ -615,7 +616,7 @@ func xfLiteralOf(v xpath.Object) string {
 func xfPathOf(uri string) string {
 	u := strings.TrimSpace(uri)
 	if strings.HasPrefix(u, "file://") {
-		return strings.TrimPrefix(u, "file://")
+		return fileuri.StripFile(u)
 	}
 	if strings.HasPrefix(u, "file:") {
 		return strings.TrimPrefix(u, "file:")

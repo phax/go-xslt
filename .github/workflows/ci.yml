@@ -29,3 +29,22 @@ jobs:
 
       - name: go test
         run: go test ./...
+
+  windows:
+    # Filesystem-relative resolution (BaseDir, file: URIs) is OS-specific, so the
+    # Linux job cannot see regressions in it (issue #1). Run the targeted tests
+    # on a real Windows runner; the full conformance suites stay on Linux.
+    name: Windows (file URIs, BaseDir-relative resolution)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test (file URI handling)
+        run: go test ./internal/fileuri ./engine
