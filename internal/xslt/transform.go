@@ -562,7 +562,7 @@ func (ss *Stylesheet) resolveCharMap(names []string, visited map[string]bool) ma
 		if use, ok := decl.AttrLocal("use-character-maps"); ok {
 			var refs []string
 			for _, tok := range strings.Fields(use) {
-				refs = append(refs, clarkName(resolveQName(decl, tok)))
+				refs = append(refs, scopedName(ss.pkgKey(decl), clarkName(resolveQName(decl, tok))))
 			}
 			for k, v := range ss.resolveCharMap(refs, visited) {
 				out[k] = v
@@ -1684,6 +1684,11 @@ func (eng *engine) evalGlobal(key string, vd *VarDef) (xpath.Object, error) {
 	}
 	eng.globalBusy[key] = true
 	defer delete(eng.globalBusy, key)
+	// A global of a USED library package has no global context item: its
+	// initializer cannot read the source document (package-912, spec 2.3.2).
+	if ss := eng.sheet; ss.multiPkg && !ss.inPrincipal(vd.el) {
+		return eng.evalVarDef(vd, rt{noFocus: true})
+	}
 	return eng.evalVarDef(vd, rt{node: eng.globalCtx, pos: 1, size: 1, noFocus: eng.globalCtx == nil})
 }
 
@@ -1859,6 +1864,37 @@ func (e *evalEnv) ResolveVar(prefix, local string) (xpath.Object, bool) {
 			return v, true
 		}
 	}
+	if ov := e.eng.sheet.overrideVars; len(ov) > 0 {
+		key := clark(uri, local)
+		if vd := ov[e.eng.sheet.pkgKey(e.el)][key]; vd != nil && e.eng.globalDefs[key] != vd {
+			if v, ok := e.eng.origGlobals[vd]; ok {
+				return v, true
+			}
+			v, err := e.eng.evalGlobal(fmt.Sprintf("\x00override:%p", vd), vd)
+			if err == nil {
+				if e.eng.origGlobals == nil {
+					e.eng.origGlobals = map[*VarDef]xpath.Object{}
+				}
+				e.eng.origGlobals[vd] = v
+				return v, true
+			}
+		}
+	}
+	if e.eng.sheet.multiPkg {
+		key := clark(uri, local)
+		if vd := e.eng.sheet.globalFromUsedPackage(e.eng.sheet.pkgKey(e.el), key, e.eng.globalDefs[key]); vd != nil {
+			if v, ok := e.eng.origGlobals[vd]; ok {
+				return v, true
+			}
+			if v, err := e.eng.evalGlobal(fmt.Sprintf("\x00used:%p", vd), vd); err == nil {
+				if e.eng.origGlobals == nil {
+					e.eng.origGlobals = map[*VarDef]xpath.Object{}
+				}
+				e.eng.origGlobals[vd] = v
+				return v, true
+			}
+		}
+	}
 	if e.eng.sheet.hiddenRef(e.el, "variable#"+clark(uri, local)) {
 		return nil, false // hidden by the used package: undeclared here (XPST0008)
 	}
@@ -1953,7 +1989,7 @@ func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOver
 	if eng.sheet.hasBackwardsCompat && backwardsCompatRun() {
 		bc10 = inBackwardsCompatScope(el)
 	}
-	v, err := p.Eval(&xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: eng.resolveNamedFunction(env), Resolver: eng.resolver, DecimalFormats: eng.sheet.decimalFormatsFor(el), DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10})
+	v, err := p.Eval(&xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: eng.resolveNamedFunction(env), ResolveLookupFunction: eng.resolveLookupFunction(env), Resolver: eng.resolver, DecimalFormats: eng.sheet.decimalFormatsFor(el), DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10})
 	if err != nil && eng.errEl == nil {
 		eng.errEl = el
 	}
@@ -1975,7 +2011,21 @@ func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOver
 // private xsl:function are found this way from WITHIN the declaring
 // stylesheet (visibility restricts cross-package/cross-module access, not
 // lookup from inside the module that declares it).
+// resolveLookupFunction is the hook for fn:function-lookup() (as opposed to a
+// static named function reference, which sees the overriding function). From
+// inside a USED package, function-lookup finds that package's own functions: a
+// function only the principal package declares is not there, an override is not
+// seen (the package's own original is), and an abstract function does not exist
+// (function-lookup-005).
+func (eng *engine) resolveLookupFunction(env *evalEnv) func(ns, local string, arity int) (*xpath.Function, bool) {
+	return eng.resolveFunctionAs(env, true)
+}
+
 func (eng *engine) resolveNamedFunction(env *evalEnv) func(ns, local string, arity int) (*xpath.Function, bool) {
+	return eng.resolveFunctionAs(env, false)
+}
+
+func (eng *engine) resolveFunctionAs(env *evalEnv, lookup bool) func(ns, local string, arity int) (*xpath.Function, bool) {
 	return func(ns, local string, arity int) (*xpath.Function, bool) {
 		fd, ok := eng.sheet.functions[funcKey(ns, local, arity)]
 		if ns == NS && local == "original" {
@@ -1988,6 +2038,18 @@ func (eng *engine) resolveNamedFunction(env *evalEnv) func(ns, local string, ari
 		}
 		if eng.sheet.hiddenRef(env.el, "function#"+clark(ns, local)+"#"+itoa(arity)) {
 			return nil, false // function-lookup() cannot see what the used package hides
+		}
+		if lookup {
+			if ss := eng.sheet; ss.multiPkg && !ss.inPrincipal(env.el) && ss.inPrincipal(fd.el) {
+				orig := ss.originalFuncs[fd.el]
+				if orig == nil || ss.pkgKey(orig.el) != ss.pkgKey(env.el) {
+					return nil, false
+				}
+				fd = orig
+			}
+		}
+		if fd.visibility == "abstract" {
+			return nil, false
 		}
 		fn := &xpath.Function{Arity: arity, NS: ns, Name: local, Call: func(args []xpath.Object) (xpath.Object, error) {
 			v, _, err := eng.callUserFunc(fd, args, env)

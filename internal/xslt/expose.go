@@ -324,6 +324,10 @@ func (c *compiler) noteUsedVisibility(use, usedRoot *xmltree.Node, exports []pkg
 	if using == nil {
 		return
 	}
+	if c.usesOf == nil {
+		c.usesOf = map[*xmltree.Node][]*xmltree.Node{}
+	}
+	c.usesOf[using] = append(c.usesOf[using], usedRoot)
 	uv := usedVisibility{hidden: map[string]bool{}, visible: map[string]bool{}, abstract: map[string]bool{}, explicit: map[string]bool{}}
 	exported := map[string]bool{}
 	for _, comp := range exports {
@@ -523,6 +527,20 @@ func (ss *Stylesheet) originalFunc(el *xmltree.Node, arity int) *FuncDef {
 func (c *compiler) noteOriginalVar(ss *Stylesheet, vd *VarDef, el *xmltree.Node) {
 	if !c.overrideNodes[el] {
 		return
+	}
+	// A package that overrides a variable sees ITS override from its own code
+	// even when another package's override of the same variable ends up the
+	// global winner (the diamond case: two packages each override one used
+	// package differently). Only consulted when it is not the winner.
+	if c.multiPkg {
+		if ss.overrideVars == nil {
+			ss.overrideVars = map[string]map[string]*VarDef{}
+		}
+		pk := c.pkgKey(el)
+		if ss.overrideVars[pk] == nil {
+			ss.overrideVars[pk] = map[string]*VarDef{}
+		}
+		ss.overrideVars[pk][clark(vd.name.Space, vd.name.Local)] = vd
 	}
 	for i := len(ss.globals) - 1; i >= 0; i-- {
 		if p := ss.globals[i]; p.name == vd.name {

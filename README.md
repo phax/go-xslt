@@ -65,13 +65,13 @@ same input — confirmed by running the disputed case through a live,
 independent reference processor (SaxonJS), not assumed — rather than an
 engine gap; see `CLAUDE.md` for the specific cases.
 
-Measured 2026-09-20, against these suite commits:
+Measured 2026-10-11, against these suite commits:
 
 | Suite | Source | Commit | Pass rate | Detail |
 |---|---|---|---|---|
-| **XSLT 3.0** — default (basic) processor | [w3c/xslt30-test](https://github.com/w3c/xslt30-test) | `fddf1cf9` (2026-06-10) | **98.8%** (8,037 / 8,138) | by min spec version: 1.0 **100.0%** (1,980/1,980), 2.0 **99.8%** (2,656/2,660), 3.0 **97.2%** (3,396/3,493) |
-| **XSLT 3.0** — combined (`XSLT30_FULL=1`: + streaming + schema-awareness + XSLT 1.0 backwards-compatible processing, see [below](#xslt-30-engine)) | same | same | **98.9%** (11,681 / 11,808) | |
-| **XPath 3.1 / XQuery F&O** (QT3/FOTS) | [w3c/qt3tests](https://github.com/w3c/qt3tests) | `201a6e46` (2026-05-14) | **99.6%** (22,066 / 22,153) | |
+| **XSLT 3.0** — default (basic) processor | [w3c/xslt30-test](https://github.com/w3c/xslt30-test) | `fddf1cf9` (2026-06-10) | **99.9%** (8,126 / 8,138) | by min spec version: 1.0 **100.0%** (1,980/1,980), 2.0 **99.8%** (2,656/2,660), 3.0 **99.8%** (3,485/3,493) |
+| **XSLT 3.0** — combined (`XSLT30_FULL=1`: + streaming + schema-awareness + XSLT 1.0 backwards-compatible processing, see [below](#xslt-30-engine)) | same | same | **99.7%** (11,770 / 11,808) | |
+| **XPath 3.1 / XQuery F&O** (QT3/FOTS) | [w3c/qt3tests](https://github.com/w3c/qt3tests) | `201a6e46` (2026-05-14) | **99.8%** (22,099 / 22,153) | |
 | **XSD 1.0** | [w3c/xsdtests](https://github.com/w3c/xsdtests) | `7bc3365c` (2026-04-01) | **99.99%** (39,346 / 39,351) | 5 residual are suite self-contradictions |
 | **XSD 1.1** | same | same | **99.99%** (41,499 / 41,503) | 4 residual are suite self-contradictions |
 
@@ -80,9 +80,9 @@ out-of-scope territory: JSON pretty-printing (implementation-defined, no
 conformance test requires it — the `json`/`adaptive` output methods
 themselves are fully implemented), broad `xsl:source-document` static
 enforcement beyond the spec's own guaranteed-streamability minimum (measured
-net-negative every time it's been tried), true UCA collation tailoring,
-locale-specific ordinal-word spellout, a live network-dependent assertion or
-two, and a short tail of environment-specific or individually-documented
+net-negative every time it's been tried), UCA `reorder=` script-group
+tailoring, XQuery module loading, the XPath static typing feature, a live
+network-dependent assertion or two, and a short tail of environment-specific or individually-documented
 suite fixture artifacts. (Regex back-references are no longer a gap: a
 dedicated backtracking matcher handles them when RE2 can't, used only for
 patterns that actually need it.)
@@ -218,7 +218,7 @@ map, array, JSON) is implemented on the Go standard library.
 ## XSLT 3.0 engine
 
 By default, the engine runs as a highly conformant XSLT 3.0 **basic
-processor** — 98.8% of the W3C suite, see
+processor** — 99.9% of the W3C suite, see
 [Conformance benchmarks](#conformance-benchmarks). Three of the spec's
 optional, heavyweight conformance features are also implemented (each is a
 substantial capability in its own right, not a stub), but stay **off by

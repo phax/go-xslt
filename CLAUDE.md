@@ -193,8 +193,8 @@ Desktop GUI (**run from `desktop/`**):
   `XSLT30_BYVER=1` for a per-version breakdown; `XSLT30_FULL=1` additionally
   claims streaming + schema-awareness + backwards-compatibility together —
   see below):
-  - **Default (basic processor): 99.8% (8,119/8,138)**. **Combined
-    (`XSLT30_FULL=1`): 99.6% (11,763/11,808)**.
+  - **Default (basic processor): 99.9% (8,126/8,138)**. **Combined
+    (`XSLT30_FULL=1`): 99.7% (11,770/11,808)**.
   - `<test><package role="principal"></test>` catalog entries (347 cases)
     used to be hard-skipped unconditionally; the engine already accepted a
     top-level `xsl:package` as a module root and already fully implemented
@@ -203,7 +203,7 @@ Desktop GUI (**run from `desktop/`**):
     packages are **not** one of the six optional features (schema-awareness,
     serialization, backwards-compatibility, streaming, dynamic evaluation,
     XQuery invocation) — so unskipping them genuinely widens the **default**
-    denominator too, not just the combined one; 8,119 of the 8,138 now pass.
+    denominator too, not just the combined one; 8,126 of the 8,138 now pass.
   - `xsl:expose` is real (`internal/xslt/expose.go`): the §3.5.3.1 precedence
     (explicit name > declared `@visibility` > partial wildcard > `*` >
     private), XTSE0020/3010/3020/3022/3025, implicit modes, and it feeds
@@ -219,14 +219,17 @@ Desktop GUI (**run from `desktop/`**):
     XTSE3088 for `xsl:global-context-item`, and `xsl:original` for
     functions (`originalFuncs`), global variables (`originalVars`) and
     attribute sets (an override REPLACES the set). Package-local declarations (`scope.go`): when more than one package
-    takes part (`multiPkg`), keys, decimal formats and namespace aliases are
-    filed per package, only the principal package's UNNAMED `xsl:output`
-    counts, and the principal's `xsl:output` cannot use a character map of a
-    used package. XTSE3070 covers `as`, parameters (name/tunnel/required/
-    type), context item and function `new-each-time`. Still open:
-    accumulators/private attribute sets/named outputs of the same name in two
-    packages, the `xs:`/result-prefix namespace nodes `use-package-108*`
-    expect, diamond package graphs, per-package `xsl:strip-space`. Abstract components: a top-level package may
+    takes part (`multiPkg`), keys, decimal formats, accumulators, namespace
+    aliases, named `xsl:output` formats and character maps are filed per
+    package, and only the principal package's UNNAMED `xsl:output` counts.
+    Diamond graphs: a package that overrides (or whose used package declares)
+    a global variable sees its own (`overrideVars`/`globalFromUsedPackage`);
+    a used package's globals have no context item. A namespace that is the
+    result of an `xsl:namespace-alias` is not removed by
+    `exclude-result-prefixes`. `fn:function-lookup` inside a used package
+    sees that package's own functions (`ResolveLookupFunction`), unlike a
+    static `f#N` reference. XTSE3070 covers `as`, parameters (name/tunnel/
+    required/type), context item and function `new-each-time`. Abstract components: a top-level package may
     contain none (XTSE3080 — declared abstract, or accepted as abstract and
     not overridden); an abstract component not accepted *as* abstract becomes
     hidden; evaluating an unoverridden abstract attribute set is XTDE3052; a
@@ -248,29 +251,23 @@ Desktop GUI (**run from `desktop/`**):
     file used to say so) — all three were built from scratch and are now
     real, load-bearing features (see their own entries below), not
     conformance-only paper capabilities.
-  - **Permanent residual, default mode** (~101 fails; not winnable without
+  - **Residual, default mode** (12 fails; not winnable without
     disproportionate effort, or genuinely impossible — do not re-attempt
-    without new evidence): the original 11 — network-dependent assertions
-    (`unparsed-text-2002/2003` — proven, not just suspected: the live page
-    content changed since the test was written); XInclude (`base-uri-052`,
-    unimplemented); per-package `xsl:strip-space` scoping (`collection-006`,
-    `document-2401/2402` — needs a "current package" identity threaded
-    through every `document()`/`collection()`/`fn:doc` call site down to the
-    resolver, a large, high-blast-radius change for 3 tests, declined by the
-    user); proven suite self-contradictions (`output-0130/0715`'s stale
-    reference fixtures vs. a live SaxonJS check; `copy-3002`'s own catalog
-    entry says "the test should fail"); `copy-1220/1221`'s
-    ambient-namespace-on-copy gap (the only known fix is measured
-    net-negative, repeatedly) — plus ~10 remaining from the package-entry
-    unskip, all genuine gaps in the current **flattened** package execution
-    model (packages compile and run, but cross-package isolation is only
-    partial): hiding is enforced only at name-resolution points (not for
-    modes, `xsl:override` signature/overridability checks, or transitive
-    hiding through a second used package), decimal-formats/keys/namespace-aliases/
-    character-maps/output scoped per-package rather than merged
-    stylesheet-wide, XTSE3008 (`xsl:import` splicing `xsl:use-package`
-    definitions across a module boundary), global-context-item package
-    scoping, diamond package-version-range resolution.
+    without new evidence): network-dependent assertions (`unparsed-text-2002/
+    2003` — proven, not just suspected: the live page content changed since
+    the test was written); XInclude (`base-uri-052`, unimplemented);
+    per-package `xsl:strip-space` scoping (`collection-006`, `document-2401/
+    2402` — needs a "current package" identity threaded through every
+    `document()`/`collection()`/`fn:doc` call site down to the resolver, a
+    large, high-blast-radius change for 3 tests, declined by the user);
+    proven suite self-contradictions (`output-0130/0715`'s stale reference
+    fixtures vs. a live SaxonJS check; `copy-3002`'s own catalog entry says
+    "the test should fail"); `copy-1220/1221`'s ambient-namespace-on-copy gap
+    (the only known fix is measured net-negative, repeatedly); and
+    `override-as-005` (two PRIVATE attribute sets of one name in two
+    packages: attribute-set references are resolved without their package,
+    so scoping them means threading it through every `use-attribute-sets`
+    site and the streamability analysis).
   - **Additional combined-mode-only residual** (~26 more): `catalog-005/005b`
     (needs a schema in scope the stylesheet never imports — Saxon's own
     global-cache behavior, not what §3.16 provides); `square-array-201`

@@ -252,8 +252,8 @@ func hofFunctionLookup(ctx *Context, args []Object) (Object, error) {
 	// Context.ResolveNamedFunction's own doc comment.
 	// xsl:original is a static-context name of an overriding function body, not
 	// a function function-lookup() can find (function-lookup-006).
-	if ctx.ResolveNamedFunction != nil && ns != "http://www.w3.org/1999/XSL/Transform" {
-		if fn, ok := ctx.ResolveNamedFunction(ns, q.qnv().Local, arity); ok {
+	if lookup := ctx.lookupHook(); lookup != nil && ns != "http://www.w3.org/1999/XSL/Transform" {
+		if fn, ok := lookup(ns, q.qnv().Local, arity); ok {
 			return fn, nil
 		}
 	}
@@ -277,4 +277,12 @@ func hofApply(_ *Context, args []Object) (Object, error) {
 		return nil, fmt.Errorf("err:FOAP0001: arity mismatch: function takes %d arguments but array has %d members", fn.Arity, len(members))
 	}
 	return fn.Call(members)
+}
+
+// lookupHook is the host hook fn:function-lookup consults.
+func (c *Context) lookupHook() func(ns, local string, arity int) (*Function, bool) {
+	if c.ResolveLookupFunction != nil {
+		return c.ResolveLookupFunction
+	}
+	return c.ResolveNamedFunction
 }

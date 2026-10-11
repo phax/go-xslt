@@ -367,6 +367,13 @@ type Stylesheet struct {
 	// originalVars is the same for an overriding global variable/param, read
 	// as $xsl:original.
 	originalVars map[*xmltree.Node]*VarDef
+	// overrideVars: per package, the variables it overrides (diamond graphs).
+	overrideVars map[string]map[string]*VarDef
+	// pkgGlobals: per package, the global variables its own modules declare;
+	// usesPkg: per package, the packages it uses (both for graphs where two
+	// used packages declare the same name, use-package-176).
+	pkgGlobals map[string]map[string]*VarDef
+	usesPkg    map[string][]string
 	// implicitPrivateModes: modes named only by a template's @mode that an
 	// xsl:expose made private (so they are not eligible initial modes).
 	implicitPrivateModes map[string]bool
@@ -842,6 +849,15 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 	}
 	ss.multiPkg = len(distinct) > 1
 	c.multiPkg = ss.multiPkg
+	if ss.multiPkg {
+		ss.usesPkg = map[string][]string{}
+		for using, usedRoots := range c.usesOf {
+			up := pkgKeyOf(true, c.pkgOf, using)
+			for _, ur := range usedRoots {
+				ss.usesPkg[up] = append(ss.usesPkg[up], pkgKeyOf(true, c.pkgOf, ur))
+			}
+		}
+	}
 	ss.principalMods = map[*xmltree.Node]bool{root: true}
 	for _, r := range c.incRoots[root] {
 		ss.principalMods[r] = true
@@ -982,7 +998,7 @@ func validateCharacterMaps(ss *Stylesheet, el *xmltree.Node) error {
 	for key, cm := range ss.charMaps {
 		if v, ok := cm.AttrLocal("use-character-maps"); ok {
 			for _, tok := range strings.Fields(v) {
-				ref := clarkName(resolveQName(cm, tok))
+				ref := scopedName(ss.pkgKey(cm), clarkName(resolveQName(cm, tok)))
 				if _, ok := ss.charMaps[ref]; !ok {
 					return errAt(cm, "err:XTSE1590: xsl:character-map %q references unknown character-map %q", key, tok)
 				}
@@ -1279,7 +1295,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 				// prefix text) so xsl:result-document/@format can resolve it
 				// via a different prefix bound to the same namespace
 				// (result-document-0238).
-				key := clarkName(resolveQName(child, name))
+				key := scopedName(c.pkgKey(child), clarkName(resolveQName(child, name))) // named outputs are local to a package
 				if err := c.checkOutputConflict(key, child); err != nil {
 					return err
 				}
@@ -1288,6 +1304,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 					return err
 				}
 				applyOutput(&o, child)
+				c.scopeCharMapRefs(&o, child)
 				ss.namedOutputs[key] = o
 			} else {
 				if err := c.checkOutputConflict("", child); err != nil {
@@ -1297,6 +1314,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 					return err
 				}
 				applyOutput(&ss.output, child)
+				c.scopeCharMapRefs(&ss.output, child)
 				ss.hasOutputDecl = true
 			}
 		case "param":
@@ -1309,6 +1327,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 			}
 			c.bindSettledStatic(vd, child)
 			c.noteOriginalVar(ss, vd, child)
+			c.notePkgGlobal(ss, vd, child)
 			ss.globals = append(ss.globals, vd)
 		case "variable":
 			vd, err := c.compileVarDef(child, false)
@@ -1323,6 +1342,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 			}
 			c.bindSettledStatic(vd, child)
 			c.noteOriginalVar(ss, vd, child)
+			c.notePkgGlobal(ss, vd, child)
 			ss.globals = append(ss.globals, vd)
 		case "strip-space":
 			if err := addNames(&ss.strip, child, c.importPrec); err != nil {
@@ -1420,7 +1440,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 			ss.decFmtDecls[dk] = append(ss.decFmtDecls[dk], decFmtDecl{prec: c.importPrec, el: child})
 		case "character-map":
 			if name, ok := child.AttrLocal("name"); ok {
-				key := clarkName(resolveQName(child, name))
+				key := scopedName(c.pkgKey(child), clarkName(resolveQName(child, name))) // character maps are local to a package
 				if ss.charMapPrec == nil {
 					ss.charMapPrec = map[string]int{}
 				}
@@ -1463,6 +1483,7 @@ type compiler struct {
 	incRoots map[*xmltree.Node][]*xmltree.Node
 	pkgOf    map[*xmltree.Node]*xmltree.Node
 	multiPkg bool
+	usesOf   map[*xmltree.Node][]*xmltree.Node // package/module root -> the package roots its xsl:use-package elements name
 	// principalRoot is the root of the module being compiled as the principal
 	// package/stylesheet; globalCtxDecls the xsl:global-context-item seen.
 	principalRoot    *xmltree.Node
@@ -3222,7 +3243,13 @@ func ambientResultNamespaces(el *xmltree.Node, already []*xmltree.Node, nsAlias 
 		if uri == "" || uri == NS || have[pfx] {
 			continue
 		}
-		if excl[uri] {
+		aliasTarget := false
+		for _, t := range nsAlias {
+			if t.Space == uri {
+				aliasTarget = true
+			}
+		}
+		if excl[uri] && !aliasTarget {
 			// The used-URI exception only applies when nothing else already
 			// provides this URI a binding (result-document-0217/0401: el's
 			// own literal xmlns="..." already satisfies its name's need, so

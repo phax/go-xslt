@@ -107,7 +107,7 @@ func init() {
 						exp = append(exp, t)
 						continue
 					}
-					exp = append(exp, clarkName(resolveQName(el, t)))
+					exp = append(exp, scopedName(c.pkgKey(el), clarkName(resolveQName(el, t))))
 				}
 				sort.Strings(exp)
 				v = strings.Join(exp, " ")

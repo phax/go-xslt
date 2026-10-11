@@ -222,7 +222,7 @@ func (n *rdResultDocument) rdEffectiveOutput(eng *engine, r rt) (Output, error) 
 			// THIS instruction's own in-scope namespaces, which may bind the
 			// prefix differently than wherever the xsl:output declaration
 			// itself lives (result-document-0238).
-			key := clarkName(resolveQName(n.el, fv))
+			key := scopedName(eng.sheet.pkgKey(n.el), clarkName(resolveQName(n.el, fv)))
 			named, ok := eng.sheet.namedOutputs[key]
 			if !ok {
 				return cfg, errAt(n.el, "err:XTDE1460: no xsl:output declaration named %q", fv)
@@ -255,7 +255,11 @@ func (n *rdResultDocument) rdEffectiveOutput(eng *engine, r rt) (Output, error) 
 	}
 	if len(n.useCMaps) > 0 {
 		// Merges with the @format output's maps; later names win on conflicts.
-		cfg.UseCharacterMaps = append(append([]string{}, cfg.UseCharacterMaps...), n.useCMaps...)
+		cms := append([]string{}, cfg.UseCharacterMaps...)
+		for _, m := range n.useCMaps {
+			cms = append(cms, scopedName(eng.sheet.pkgKey(n.el), m))
+		}
+		cfg.UseCharacterMaps = cms
 	}
 	if n.encoding != "" {
 		cfg.Encoding = n.encoding

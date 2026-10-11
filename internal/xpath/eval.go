@@ -103,6 +103,10 @@ type Context struct {
 	// there, so no ambiguity between a built-in and a user function can
 	// arise.
 	ResolveNamedFunction func(ns, local string, arity int) (*Function, bool)
+	// ResolveLookupFunction, when set, is what fn:function-lookup consults
+	// instead of ResolveNamedFunction (it may see fewer functions: see the XSLT
+	// engine's resolveLookupFunction).
+	ResolveLookupFunction func(ns, local string, arity int) (*Function, bool)
 	// ViaFunctionItem marks a context that was CAPTURED into a function item
 	// by a named function reference, rather than one a direct call sees.
 	// XSLT 3.0 §10.3.6 draws exactly this line for a context-dependent

@@ -111,7 +111,7 @@ func acc2compile(c *compiler, el *xmltree.Node) (*acc2Def, error) {
 	}
 	def := &acc2Def{
 		name:       name,
-		clarkN:     clark(name.Space, name.Local),
+		clarkN:     scopedName(c.pkgKey(el), clark(name.Space, name.Local)), // accumulators are local to a package (scope.go)
 		initial:    initial,
 		el:         el,
 		importPrec: c.importPrec,
@@ -255,7 +255,7 @@ func (eng *engine) acc2lookup(args []xpath.Object, env *evalEnv, after bool) (xp
 	}
 	nameStr := xpath.ToString(args[0])
 	name := resolveQName(env.el, nameStr)
-	clarkN := clark(name.Space, name.Local)
+	clarkN := scopedName(eng.sheet.pkgKey(env.el), clark(name.Space, name.Local))
 
 	def := eng.acc2find(clarkN)
 	if def == nil {

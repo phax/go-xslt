@@ -98,3 +98,47 @@ func (c *compiler) aliasesFor(el *xmltree.Node) map[string]xmltree.Name {
 	a, _ := c.nsAliasTables(el)
 	return a
 }
+
+// notePkgGlobal records a global variable under the package that declares it.
+func (c *compiler) notePkgGlobal(ss *Stylesheet, vd *VarDef, el *xmltree.Node) {
+	if !c.multiPkg {
+		return
+	}
+	if ss.pkgGlobals == nil {
+		ss.pkgGlobals = map[string]map[string]*VarDef{}
+	}
+	pk := c.pkgKey(el)
+	if ss.pkgGlobals[pk] == nil {
+		ss.pkgGlobals[pk] = map[string]*VarDef{}
+	}
+	ss.pkgGlobals[pk][clark(vd.name.Space, vd.name.Local)] = vd
+}
+
+// globalFromUsedPackage finds, for a reference written in package pk to the
+// global key, the declaration in a package pk USES when that is not the global
+// winner (two used packages — or two versions of one — declaring the same name).
+func (ss *Stylesheet) globalFromUsedPackage(pk, key string, winner *VarDef) *VarDef {
+	if own := ss.pkgGlobals[pk][key]; own != nil {
+		return nil // declared here: the ordinary lookup is right
+	}
+	for _, u := range ss.usesPkg[pk] {
+		if vd := ss.pkgGlobals[u][key]; vd != nil && vd != winner {
+			return vd
+		}
+	}
+	return nil
+}
+
+// scopeCharMapRefs qualifies the use-character-maps names an xsl:output just
+// added (those not yet qualified) with the package of the declaring element.
+func (c *compiler) scopeCharMapRefs(o *Output, el *xmltree.Node) {
+	if !c.multiPkg {
+		return
+	}
+	pk := c.pkgKey(el)
+	for i, ref := range o.UseCharacterMaps {
+		if _, name := splitScoped(ref); name == ref { // not qualified yet
+			o.UseCharacterMaps[i] = scopedName(pk, ref)
+		}
+	}
+}
