@@ -2,7 +2,9 @@ package xslt
 
 import (
 	"path/filepath"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 )
@@ -520,7 +522,7 @@ func checkOverrideSignature(d *xmltree.Node, target pkgComponent) error {
 		}
 		return strings.Join(strings.Fields(v), " ")
 	}
-	if a, b := norm(d), norm(target.el); a != b && a != "" && b != "" {
+	if a, b := norm(d), norm(target.el); a != b && a != "" && b != "" && typesDiffer(d, a, target.el, b) {
 		return errAt(d, "err:XTSE3070: overriding %s %q declares as=%q but the overridden component declares as=%q",
 			d.Name.Local, target.name, a, b)
 	}
@@ -685,4 +687,133 @@ func checkTemplateOverrideSignature(d *xmltree.Node, target pkgComponent) error 
 		return errAt(d, "err:XTSE3070: overriding template %q declares a different context item (use/as)", target.name)
 	}
 	return nil
+}
+
+// bothBuiltinTypes reports whether two declared sequence types are written
+// only with built-in names (xs:*), kind tests and item()/node() style tests —
+// the only ones whose textual difference proves a real difference. A type
+// named by a user schema (override-v-005: two union types with the same
+// members) may be equivalent to the other however it is spelled, and this
+// check cannot resolve it, so it stays silent rather than raise XTSE3070
+// wrongly.
+func bothBuiltinTypes(types ...string) bool {
+	for _, t := range types {
+		for _, tok := range typeNameTokens(t) {
+			if !strings.HasPrefix(tok, "xs:") {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// typeNameTokens lists the QNames in a sequence type that are used as type
+// names (a name directly followed by "(" is a kind/item test, not a type).
+func typeNameTokens(t string) []string {
+	var out []string
+	rs := []rune(t)
+	for i := 0; i < len(rs); {
+		r := rs[i]
+		if r == '_' || unicode.IsLetter(r) {
+			j := i
+			for j < len(rs) && (rs[j] == '_' || rs[j] == '-' || rs[j] == '.' || rs[j] == ':' || unicode.IsLetter(rs[j]) || unicode.IsDigit(rs[j])) {
+				j++
+			}
+			if j >= len(rs) || rs[j] != '(' {
+				out = append(out, string(rs[i:j]))
+			}
+			i = j
+			continue
+		}
+		i++
+	}
+	return out
+}
+
+// typesDiffer decides whether two declared types, written at elements ea and
+// eb, are provably different. Built-in types differ when spelled differently;
+// a type from an inline xs:schema (xsl:import-schema) is resolved to the set of
+// built-in types it is a union of, so two differently NAMED unions with the same
+// members are compatible (override-v-005, f-031) and unions with different
+// members are not (override-v-006). Anything that cannot be resolved this way
+// is given the benefit of the doubt.
+func typesDiffer(ea *xmltree.Node, a string, eb *xmltree.Node, b string) bool {
+	if bothBuiltinTypes(a, b) {
+		return true
+	}
+	ra, oka := resolveTypeSet(ea, a)
+	rb, okb := resolveTypeSet(eb, b)
+	return oka && okb && ra != rb
+}
+
+// resolveTypeSet maps a sequence type to a canonical string in which a user
+// union type is replaced by its sorted, flattened member list.
+func resolveTypeSet(el *xmltree.Node, t string) (string, bool) {
+	t = strings.TrimSpace(t)
+	occ := ""
+	if n := len(t); n > 0 && strings.ContainsRune("?*+", rune(t[n-1])) {
+		occ, t = t[n-1:], strings.TrimSpace(t[:n-1])
+	}
+	if strings.HasPrefix(t, "xs:") {
+		return t + occ, true
+	}
+	if strings.ContainsAny(t, "() |,") {
+		return "", false
+	}
+	members, ok := inlineUnionMembers(el, t, 0)
+	if !ok {
+		return "", false
+	}
+	sort.Strings(members)
+	return "union(" + strings.Join(members, ",") + ")" + occ, true
+}
+
+// inlineUnionMembers finds the xs:simpleType named name among the inline
+// schemas visible from el and flattens its xs:union memberTypes to built-in
+// type names. ok is false when it is not found or is not such a union.
+func inlineUnionMembers(el *xmltree.Node, name string, depth int) ([]string, bool) {
+	if depth > 8 {
+		return nil, false
+	}
+	local := name
+	if i := strings.IndexByte(name, ':'); i >= 0 {
+		local = name[i+1:]
+	}
+	root := topElement(el)
+	var decl *xmltree.Node
+	var find func(n *xmltree.Node)
+	find = func(n *xmltree.Node) {
+		for _, ch := range elementChildren(n) {
+			if ch.Name.Space == xsdNS && ch.Name.Local == "simpleType" {
+				if v, _ := ch.AttrLocal("name"); v == local {
+					decl = ch
+				}
+			}
+			if decl == nil && (ch.Name.Local == "import-schema" || ch.Name.Local == "schema") {
+				find(ch)
+			}
+		}
+	}
+	find(root)
+	if decl == nil {
+		return nil, false
+	}
+	for _, ch := range elementChildren(decl) {
+		if ch.Name.Space == xsdNS && ch.Name.Local == "union" {
+			var out []string
+			for _, m := range strings.Fields(attrOr(ch, "memberTypes", "")) {
+				if strings.HasPrefix(m, "xs:") {
+					out = append(out, m)
+					continue
+				}
+				sub, ok := inlineUnionMembers(el, m, depth+1)
+				if !ok {
+					return nil, false
+				}
+				out = append(out, sub...)
+			}
+			return out, len(out) > 0
+		}
+	}
+	return nil, false
 }

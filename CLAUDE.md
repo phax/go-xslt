@@ -194,7 +194,7 @@ Desktop GUI (**run from `desktop/`**):
   claims streaming + schema-awareness + backwards-compatibility together —
   see below):
   - **Default (basic processor): 99.9% (8,126/8,138)**. **Combined
-    (`XSLT30_FULL=1`): 99.7% (11,770/11,808)**.
+    (`XSLT30_FULL=1`): 99.7% (11,774/11,808)**.
   - `<test><package role="principal"></test>` catalog entries (347 cases)
     used to be hard-skipped unconditionally; the engine already accepted a
     top-level `xsl:package` as a module root and already fully implemented

@@ -3900,7 +3900,7 @@ func (eng *engine) restrictAccumulators(root, el *xmltree.Node) func() {
 				return func() {}
 			}
 			qn := resolveQName(el, tok)
-			set[clark(qn.Space, qn.Local)] = true
+			set[scopedName(eng.sheet.pkgKey(el), clark(qn.Space, qn.Local))] = true
 		}
 	}
 	if eng.accApplicable == nil {

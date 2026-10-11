@@ -859,6 +859,17 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 			// node).
 			srcSelect = strings.TrimSpace(s.Select)
 			srcURI = ""
+			// Inline content has the base URI of the file it is written in: a
+			// test-set-local environment's is the test-set file itself
+			// (backwards-041 asks base-uri(//item) for it).
+			if env.base == "" {
+				cand := filepath.Join(dir, "_"+set.Name+"-test-set.xml")
+				if abs, aerr := filepath.Abs(cand); aerr == nil {
+					if _, serr := os.Stat(abs); serr == nil {
+						srcURI = "file://" + abs
+					}
+				}
+			}
 		} else if s.File != "" {
 			p := filepath.Join(srcBase, s.File)
 			if sb, err := os.ReadFile(p); err == nil {

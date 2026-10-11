@@ -183,7 +183,18 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 			// timezone offsets, or NaN, would (mis)match by accident of spelling
 			// (key-069/070); collURI additionally re-canonicalizes string-family
 			// keys per the key's @collation/@default-collation (collations-0105).
+			bc := eng.bc10At(env.el)
 			for _, it := range xpath.Items(argN(args, 1)) {
+				if at, ok := it.(*xpath.Atomic); ok && bc && at.IsNumeric() {
+					// XSLT 1.0 key(): the search value is converted with
+					// string() — a number is XPath 1.0's "1", not the decimal's
+					// "1.0" — and compared as text (backwards-038).
+					s := xpath.ToString(xpath.ToNumber(at))
+					// Both spellings: an index entry built from a NUMBER (use="1")
+					// carries the numeric key, one built from text the string key
+					// (backwards-043 vs 038).
+					values = append(values, canonKeyString(xpath.KeyString(xpath.NewUntyped(s)), collURI))
+				}
 				values = append(values, canonKeyString(xpath.KeyString(it), collURI))
 			}
 		}
