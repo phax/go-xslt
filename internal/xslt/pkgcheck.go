@@ -107,6 +107,10 @@ func componentOf(el *xmltree.Node) (pkgComponent, bool) {
 		// The unnamed mode is always private and cannot be exposed.
 		comp.visibility = "private"
 	}
+	if el.Name.Local == "param" {
+		// A global xsl:param has no @visibility; it is always public.
+		comp.visibility = "public"
+	}
 	return comp, true
 }
 
@@ -455,6 +459,18 @@ func checkOverrideDecl(d *xmltree.Node, byName map[string]pkgComponent, overridd
 		// component.
 		if err := checkOverrideRuleMode(d); err != nil {
 			return err
+		}
+		// XTSE3060: the mode a template rule is added to must be public or
+		// abstract in the used package — not final, not private (byName holds
+		// only what the used package exposes at all).
+		for _, tok := range strings.Fields(attrOr(d, "mode", "")) {
+			if strings.HasPrefix(tok, "#") {
+				continue
+			}
+			sym := "mode#" + clarkName(resolveQName(d, tok))
+			if target, found := byName[sym]; !found || (target.visibility != "public" && target.visibility != "abstract") {
+				return errAt(d, "err:XTSE3060: mode %q cannot be overridden: it is not public or abstract in the used package", tok)
+			}
 		}
 		return checkNoApplyImports(d)
 	}

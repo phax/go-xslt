@@ -891,6 +891,16 @@ func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string,
 	if ss.globalCtxUse == "required" && ctxNode == nil {
 		return nil, nil, fmt.Errorf("err:XTDE3086: the stylesheet requires a global context item, but none was supplied")
 	}
+	if ss.globalCtxUse == "absent" && ctxNode != nil {
+		return nil, nil, fmt.Errorf("err:XTSE3088: the stylesheet declares use=\"absent\" for the global context item, but one was supplied")
+	}
+	if ss.globalCtxAs != "" && ctxNode != nil {
+		if st, perr := xpath.ParseSeqTypeString(ss.globalCtxAs); perr == nil {
+			if !xpath.MatchesSeqTypeCtx(st, ctxNode, asTypeCtx(ss.globalCtxEl)) {
+				return nil, nil, fmt.Errorf("err:XTTE0590: the global context item does not match the declared type %s", ss.globalCtxAs)
+			}
+		}
+	}
 	r := rt{node: ctxNode, pos: 1, size: 1}
 	resultRoot := &xmltree.Node{Kind: xmltree.KindDocument}
 	// An item-separator in force means sequence normalization must keep the
@@ -1037,7 +1047,9 @@ entryKind:
 			// built-in rule) with the token left unresolved.
 			e.Mode = ""
 		}
-		if callerNamedMode && e.Mode != "" {
+		// The package's own default mode is always an eligible initial mode,
+		// whatever its visibility (mode-1705a, package-001q).
+		if callerNamedMode && e.Mode != "" && e.Mode != ss.defaultMode {
 			// XTDE0045 also covers a NAMED mode the caller can reference but is
 			// not allowed to ENTER: XSLT 3.0's xsl:mode/@visibility table states
 			// "A named mode is not eligible to be used as the initial mode if
@@ -1342,6 +1354,7 @@ type engine struct {
 	globalDefs     map[string]*VarDef                         // global declarations for on-demand evaluation
 	globalBusy     map[string]bool                            // globals being evaluated (circularity -> XTDE0640)
 	paramOverrides map[string]string                          // externally-supplied top-level param values, keyed by local name
+	origGlobals    map[*VarDef]xpath.Object                   // cached values of overridden globals read as $xsl:original
 	paramSelects   map[string]string                          // externally-supplied top-level param values as XPath expressions (Entry.ParamSelects)
 	evaluateDepth  int                                        // >0 while evaluating an xsl:evaluate @xpath expression
 	pendingErr     error                                      // error raised in a context without an error channel
@@ -1799,6 +1812,24 @@ func (e *evalEnv) ResolveVar(prefix, local string) (xpath.Object, bool) {
 	} else if prefix != "" {
 		uri, _ = e.el.LookupPrefix(prefix)
 	}
+	if uri == NS && local == "original" {
+		if vd := e.eng.sheet.originalVar(e.el); vd != nil {
+			if v, ok := e.eng.origGlobals[vd]; ok {
+				return v, true
+			}
+			// A key of its own: the overriding declaration of the same name is
+			// still being evaluated, which is not a circular reference.
+			v, err := e.eng.evalGlobal(fmt.Sprintf("\x00original:%p", vd), vd)
+			if err != nil {
+				return nil, false
+			}
+			if e.eng.origGlobals == nil {
+				e.eng.origGlobals = map[*VarDef]xpath.Object{}
+			}
+			e.eng.origGlobals[vd] = v
+			return v, true
+		}
+	}
 	if e.eng.sheet.hiddenRef(e.el, "variable#"+clark(uri, local)) {
 		return nil, false // hidden by the used package: undeclared here (XPST0008)
 	}
@@ -1918,8 +1949,16 @@ func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOver
 func (eng *engine) resolveNamedFunction(env *evalEnv) func(ns, local string, arity int) (*xpath.Function, bool) {
 	return func(ns, local string, arity int) (*xpath.Function, bool) {
 		fd, ok := eng.sheet.functions[funcKey(ns, local, arity)]
+		if ns == NS && local == "original" {
+			if orig := eng.sheet.originalFunc(env.el, arity); orig != nil {
+				fd, ok = orig, true
+			}
+		}
 		if !ok {
 			return nil, false
+		}
+		if eng.sheet.hiddenRef(env.el, "function#"+clark(ns, local)+"#"+itoa(arity)) {
+			return nil, false // function-lookup() cannot see what the used package hides
 		}
 		fn := &xpath.Function{Arity: arity, NS: ns, Name: local, Call: func(args []xpath.Object) (xpath.Object, error) {
 			v, _, err := eng.callUserFunc(fd, args, env)

@@ -47,6 +47,14 @@ func init() {
 		// the same namespace URI still finds it (attribute-set-1806, mirrors
 		// key-013's xsl:key name resolution).
 		key := clarkName(resolveQName(el, name))
+		if c.overrideNodes[el] {
+			// An override REPLACES the used package's set (it is not merged
+			// with it); the replaced declarations stay reachable as
+			// xsl:original from this declaration's use-attribute-sets.
+			decl.original = ss.attrSets[key]
+			ss.attrSets[key] = []attrSetDecl{decl}
+			return nil
+		}
 		ss.attrSets[key] = append(ss.attrSets[key], decl)
 		return nil
 	}
@@ -56,11 +64,37 @@ func init() {
 	// vocabulary is validated in validate.go; all that is recorded here is
 	// @use, which Transform enforces (XTDE3086) before running anything.
 	declRegistry["global-context-item"] = func(c *compiler, ss *Stylesheet, el *xmltree.Node) error {
+		use := "optional"
 		if v, ok := el.AttrLocal("use"); ok {
-			ss.globalCtxUse = strings.TrimSpace(v)
-		} else if ss.globalCtxUse == "" {
-			ss.globalCtxUse = "optional"
+			use = strings.TrimSpace(v)
 		}
+		as := strings.Join(strings.Fields(attrOr(el, "as", "")), " ")
+		top := el
+		for top.Parent != nil && top.Parent.Kind == xmltree.KindElement {
+			top = top.Parent
+		}
+		if !c.inPrincipalPackage(top) {
+			// A declaration in a library package is ignored — unless it
+			// requires a context item, which a library cannot be given.
+			if use == "required" {
+				return errAt(el, "err:XTTE0590: a library package declares xsl:global-context-item use=\"required\"")
+			}
+			return nil
+		}
+		// XTSE3087: at most one per module, and the modules of one package may
+		// only repeat the declaration consistently.
+		for _, prev := range c.globalCtxDecls {
+			if prev.top == top {
+				return errAt(el, "err:XTSE3087: more than one xsl:global-context-item in a stylesheet module")
+			}
+			if prev.use != use || strings.ReplaceAll(prev.as, " ", "") != strings.ReplaceAll(as, " ", "") {
+				return errAt(el, "err:XTSE3087: inconsistent xsl:global-context-item declarations in the modules of one package")
+			}
+		}
+		c.globalCtxDecls = append(c.globalCtxDecls, globalCtxDecl{top: top, use: use, as: as})
+		ss.globalCtxUse = use
+		ss.globalCtxAs = as
+		ss.globalCtxEl = el
 		return nil
 	}
 }
@@ -76,6 +110,22 @@ func (eng *engine) applyAttrSets(names []string, r rt, el *xmltree.Node) error {
 	eng.scopes = nil
 	defer func() { eng.scopes = prevScopes }()
 	return eng.applyAttrSetsRec(names, r, el, map[string]bool{})
+}
+
+// applyAttrDecls runs attribute-set declarations as units (each one's own
+// use-attribute-sets first, then its body), for xsl:original.
+func (eng *engine) applyAttrDecls(decls []attrSetDecl, r rt, el *xmltree.Node, active map[string]bool) error {
+	for _, d := range decls {
+		if len(d.uses) > 0 {
+			if err := eng.applyAttrSetsRec(d.uses, r, el, active); err != nil {
+				return err
+			}
+		}
+		if err := eng.execSequence(d.body, r, el); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (eng *engine) applyAttrSetsRec(names []string, r rt, el *xmltree.Node, active map[string]bool) error {
@@ -96,7 +146,18 @@ func (eng *engine) applyAttrSetsRec(names []string, r rt, el *xmltree.Node, acti
 		// declaration's body (attribute-set-1512).
 		for _, decl := range decls {
 			if len(decl.uses) > 0 {
-				if err := eng.applyAttrSetsRec(decl.uses, r, el, active); err != nil {
+				var plain []string
+				for _, u := range decl.uses {
+					if u == clark(NS, "original") {
+						// Expand what this override replaced, as units.
+						if err := eng.applyAttrDecls(decl.original, r, el, active); err != nil {
+							return err
+						}
+						continue
+					}
+					plain = append(plain, u)
+				}
+				if err := eng.applyAttrSetsRec(plain, r, el, active); err != nil {
 					return err
 				}
 			}
@@ -159,6 +220,9 @@ func checkAttributeSetRefs(ss *Stylesheet, mods []modChildren) error {
 				streamable = has && isXSLTTrue(strings.TrimSpace(sv))
 			}
 			for _, name := range resolveAttrSetNames(el, strings.Fields(v)) {
+				if name == clark(NS, "original") && el.Name.Space == NS && el.Name.Local == "attribute-set" {
+					continue // xsl:original in an overriding set: expanded at run time
+				}
 				decls, exists := ss.attrSets[name]
 				if exists && ss.hiddenRef(el, "attribute-set#"+name) {
 					exists = false // hidden by the used package

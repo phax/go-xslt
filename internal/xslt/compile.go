@@ -282,6 +282,8 @@ type Stylesheet struct {
 	stripInputTypes     bool
 	namedOutputs        map[string]Output // named xsl:output declarations (for xsl:result-document/@format)
 	globalCtxUse        string            // xsl:global-context-item/@use ("" = no declaration)
+	globalCtxAs         string            // xsl:global-context-item/@as ("" = none)
+	globalCtxEl         *xmltree.Node     // the declaration, for resolving @as
 	hasXPathDefaultNS   bool              // any module uses xpath-default-namespace (skip the walk otherwise)
 	hasXMLBase          bool              // any module uses xml:base
 	hasDefaultCollation bool              // any module uses [xsl:]default-collation (skip the walk otherwise)
@@ -347,6 +349,12 @@ type Stylesheet struct {
 	// hiddenAt: per package manifest root, the symbolic names of used-package
 	// components that code in that package may not reference (expose.go).
 	hiddenAt map[*xmltree.Node]map[string]bool
+	// originalFuncs maps an overriding xsl:function declaration to the function
+	// it overrides, for xsl:original() calls written inside it.
+	originalFuncs map[*xmltree.Node]*FuncDef
+	// originalVars is the same for an overriding global variable/param, read
+	// as $xsl:original.
+	originalVars map[*xmltree.Node]*VarDef
 	// implicitPrivateModes: modes named only by a template's @mode that an
 	// xsl:expose made private (so they are not eligible initial modes).
 	implicitPrivateModes map[string]bool
@@ -364,6 +372,10 @@ type attrSetDecl struct {
 	// streamable records the declaration's own streamable="yes", which
 	// XTSE0730 makes binding on every set it references.
 	streamable bool
+	// original is what this declaration REPLACED when it is an xsl:override of
+	// a used package's attribute set; use-attribute-sets="xsl:original"
+	// expands to it (XSLT 3.0 §3.6.3.2).
+	original []attrSetDecl
 }
 
 // KeyDef is a compiled xsl:key declaration. Its value is produced either by a
@@ -807,6 +819,7 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 		return nil, err
 	}
 	ss.hiddenAt = c.hiddenAt
+	c.principalRoot = root
 	// Shadow attributes ("_select" etc — resolveShadowAttrs' own doc comment
 	// carries the full rationale) are resolved here: every module's static
 	// params (c.staticParams) are now fully populated (gatherModules calls
@@ -1253,6 +1266,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 				return err
 			}
 			c.bindSettledStatic(vd, child)
+			c.noteOriginalVar(ss, vd, child)
 			ss.globals = append(ss.globals, vd)
 		case "variable":
 			vd, err := c.compileVarDef(child, false)
@@ -1266,6 +1280,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 				return err
 			}
 			c.bindSettledStatic(vd, child)
+			c.noteOriginalVar(ss, vd, child)
 			ss.globals = append(ss.globals, vd)
 		case "strip-space":
 			if err := addNames(&ss.strip, child, c.importPrec); err != nil {
@@ -1294,6 +1309,15 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 			key := funcKey(fd.name.Space, fd.name.Local, len(fd.params))
 			if prev, ok := ss.functions[key]; ok && prev.importPrec == fd.importPrec {
 				return errAt(child, "err:XTSE0770: duplicate function %s#%d at the same import precedence", fd.name.Local, len(fd.params))
+			}
+			// An xsl:override of a used package's function keeps the function it
+			// replaces reachable as xsl:original(...) from inside its own body
+			// (XSLT 3.0 §3.6.3.2); see originalFunc.
+			if prev, ok := ss.functions[key]; ok && c.overrideNodes[child] {
+				if ss.originalFuncs == nil {
+					ss.originalFuncs = map[*xmltree.Node]*FuncDef{}
+				}
+				ss.originalFuncs[child] = prev
 			}
 			// A one-argument stylesheet function must not take the name of a
 			// CONSTRUCTOR FUNCTION either: XPath 3.1 §3.14.4 gives every
@@ -1393,6 +1417,10 @@ type compiler struct {
 	hiddenAt map[*xmltree.Node]map[string]bool
 	// incRoots: the included/imported module roots of each package module root.
 	incRoots map[*xmltree.Node][]*xmltree.Node
+	// principalRoot is the root of the module being compiled as the principal
+	// package/stylesheet; globalCtxDecls the xsl:global-context-item seen.
+	principalRoot  *xmltree.Node
+	globalCtxDecls []globalCtxDecl
 	// staticDecls records the effective binding of each static variable/param
 	// established by the cross-module tree-order pass (staticdecl.go), with
 	// the import precedence that set it. A name present here is already

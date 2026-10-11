@@ -60,6 +60,11 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 			// function via Q{http://app.com/}count-elements).
 			uri = prefix
 		}
+		if uri == NS && local == "original" {
+			if fd := eng.sheet.originalFunc(env.el, len(args)); fd != nil {
+				return eng.callUserFunc(fd, args, env)
+			}
+		}
 		if fd, ok := eng.sheet.functions[funcKey(uri, local, len(args))]; ok {
 			if eng.sheet.hiddenRef(env.el, "function#"+clark(uri, local)+"#"+itoa(len(args))) {
 				return nil, false, nil // hidden by the used package: undeclared here (XPST0017)

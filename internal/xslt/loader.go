@@ -122,6 +122,19 @@ func (c *compiler) gatherModules(root *xmltree.Node, baseDir string, seen map[st
 			// An included/imported module is part of THIS package: what its
 			// own xsl:use-package elements hide counts for the whole package,
 			// and the hiding applies to code written in that module too.
+			if err == nil && child.Name.Local == "import" {
+				// XSLT 3.0 §3.5: an xsl:use-package is only usable in the
+				// package it is written in (or modules it includes); reaching
+				// one through xsl:import would make the used package's
+				// components visible in a way the packaging rules forbid.
+				for _, r := range append([]*xmltree.Node{subRoot}, c.incRoots[subRoot]...) {
+					for _, ch := range elementChildren(r) {
+						if ch.Name.Space == NS && ch.Name.Local == "use-package" {
+							return nil, errAt(child, "err:XTSE3008: the module imported here contains an xsl:use-package; use xsl:include to bring one in")
+						}
+					}
+				}
+			}
 			incRoots = append(incRoots, subRoot)
 			incRoots = append(incRoots, c.incRoots[subRoot]...)
 			c.useVis = mergeUseVis(c.useVis, root, subRoot)
@@ -159,7 +172,9 @@ func (c *compiler) gatherModules(root *xmltree.Node, baseDir string, seen map[st
 		c.incRoots = map[*xmltree.Node][]*xmltree.Node{}
 	}
 	c.incRoots[root] = incRoots
-	c.finishHidden(root, own, incRoots)
+	if err := c.finishHidden(root, own, incRoots); err != nil {
+		return nil, err
+	}
 	// This module sits above everything gathered so far, all of which it
 	// imported (directly, or indirectly through an xsl:include).
 	mods = append(mods, modChildren{children: own, baseDir: baseDir, importLo: 0})

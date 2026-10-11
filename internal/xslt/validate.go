@@ -546,7 +546,7 @@ var validTopLevelDecls = map[string]bool{
 var vAllowedParents = map[string]map[string]bool{
 	"sort":                   {"for-each": true, "for-each-group": true, "apply-templates": true, "perform-sort": true},
 	"with-param":             {"apply-templates": true, "call-template": true, "apply-imports": true, "next-match": true, "next-iteration": true, "evaluate": true},
-	"param":                  {"stylesheet": true, "transform": true, "package": true, "template": true, "function": true, "iterate": true},
+	"param":                  {"stylesheet": true, "transform": true, "package": true, "template": true, "function": true, "iterate": true, "override": true},
 	"when":                   {"choose": true},
 	"otherwise":              {"choose": true},
 	"matching-substring":     {"analyze-string": true},

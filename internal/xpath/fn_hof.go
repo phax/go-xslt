@@ -250,7 +250,9 @@ func hofFunctionLookup(ctx *Context, args []Object) (Object, error) {
 	// The built-in F&O catalog has no match — give the host (the XSLT
 	// engine, for a user-declared xsl:function) a chance, via
 	// Context.ResolveNamedFunction's own doc comment.
-	if ctx.ResolveNamedFunction != nil {
+	// xsl:original is a static-context name of an overriding function body, not
+	// a function function-lookup() can find (function-lookup-006).
+	if ctx.ResolveNamedFunction != nil && ns != "http://www.w3.org/1999/XSL/Transform" {
 		if fn, ok := ctx.ResolveNamedFunction(ns, q.qnv().Local, arity); ok {
 			return fn, nil
 		}

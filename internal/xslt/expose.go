@@ -383,10 +383,10 @@ func (c *compiler) noteUsedVisibility(use, usedRoot *xmltree.Node, exports []pkg
 // hidden set: a name is hidden unless some used package makes it visible or the
 // using package declares a component of that name itself (then the reference
 // means that one).
-func (c *compiler) finishHidden(root *xmltree.Node, own, incRoots []*xmltree.Node) {
+func (c *compiler) finishHidden(root *xmltree.Node, own, incRoots []*xmltree.Node) error {
 	infos := c.useVis[root]
 	if len(infos) == 0 {
-		return
+		return nil
 	}
 	ownDeclared := map[string]bool{}
 	for _, ch := range own {
@@ -398,6 +398,30 @@ func (c *compiler) finishHidden(root *xmltree.Node, own, incRoots []*xmltree.Nod
 	for _, uv := range infos {
 		for sym := range uv.visible {
 			visible[sym] = true
+		}
+	}
+	// XTSE3050: a component this package declares OUTSIDE xsl:override may not
+	// have the symbolic name of a component it accepts from a used package —
+	// overriding is only done with xsl:override. A template rule joins a mode
+	// the same way (override-m-018).
+	for _, ch := range own {
+		if c.overrideNodes[ch] {
+			continue
+		}
+		if comp, ok := componentOf(ch); ok && ch.Name.Local != "param" && visible[comp.symbolic()] {
+			return errAt(ch, "err:XTSE3050: %s %q is accepted from a used package and cannot be redeclared outside xsl:override", comp.kind, comp.name)
+		}
+		if ch.Name.Space == NS && ch.Name.Local == "template" {
+			if _, hasMatch := ch.AttrLocal("match"); hasMatch {
+				for _, tok := range strings.Fields(attrOr(ch, "mode", "")) {
+					if tok == "#all" || tok == "#default" || tok == "#unnamed" || tok == "#current" {
+						continue
+					}
+					if visible["mode#"+clarkName(resolveQName(ch, tok))] {
+						return errAt(ch, "err:XTSE3050: mode %q comes from a used package; template rules are added to it with xsl:override", tok)
+					}
+				}
+			}
 		}
 	}
 	final := map[string]bool{}
@@ -415,7 +439,7 @@ func (c *compiler) finishHidden(root *xmltree.Node, own, incRoots []*xmltree.Nod
 		for _, r := range incRoots {
 			delete(c.hiddenAt, r)
 		}
-		return
+		return nil
 	}
 	if c.hiddenAt == nil {
 		c.hiddenAt = map[*xmltree.Node]map[string]bool{}
@@ -424,6 +448,7 @@ func (c *compiler) finishHidden(root *xmltree.Node, own, incRoots []*xmltree.Nod
 	for _, r := range incRoots {
 		c.hiddenAt[r] = final
 	}
+	return nil
 }
 
 // mergeUseVis folds the per-use-package visibility recorded for an included or
@@ -448,4 +473,76 @@ func (ss *Stylesheet) hiddenRef(el *xmltree.Node, sym string) bool {
 		root = root.Parent
 	}
 	return ss.hiddenAt[root][sym]
+}
+
+// globalCtxDecl is one xsl:global-context-item seen while compiling the
+// principal package: the module it sits in and what it says.
+type globalCtxDecl struct {
+	top     *xmltree.Node
+	use, as string
+}
+
+// inPrincipalPackage reports whether the module whose root element is top is
+// part of the principal package (the root module or one it includes/imports),
+// as opposed to a used library package.
+func (c *compiler) inPrincipalPackage(top *xmltree.Node) bool {
+	if c.principalRoot == nil || top == c.principalRoot {
+		return true
+	}
+	for _, r := range c.incRoots[c.principalRoot] {
+		if r == top {
+			return true
+		}
+	}
+	return false
+}
+
+// originalFunc resolves xsl:original(...) written at el: the function that the
+// enclosing overriding xsl:function replaces, or nil when el is not inside one.
+func (ss *Stylesheet) originalFunc(el *xmltree.Node, arity int) *FuncDef {
+	if len(ss.originalFuncs) == 0 {
+		return nil
+	}
+	for n := el; n != nil; n = n.Parent {
+		if n.Kind == xmltree.KindElement && n.Name.Space == NS && n.Name.Local == "function" {
+			if fd := ss.originalFuncs[n]; fd != nil && len(fd.params) == arity {
+				return fd
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// noteOriginalVar records, for an xsl:override of a global variable/param, the
+// declaration it replaces (the latest earlier one of the same name).
+func (c *compiler) noteOriginalVar(ss *Stylesheet, vd *VarDef, el *xmltree.Node) {
+	if !c.overrideNodes[el] {
+		return
+	}
+	for i := len(ss.globals) - 1; i >= 0; i-- {
+		if p := ss.globals[i]; p.name == vd.name {
+			if ss.originalVars == nil {
+				ss.originalVars = map[*xmltree.Node]*VarDef{}
+			}
+			ss.originalVars[el] = p
+			return
+		}
+	}
+}
+
+// originalVar resolves $xsl:original written at el: the global variable the
+// enclosing overriding declaration replaces.
+func (ss *Stylesheet) originalVar(el *xmltree.Node) *VarDef {
+	if len(ss.originalVars) == 0 {
+		return nil
+	}
+	for n := el; n != nil; n = n.Parent {
+		if n.Kind == xmltree.KindElement && n.Name.Space == NS && (n.Name.Local == "variable" || n.Name.Local == "param") {
+			if vd := ss.originalVars[n]; vd != nil {
+				return vd
+			}
+		}
+	}
+	return nil
 }
