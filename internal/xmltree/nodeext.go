@@ -135,6 +135,14 @@ type nodeExt struct {
 	// preserve the source document's unparsed entities.
 	Unparsed map[string]UnparsedEntity
 
+	// NS holds the namespace nodes DECLARED on this element. Declarations sit
+	// almost entirely on the document element (a UBL invoice has two, on the
+	// root, and ~240,000 elements that declare none), so keeping a 24-byte
+	// slice header for them in every node of every tree — text nodes and
+	// attributes included — was the cheapest remaining field to take out of
+	// the hot struct. Read through NSDecls, written through AddNS/SetNSDecls.
+	NS []*Node
+
 	Raw    bool // text node whose value bypasses output escaping (disable-output-escaping)
 	Atomic bool // text node created from an atomic value; adjacent atomics get a space separator
 
@@ -387,3 +395,43 @@ func (n *Node) Ephemeral() bool {
 	return n.extPtr.Ephemeral
 }
 func (n *Node) SetEphemeral(v bool) { n.ext().Ephemeral = v }
+
+// NSDecls returns the namespace nodes declared on this element (nil for the
+// overwhelmingly common element that declares none). The returned slice is the
+// node's own storage: read it, don't append to it — use AddNS.
+func (n *Node) NSDecls() []*Node {
+	if n.extPtr == nil {
+		return nil
+	}
+	return n.extPtr.NS
+}
+
+// AddNS appends namespace nodes to this element's declarations. It does not
+// set the nodes' Parent; callers that need it set it themselves, as they did
+// when they appended to the field directly.
+func (n *Node) AddNS(ns ...*Node) {
+	if len(ns) == 0 {
+		return
+	}
+	e := n.ext()
+	e.NS = append(e.NS, ns...)
+}
+
+// SetNSDecls replaces this element's declared namespace nodes.
+func (n *Node) SetNSDecls(v []*Node) {
+	if v == nil && n.extPtr == nil {
+		return
+	}
+	n.ext().NS = v
+}
+
+// CloneExt gives n its own copy of its rarely-used side struct. It exists for
+// the one idiom that would otherwise alias it: a struct copy (cp := *n), which
+// duplicates extPtr and so would let cp's later AddNS/Set* calls mutate n.
+func (n *Node) CloneExt() {
+	if n.extPtr == nil {
+		return
+	}
+	c := *n.extPtr
+	n.extPtr = &c
+}

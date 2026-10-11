@@ -59,7 +59,7 @@ func (e *CompileError) Error() string { return e.Msg }
 func errAt(el *xmltree.Node, format string, args ...any) *CompileError {
 	e := &CompileError{Msg: fmt.Sprintf(format, args...)}
 	if el != nil {
-		e.Line, e.Col = el.Line, el.Col
+		e.Line, e.Col = int(el.Line), int(el.Col)
 	}
 	return e
 }
@@ -3138,7 +3138,7 @@ func ambientResultNamespaces(el *xmltree.Node, already []*xmltree.Node, nsAlias 
 
 func (c *compiler) compileLiteralElement(el *xmltree.Node) (instruction, error) {
 	name := el.Name
-	nsNodes := el.NS
+	nsNodes := el.NSDecls()
 	if alias, ok := c.nsAlias[name.Space]; ok {
 		name = xmltree.Name{Local: name.Local, Space: alias.Space, Prefix: alias.Prefix}
 	}
@@ -3550,7 +3550,7 @@ func noInheritNamespaces(el *xmltree.Node) bool {
 // names — actually requires; every other declaration it carried is dropped
 // (copy-0614/0615/0622/0623: an unused "s" prefix must not survive the copy).
 func pruneCopiedNamespaces(n *xmltree.Node) {
-	if n.Kind == xmltree.KindElement && len(n.NS) > 0 {
+	if n.Kind == xmltree.KindElement && len(n.NSDecls()) > 0 {
 		need := map[string]bool{}
 		if n.Name.Space != "" {
 			need[n.Name.Space] = true
@@ -3570,7 +3570,7 @@ func pruneCopiedNamespaces(n *xmltree.Node) {
 				return
 			}
 			var fallback *xmltree.Node
-			for _, ns := range n.NS {
+			for _, ns := range n.NSDecls() {
 				if ns.Value != name.Space {
 					continue
 				}
@@ -3592,13 +3592,13 @@ func pruneCopiedNamespaces(n *xmltree.Node) {
 		for _, a := range n.Attrs {
 			pick(a.Name)
 		}
-		kept := n.NS[:0]
-		for _, ns := range n.NS {
+		kept := n.NSDecls()[:0]
+		for _, ns := range n.NSDecls() {
 			if keep[ns] {
 				kept = append(kept, ns)
 			}
 		}
-		n.NS = kept
+		n.SetNSDecls(kept)
 		// Namespace fixup (XSLT 3.0 §5.7.3): whatever the copy's own
 		// declarations happened to cover, the copy must still END UP with a
 		// binding for every prefix its name and its attribute names use. A
@@ -3625,13 +3625,13 @@ func addFixup(n *xmltree.Node, name xmltree.Name, need map[string]bool) {
 	if name.Space == "" || !need[name.Space] {
 		return
 	}
-	for _, ns := range n.NS {
+	for _, ns := range n.NSDecls() {
 		if ns.Name.Local == name.Prefix {
 			return // that prefix is already bound on this element
 		}
 	}
 	delete(need, name.Space)
-	n.NS = append(n.NS, &xmltree.Node{
+	n.AddNS(&xmltree.Node{
 		Kind:   xmltree.KindNamespace,
 		Name:   xmltree.Name{Local: name.Prefix},
 		Value:  name.Space,

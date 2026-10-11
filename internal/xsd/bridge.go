@@ -632,20 +632,23 @@ func cloneForValidation(el *xmltree.Node) (*xmltree.Node, map[*xmltree.Node]*xml
 	var clone func(n *xmltree.Node) *xmltree.Node
 	clone = func(n *xmltree.Node) *xmltree.Node {
 		cp := *n
+		cp.CloneExt()
 		cp.Parent = nil
 		cp.Children = nil
 		cp.Attrs = make([]*xmltree.Node, len(n.Attrs))
 		for i, at := range n.Attrs {
 			ac := *at
+			ac.CloneExt()
 			ac.Parent = &cp
 			cp.Attrs[i] = &ac
 			back[&ac] = at
 		}
-		cp.NS = make([]*xmltree.Node, len(n.NS))
-		for i, ns := range n.NS {
+		cp.SetNSDecls(make([]*xmltree.Node, len(n.NSDecls())))
+		for i, ns := range n.NSDecls() {
 			nc := *ns
+			nc.CloneExt()
 			nc.Parent = &cp
-			cp.NS[i] = &nc
+			cp.NSDecls()[i] = &nc
 		}
 		for _, ch := range n.Children {
 			// Merge an adjacent text RUN into the node that opened it, and drop
@@ -675,12 +678,12 @@ func cloneForValidation(el *xmltree.Node) (*xmltree.Node, map[*xmltree.Node]*xml
 	// parent chain). Materialize the in-scope set onto the clone root, the same
 	// way assertTree does for an assertion's detached tree.
 	have := map[string]bool{}
-	for _, ns := range root.NS {
+	for _, ns := range root.NSDecls() {
 		have[ns.Name.Local] = true
 	}
 	for pfx, uri := range el.InScopeNamespaces() {
 		if !have[pfx] {
-			root.NS = append(root.NS, &xmltree.Node{Kind: xmltree.KindNamespace,
+			root.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace,
 				Name: xmltree.Name{Local: pfx}, Value: uri, Parent: root})
 		}
 	}
@@ -809,7 +812,7 @@ func nsFixupPrefix(el *xmltree.Node, space string) string {
 			break
 		}
 	}
-	el.NS = append(el.NS, &xmltree.Node{
+	el.AddNS(&xmltree.Node{
 		Kind:   xmltree.KindNamespace,
 		Name:   xmltree.Name{Local: pfx},
 		Value:  space,

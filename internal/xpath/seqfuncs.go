@@ -376,12 +376,12 @@ func aggregate(o Object, op string, zero Object, coll func(a, b string) int) (Ob
 				for _, a := range atoms {
 					// Guard the month accumulator against int overflow — a huge
 					// yearMonthDuration total is FODT0002 (cbcl-avg-003).
-					if (a.dur.Months > 0 && tot.Months > math.MaxInt64-a.dur.Months) ||
-						(a.dur.Months < 0 && tot.Months < math.MinInt64-a.dur.Months) {
+					if (a.durv().Months > 0 && tot.Months > math.MaxInt64-a.durv().Months) ||
+						(a.durv().Months < 0 && tot.Months < math.MinInt64-a.durv().Months) {
 						return nil, fmt.Errorf("err:FODT0002: duration overflow in %s", op)
 					}
-					tot.Months += a.dur.Months
-					tot.Secs += a.dur.Secs
+					tot.Months += a.durv().Months
+					tot.Secs += a.durv().Secs
 				}
 				if op == "avg" {
 					n := float64(len(atoms))

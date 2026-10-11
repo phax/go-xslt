@@ -1049,7 +1049,7 @@ func (eng *engine) evalFuncBody(fd *FuncDef, r rt) (result xpath.Object, confide
 // element/comment/PI child — i.e. real markup whose node identity a caller
 // might need, as opposed to a sequence of purely atomic-valued items.
 func fragHasMarkup(frag *xmltree.Node) bool {
-	if len(frag.Attrs) > 0 || len(frag.NS) > 0 {
+	if len(frag.Attrs) > 0 || len(frag.NSDecls()) > 0 {
 		return true
 	}
 	for _, c := range frag.Children {
@@ -1553,7 +1553,7 @@ func materializeInScopeNS(cp, src *xmltree.Node) {
 	// the node, not its ancestors), and then only what it declares itself
 	// survives (sf-snapshot-0321).
 	have := map[string]string{}
-	for _, ns := range cp.NS {
+	for _, ns := range cp.NSDecls() {
 		have[ns.Name.Local] = ns.Value
 	}
 	want := src.InScopeNamespaces()
@@ -1570,7 +1570,7 @@ func materializeInScopeNS(cp, src *xmltree.Node) {
 		if _, bound := have[prefix]; bound {
 			continue // the copy rebinds this prefix itself; that binding wins
 		}
-		cp.NS = append(cp.NS, &xmltree.Node{Kind: xmltree.KindNamespace, Name: xmltree.Name{Local: prefix}, Value: uri, Parent: cp})
+		cp.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: xmltree.Name{Local: prefix}, Value: uri, Parent: cp})
 	}
 }
 
@@ -1604,8 +1604,8 @@ func snapshotNode(n *xmltree.Node) *xmltree.Node {
 		case xmltree.KindElement:
 			c = xmltree.NewElement(a.Name)
 			xmltree.CopyTypeInfo(c, a)
-			for _, ns := range a.NS {
-				c.NS = append(c.NS, &xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: c})
+			for _, ns := range a.NSDecls() {
+				c.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: c})
 			}
 			for _, at := range a.Attrs {
 				xmltree.CopyTypeInfo(c.SetAttr(at.Name, at.Value), at)
@@ -1645,13 +1645,13 @@ func snapshotNode(n *xmltree.Node) *xmltree.Node {
 		// a prefix among them is that node, not a second declaration
 		// (snapshot-0102a deep-equals the snapshot's root against the spec's
 		// own graft-based implementation, which declares each prefix once).
-		for _, ns := range parent.NS {
+		for _, ns := range parent.NSDecls() {
 			if ns.Name.Local == copyN.Name.Local {
 				return ns
 			}
 		}
 		nsn := &xmltree.Node{Kind: xmltree.KindNamespace, Name: copyN.Name, Value: copyN.Value, Parent: parent}
-		parent.NS = append(parent.NS, nsn)
+		parent.AddNS(nsn)
 		return nsn
 	default:
 		parent.Append(copyN)

@@ -222,14 +222,13 @@ func prefixCarrier(lexical string, ctx *Context) *xmltree.Node {
 	if !ok || uri == "" {
 		return nil
 	}
-	return &xmltree.Node{
-		Kind: xmltree.KindElement,
-		NS: []*xmltree.Node{{
-			Kind:  xmltree.KindNamespace,
-			Name:  xmltree.Name{Local: prefix},
-			Value: uri,
-		}},
-	}
+	el := &xmltree.Node{Kind: xmltree.KindElement}
+	el.AddNS(&xmltree.Node{
+		Kind:  xmltree.KindNamespace,
+		Name:  xmltree.Name{Local: prefix},
+		Value: uri,
+	})
+	return el
 }
 
 // castToNamedSchemaType casts one atomic value to a named simple type. The
@@ -356,7 +355,7 @@ func notationAtomicFor(lex string, ctx *Context) (*Atomic, error) {
 	} else if prefix != "" {
 		return nil, fmt.Errorf("err:FONS0004: no namespace declaration for prefix %q", prefix)
 	}
-	return &Atomic{T: XSnotation, qn: xmltree.Name{Space: uri, Local: local, Prefix: prefix}}, nil
+	return &Atomic{T: XSnotation, ext: &atomExt{qn: xmltree.Name{Space: uri, Local: local, Prefix: prefix}}}, nil
 }
 
 // lookupSchemaSimpleType resolves an AtomicOrUnionType name against the

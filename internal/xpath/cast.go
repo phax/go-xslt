@@ -98,7 +98,7 @@ func toAtomic(it Item) (*Atomic, error) {
 				// Part 2 §3.2.19), so `data(@a) instance of my:nota` — exactly
 				// what notation-0101/0102 ask — can only be answered from the
 				// annotation's own name, never from the primitive.
-				qa := &Atomic{T: at, qn: xmltree.Name{Space: uri, Local: local, Prefix: pre}}
+				qa := &Atomic{T: at, ext: &atomExt{qn: xmltree.Name{Space: uri, Local: local, Prefix: pre}}}
 				return qa.withSchemaType(v.SchemaType()), nil
 			}
 		}
@@ -331,7 +331,7 @@ func CastTo(it Item, target AtomType) (*Atomic, error) {
 
 	case target == XShexBinary:
 		if a.T == XShexBinary || a.T == XSbase64Binary {
-			return NewBinary(XShexBinary, a.bin), nil
+			return NewBinary(XShexBinary, a.binv()), nil
 		}
 		if !stringSource {
 			return nil, fmt.Errorf("err:XPTY0004: cannot cast %s to xs:hexBinary", a.T)
@@ -344,7 +344,7 @@ func CastTo(it Item, target AtomType) (*Atomic, error) {
 
 	case target == XSbase64Binary:
 		if a.T == XShexBinary || a.T == XSbase64Binary {
-			return NewBinary(XSbase64Binary, a.bin), nil
+			return NewBinary(XSbase64Binary, a.binv()), nil
 		}
 		if !stringSource {
 			return nil, fmt.Errorf("err:XPTY0004: cannot cast %s to xs:base64Binary", a.T)
@@ -373,7 +373,7 @@ func CastTo(it Item, target AtomType) (*Atomic, error) {
 			return nil, fmt.Errorf("err:XPTY0004: cannot cast xs:untypedAtomic to xs:QName")
 		}
 		if a.T == XSqname || a.T == XSnotation {
-			return NewQName(a.qn), nil
+			return NewQName(a.qnv()), nil
 		}
 		prefix, local := "", a.Lexical()
 		if i := strings.IndexByte(local, ':'); i >= 0 {
@@ -446,7 +446,7 @@ func castDateTimeToDateTime(a *Atomic, target AtomType) (*Atomic, error) {
 		XSgDay:       {XSgDay: true},
 	}
 	if m, ok := allowed[a.T]; ok && m[target] {
-		tm := a.tm
+		tm := a.tmv()
 		// Casting to a GREGORIAN type keeps only that type's components and
 		// fills the rest with the SAME reference values the lexical parser
 		// uses (parseDateTimeValue), so xs:gYear(dateTime) equals
@@ -483,7 +483,7 @@ func castDateTimeToDateTime(a *Atomic, target AtomType) (*Atomic, error) {
 // castDurationToDuration extracts the relevant components when converting among
 // duration subtypes.
 func castDurationToDuration(a *Atomic, target AtomType) *Atomic {
-	d := a.dur
+	d := a.durv()
 	switch target {
 	case XSyearMonthDuration:
 		d.Secs = 0

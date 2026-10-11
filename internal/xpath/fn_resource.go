@@ -300,7 +300,7 @@ func checkBoundPrefixes(n *xmltree.Node) error {
 					// otherwise it is an unbound prefix
 					bound := false
 					for cur := n; cur != nil; cur = cur.Parent {
-						for _, ns := range cur.NS {
+						for _, ns := range cur.NSDecls() {
 							if ns.Value == a.Name.Space {
 								bound = true
 							}

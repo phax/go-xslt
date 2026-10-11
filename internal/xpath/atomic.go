@@ -15,7 +15,7 @@ import (
 // referenced by XPath 3.1 (the numeric tower, string/boolean, the date/time and
 // duration families, binary, anyURI, QName, untypedAtomic, and the gregorian
 // types).
-type AtomType int
+type AtomType int8
 
 const (
 	XSuntypedAtomic AtomType = iota
@@ -125,16 +125,19 @@ type Duration struct {
 // Atomic is a typed atomic value. Only the field(s) relevant to T are populated.
 type Atomic struct {
 	T     AtomType
-	s     string       // string family, anyURI, untypedAtomic, gregorian lexical
-	b     bool         // boolean
-	i     *big.Int     // integer family
-	d     *big.Rat     // decimal
-	f     float64      // double, float
-	tm    time.Time    // date, dateTime, time
-	hasTZ bool         // whether tm carries an explicit timezone
-	dur   Duration     // duration family
-	bin   []byte       // binary
-	qn    xmltree.Name // QName / NOTATION
+	b     bool     // boolean
+	hasTZ bool     // whether the date/time value carries an explicit timezone
+	s     string   // string family, anyURI, untypedAtomic, gregorian lexical
+	i     *big.Int // integer family
+	d     *big.Rat // decimal
+	f     float64  // double, float
+	// ext holds the payloads of the rare, large kinds (date/time, duration,
+	// binary, QName/NOTATION) so every other Atomic — strings, numbers,
+	// booleans: nearly all of them — stays at 64 bytes instead of paying for
+	// ~120 bytes of fields it never uses. It is written only by the
+	// constructors and never mutated afterwards, so struct copies (see
+	// withSchemaType) may share it.
+	ext *atomExt
 	// st is the USER-DEFINED schema type this value was validated against,
 	// when there is one: T alone records only the built-in primitive its value
 	// space sits in, which cannot distinguish my:hatsize from xs:integer.
@@ -144,6 +147,38 @@ type Atomic struct {
 	// every value in a non-schema-aware run, and `instance of my:T` is then
 	// false for everything, which is the fail-closed answer.
 	st *xmltree.SchemaTypeName
+}
+
+type atomExt struct {
+	tm  time.Time    // date, dateTime, time
+	dur Duration     // duration family
+	bin []byte       // binary
+	qn  xmltree.Name // QName / NOTATION
+}
+
+func (a *Atomic) tmv() time.Time {
+	if a.ext == nil {
+		return time.Time{}
+	}
+	return a.ext.tm
+}
+func (a *Atomic) durv() Duration {
+	if a.ext == nil {
+		return Duration{}
+	}
+	return a.ext.dur
+}
+func (a *Atomic) binv() []byte {
+	if a.ext == nil {
+		return nil
+	}
+	return a.ext.bin
+}
+func (a *Atomic) qnv() xmltree.Name {
+	if a.ext == nil {
+		return xmltree.Name{}
+	}
+	return a.ext.qn
 }
 
 // SchemaType returns the user-defined schema type this value was validated
@@ -203,8 +238,8 @@ func NewInteger(n int64) *Atomic {
 	return &Atomic{T: XSinteger, i: big.NewInt(n)}
 }
 func NewIntegerBig(n *big.Int) *Atomic       { return &Atomic{T: XSinteger, i: n} }
-func NewQName(n xmltree.Name) *Atomic        { return &Atomic{T: XSqname, qn: n} }
-func NewBinary(t AtomType, b []byte) *Atomic { return &Atomic{T: t, bin: b} }
+func NewQName(n xmltree.Name) *Atomic        { return &Atomic{T: XSqname, ext: &atomExt{qn: n}} }
+func NewBinary(t AtomType, b []byte) *Atomic { return &Atomic{T: t, ext: &atomExt{bin: b}} }
 
 func NewDecimal(r *big.Rat) *Atomic { return &Atomic{T: XSdecimal, d: r} }
 
@@ -217,10 +252,10 @@ func NewDecimalFromString(s string) (*Atomic, bool) {
 }
 
 func NewDateTime(t AtomType, tm time.Time, hasTZ bool) *Atomic {
-	return &Atomic{T: t, tm: tm, hasTZ: hasTZ}
+	return &Atomic{T: t, hasTZ: hasTZ, ext: &atomExt{tm: tm}}
 }
 
-func NewDuration(t AtomType, d Duration) *Atomic { return &Atomic{T: t, dur: d} }
+func NewDuration(t AtomType, d Duration) *Atomic { return &Atomic{T: t, ext: &atomExt{dur: d}} }
 
 // --- classification ---------------------------------------------------------
 
@@ -323,12 +358,12 @@ func (a *Atomic) QNameValue() (xmltree.Name, bool) {
 	if a == nil || (a.T != XSqname && a.T != XSnotation) {
 		return xmltree.Name{}, false
 	}
-	return a.qn, true
+	return a.qnv(), true
 }
 
 // TimeValue returns the stored time value and whether it carries an explicit
 // timezone (zero Time for non-date/time atomics).
-func (a *Atomic) TimeValue() (time.Time, bool) { return a.tm, a.hasTZ }
+func (a *Atomic) TimeValue() (time.Time, bool) { return a.tmv(), a.hasTZ }
 
 // --- canonical lexical form -------------------------------------------------
 
@@ -357,18 +392,18 @@ func (a *Atomic) Lexical() string {
 	case a.T == XSqname || a.T == XSnotation:
 		// xs:NOTATION shares xs:QName's value space (XSD 1.0 Part 2 §3.2.19)
 		// and therefore its lexical form too.
-		if a.qn.Prefix != "" {
-			return a.qn.Prefix + ":" + a.qn.Local
+		if a.qnv().Prefix != "" {
+			return a.qnv().Prefix + ":" + a.qnv().Local
 		}
-		return a.qn.Local
+		return a.qnv().Local
 	case a.T == XShexBinary:
-		return strings.ToUpper(hexEncode(a.bin))
+		return strings.ToUpper(hexEncode(a.binv()))
 	case a.T == XSbase64Binary:
-		return base64Encode(a.bin)
+		return base64Encode(a.binv())
 	case isDurationType(a.T):
-		return formatDuration(a.T, a.dur)
+		return formatDuration(a.T, a.durv())
 	case isDateTimeType(a.T):
-		return formatDateTime(a.T, a.tm, a.hasTZ)
+		return formatDateTime(a.T, a.tmv(), a.hasTZ)
 	}
 	return a.s
 }

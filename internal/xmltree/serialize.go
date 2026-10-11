@@ -630,7 +630,7 @@ func (s *serializer) startTag(n *Node, depth int) elemOpen {
 
 	// Explicitly-declared namespace nodes (e.g. from xsl:namespace or copied
 	// namespaces) own their prefixes; declare them first.
-	for _, ns := range n.NS {
+	for _, ns := range n.NSDecls() {
 		if normalizePfx && ns.Name.Local != "" && htmlFamilyNS[ns.Value] {
 			continue // prefixed binding for XHTML/SVG/MathML: removed
 		}
@@ -676,7 +676,7 @@ func (s *serializer) startTag(n *Node, depth int) elemOpen {
 	// (element-0306).
 	if n.NSBarrier() && n.Name.Space != "" && n.Name.Prefix != "" {
 		ownDefault := ""
-		for _, ns := range n.NS {
+		for _, ns := range n.NSDecls() {
 			if ns.Name.Local == "" {
 				ownDefault = ns.Value
 			}
@@ -1047,9 +1047,35 @@ func escapeC1(s string) string {
 	return b.String()
 }
 
+// The four escapers share package-level Replacers (a Replacer is safe for
+// concurrent use) and a strings.IndexAny pre-check. Building one per call was
+// the single largest allocation source in serialization: every pattern here is
+// one byte, so strings.NewReplacer builds a 256-entry lookup table (~6KB) on
+// first use — paid once per text node and once per attribute — and almost every
+// real text node and attribute value contains nothing to escape at all, in
+// which case Replace would also hand back an unchanged copy of the input.
+var (
+	textReplacer    = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	textXMLReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\r", "&#13;")
+	attrReplacer    = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&#34;")
+	attrXMLReplacer = strings.NewReplacer(
+		"&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&#34;",
+		"\t", "&#9;", "\n", "&#10;", "\r", "&#13;",
+	)
+)
+
+const (
+	textSpecials    = "&<>"
+	textXMLSpecials = "&<>\r"
+	attrSpecials    = "&<>\""
+	attrXMLSpecials = "&<>\"\t\n\r"
+)
+
 func escapeText(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
+	if strings.IndexAny(s, textSpecials) < 0 {
+		return s
+	}
+	return textReplacer.Replace(s)
 }
 
 // escapeTextXML is escapeText plus a character reference for CR: under the
@@ -1057,8 +1083,10 @@ func escapeText(s string) string {
 // on re-parse (Serialization 3.1 §6.1.4; xml-version-002/020 round-trip
 // &#13; through a text node).
 func escapeTextXML(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\r", "&#13;")
-	return r.Replace(s)
+	if strings.IndexAny(s, textXMLSpecials) < 0 {
+		return s
+	}
+	return textXMLReplacer.Replace(s)
 }
 
 // escapeAttr escapes an html-method attribute value. The quote is a numeric
@@ -1067,8 +1095,10 @@ func escapeTextXML(s string) string {
 // both require &#34;/&#x22;, never &quot;, and nothing in the suite expects
 // &quot; either, so this is a safe, not just test-fitted, choice).
 func escapeAttr(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&#34;")
-	return r.Replace(s)
+	if strings.IndexAny(s, attrSpecials) < 0 {
+		return s
+	}
+	return attrReplacer.Replace(s)
 }
 
 // escapeAttrXML is escapeAttr plus tab/LF/CR character references
@@ -1078,11 +1108,10 @@ func escapeAttr(s string) string {
 // The html output method has no such normalization step, so it keeps using
 // plain escapeAttr.
 func escapeAttrXML(s string) string {
-	r := strings.NewReplacer(
-		"&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&#34;",
-		"\t", "&#9;", "\n", "&#10;", "\r", "&#13;",
-	)
-	return r.Replace(s)
+	if strings.IndexAny(s, attrXMLSpecials) < 0 {
+		return s
+	}
+	return attrXMLReplacer.Replace(s)
 }
 
 // ---------------------------------------------------------------------------

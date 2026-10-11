@@ -219,6 +219,7 @@ func (s *Schema) assertTree(el *xmltree.Node) *xmltree.Node {
 	var clone func(n *xmltree.Node) *xmltree.Node
 	clone = func(n *xmltree.Node) *xmltree.Node {
 		cp := *n
+		cp.CloneExt()
 		cp.Parent = nil
 		// Attributes are VALUE-cloned so their typed-XDM annotation lives
 		// only on the assertion tree (assert_002/018, d4_3_15v02/v11: a
@@ -226,6 +227,7 @@ func (s *Schema) assertTree(el *xmltree.Node) *xmltree.Node {
 		cp.Attrs = make([]*xmltree.Node, 0, len(n.Attrs)+len(s.nodeDefaults[n]))
 		for _, at := range n.Attrs {
 			ac := *at
+			ac.CloneExt()
 			ac.Parent = &cp
 			s.annotateAssertNode(&ac, at)
 			cp.Attrs = append(cp.Attrs, &ac)
@@ -283,12 +285,12 @@ func (s *Schema) assertTree(el *xmltree.Node) *xmltree.Node {
 	// bindings (QName-typed content — assert024's @name — resolves against
 	// them).
 	have := map[string]bool{}
-	for _, ns := range root.NS {
+	for _, ns := range root.NSDecls() {
 		have[ns.Name.Local] = true
 	}
 	for pfx, uri := range el.InScopeNamespaces() {
 		if !have[pfx] {
-			root.NS = append(root.NS, &xmltree.Node{Kind: xmltree.KindNamespace,
+			root.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace,
 				Name: xmltree.Name{Local: pfx}, Value: uri, Parent: root})
 		}
 	}
@@ -389,6 +391,7 @@ func (s *Schema) selectAlternativeType(decl *ElementDecl, el *xmltree.Node) (Typ
 	// not, so the merged view exists only here.
 	if inh := s.inheritedAttrs(el); len(inh) > 0 {
 		cp := *el
+		cp.CloneExt()
 		cp.Attrs = append(append([]*xmltree.Node{}, el.Attrs...), inh...)
 		el = &cp
 	}

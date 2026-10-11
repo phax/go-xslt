@@ -228,16 +228,17 @@ func inlineWithInScopeNS(inline *xmltree.Node) *xmltree.Node {
 		return inline
 	}
 	cp := *inline
-	cp.NS = append([]*xmltree.Node(nil), inline.NS...)
+	cp.CloneExt() // the struct copy shares inline's nodeExt; give cp its own
+	cp.SetNSDecls(append([]*xmltree.Node(nil), inline.NSDecls()...))
 	have := map[string]bool{}
-	for _, ns := range cp.NS {
+	for _, ns := range cp.NSDecls() {
 		have[ns.Name.Local] = true
 	}
 	for pfx, uri := range scope {
 		if have[pfx] {
 			continue
 		}
-		cp.NS = append(cp.NS, &xmltree.Node{Kind: xmltree.KindNamespace,
+		cp.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace,
 			Name: xmltree.Name{Local: pfx}, Value: uri, Parent: &cp})
 	}
 	return &cp

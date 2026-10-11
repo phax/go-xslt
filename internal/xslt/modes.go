@@ -437,6 +437,13 @@ func applyTypedModeRewrites(ss *Stylesheet) error {
 
 // matchingTemplates returns all templates matching node in the given mode,
 // best-first by (import precedence desc, priority desc, document order desc).
+// matchScratch is the reusable evalEnv + Context pair of one matchingTemplates
+// call (see the free list, engine.matchPool).
+type matchScratch struct {
+	env evalEnv
+	ctx xpath.Context
+}
+
 func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Template {
 	var cands []*Template
 	// XSLT §5.5: a pattern is evaluated with an empty "current captured
@@ -444,13 +451,36 @@ func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Templat
 	savedGroups := eng.regexGroups
 	eng.regexGroups = nil
 	defer func() { eng.regexGroups = savedGroups }()
+	// One evalEnv and one Context serve every candidate of this call: they were
+	// rebuilt per template, i.e. two allocations x every template x every
+	// matched node. Match returns only a bool and keeps no reference to either
+	// (a nested matchingTemplates builds its own), so resetting them in place
+	// per template is equivalent. The Context is overwritten wholesale rather
+	// than patched so nothing a previous Match set can leak into the next.
+	// The pair itself comes from a per-engine free list: a matchingTemplates
+	// call checks one out and returns it on exit, so a nested call (a pattern
+	// predicate that applies templates) gets its own and never sees ours.
+	var sc *matchScratch
+	if n := len(eng.matchPool); n > 0 {
+		sc = eng.matchPool[n-1]
+		eng.matchPool = eng.matchPool[:n-1]
+	} else {
+		sc = new(matchScratch)
+	}
+	defer func() {
+		*sc = matchScratch{} // drop node/stylesheet references while pooled
+		eng.matchPool = append(eng.matchPool, sc)
+	}()
+	env, ctx := &sc.env, &sc.ctx
+	item := realItemOf(node)
 	for _, t := range eng.sheet.templates {
 		if t.pattern == nil || !t.matchesMode(mode) {
 			continue
 		}
-		env := &evalEnv{eng: eng, el: t.el, current: node}
+		*env = evalEnv{eng: eng, el: t.el, current: node}
+		*ctx = xpath.Context{Node: node, CtxItem: item, Pos: 1, Size: 1, Vars: env, NS: env, Funcs: env, Resolver: eng.resolver, NoOutputURI: true, DefaultElemNS: eng.templateDefaultNS(t), Now: eng.now, SchemaTypes: schemaTypesFor(t.el)}
 		eng.patternDepth++
-		ok, err := t.pattern.Match(node, &xpath.Context{Node: node, CtxItem: realItemOf(node), Pos: 1, Size: 1, Vars: env, NS: env, Funcs: env, Resolver: eng.resolver, NoOutputURI: true, DefaultElemNS: eng.templateDefaultNS(t), Now: eng.now, SchemaTypes: schemaTypesFor(t.el)})
+		ok, err := t.pattern.Match(node, ctx)
 		eng.patternDepth--
 		if err != nil || !ok {
 			continue
@@ -582,6 +612,19 @@ func (eng *engine) shallowCopyAndRecurse(node *xmltree.Node, mode string, out *x
 		// STYLESHEET's base URI).
 		if out.NoAtomicMerge() {
 			el.SetBase(retainedBase(el, node))
+		}
+		// The built-in shallow-copy rule IS an xsl:copy with
+		// <xsl:apply-templates select="@*,node()"/> inside (XSLT 3.0 §6.7), so
+		// the copy takes the original's namespace nodes exactly as xsl:copy
+		// does (copy-namespaces="yes", the default). Without them each
+		// constructed element had only the namespaces its own name and
+		// attributes happened to need, and serialization re-declared a prefix
+		// on every single element that used it instead of once where the
+		// source declared it — correct-looking but a different infoset, and
+		// several times the output size on a namespace-heavy document.
+		for _, ns := range copiedNamespaceNodes(node) {
+			ns.Parent = el
+			el.AddNS(ns)
 		}
 		out.Append(el)
 		// The built-in shallow-copy rule applies templates to the attributes

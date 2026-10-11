@@ -51,18 +51,21 @@ func checkOverrideUniqueness(ov *xmltree.Node) error {
 // with correct parent pointers.
 func cloneSchemaTree(n *xmltree.Node, parent *xmltree.Node) *xmltree.Node {
 	cp := *n
+	cp.CloneExt()
 	cp.Parent = parent
 	cp.Attrs = make([]*xmltree.Node, len(n.Attrs))
 	for i, a := range n.Attrs {
 		ac := *a
+		ac.CloneExt()
 		ac.Parent = &cp
 		cp.Attrs[i] = &ac
 	}
-	cp.NS = make([]*xmltree.Node, len(n.NS))
-	for i, ns := range n.NS {
+	cp.SetNSDecls(make([]*xmltree.Node, len(n.NSDecls())))
+	for i, ns := range n.NSDecls() {
 		nc := *ns
+		nc.CloneExt()
 		nc.Parent = &cp
-		cp.NS[i] = &nc
+		cp.NSDecls()[i] = &nc
 	}
 	cp.Children = make([]*xmltree.Node, len(n.Children))
 	for i, ch := range n.Children {
@@ -78,7 +81,7 @@ func cloneSchemaTree(n *xmltree.Node, parent *xmltree.Node) *xmltree.Node {
 func transplantClone(src *xmltree.Node, parent *xmltree.Node) *xmltree.Node {
 	cp := cloneSchemaTree(src, parent)
 	have := map[string]bool{}
-	for _, ns := range cp.NS {
+	for _, ns := range cp.NSDecls() {
 		have[ns.Name.Local] = true
 	}
 	inscope := src.InScopeNamespaces()
@@ -89,7 +92,7 @@ func transplantClone(src *xmltree.Node, parent *xmltree.Node) *xmltree.Node {
 		if have[pfx] {
 			continue
 		}
-		cp.NS = append(cp.NS, &xmltree.Node{
+		cp.AddNS(&xmltree.Node{
 			Kind: xmltree.KindNamespace,
 			Name: xmltree.Name{Local: pfx}, Value: uri, Parent: cp,
 		})

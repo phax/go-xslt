@@ -83,7 +83,7 @@ func sameOrdering(got, want *Node) error {
 
 func collect(n *Node, out *[]*Node) {
 	*out = append(*out, n)
-	for _, ns := range n.NS {
+	for _, ns := range n.NSDecls() {
 		*out = append(*out, ns)
 	}
 	for _, a := range n.Attrs {

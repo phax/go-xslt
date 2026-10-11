@@ -123,6 +123,15 @@ type Step struct {
 	// xs:decimal(.) or $f(.)) used as a relative-path step. When set, Axis/Test
 	// are unused and the expression is evaluated with each context node as focus.
 	Postfix Expr
+	// Fuse is set only on the descendant-or-self::node() step the parser
+	// expands "//" into, and only when the child:: step right after it can
+	// be folded into one equivalent descendant:: step (see fuseSlashSlash for
+	// the exact conditions). evalPath then walks the subtree once, testing
+	// each node as it goes, instead of first materializing EVERY node of the
+	// subtree as a NodeSet just to apply the child step to each of them. Only
+	// expression evaluation reads it; pattern matching, streamability and
+	// static analysis keep seeing the two literal steps.
+	Fuse *Step
 }
 
 // SequenceExpr is a comma-separated sequence constructor: (a, b, c).

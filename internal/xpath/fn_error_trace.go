@@ -23,9 +23,9 @@ func fnError(_ *Context, args []Object) (Object, error) {
 	code := "err:FOER0000"
 	if len(args) >= 1 && !numIsEmpty(arg(args, 0)) {
 		if q, ok := firstItem(arg(args, 0)).(*Atomic); ok && q.T == XSqname {
-			if q.qn.Local != "" {
-				qn = q.qn
-				code = "err:" + q.qn.Local
+			if q.qnv().Local != "" {
+				qn = q.qnv()
+				code = "err:" + q.qnv().Local
 			}
 		}
 	}

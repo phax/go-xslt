@@ -264,7 +264,7 @@ func tcErrorLocation(err error, errEl, tryEl *xmltree.Node) (xpath.Object, xpath
 		el = tryEl
 	}
 	if line == 0 && el != nil {
-		line, col = el.Line, el.Col
+		line, col = int(el.Line), int(el.Col)
 	}
 	var module xpath.Object = xpath.Sequence{}
 	if el != nil {

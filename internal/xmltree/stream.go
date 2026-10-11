@@ -351,7 +351,8 @@ func (s *StreamReader) startElement(t xml.StartElement) *Node {
 		frame[local] = a.Value
 		decls = append(decls, &Node{Kind: KindNamespace, Name: Name{Local: local}, Value: a.Value})
 	}
-	el := &Node{Kind: KindElement, Name: resolveRawName(frame, t.Name, false), NS: decls}
+	el := &Node{Kind: KindElement, Name: resolveRawName(frame, t.Name, false)}
+	el.SetNSDecls(decls)
 	// Stamping order is element, then its namespace nodes, then its
 	// attributes, then (as they arrive) its children — exactly assignOrder's
 	// traversal, so a streamed tree numbers identically to a parsed one.

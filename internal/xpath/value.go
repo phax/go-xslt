@@ -357,7 +357,7 @@ func siblingIndex(n *xmltree.Node) int {
 		return 0
 	}
 	i := 0
-	for _, x := range p.NS {
+	for _, x := range p.NSDecls() {
 		if x == n {
 			return i
 		}

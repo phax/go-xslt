@@ -271,7 +271,7 @@ func restoreSentinels(n *Node, runes map[rune]rune, tokens map[string]rune) {
 			nd.Attrs[i].Name.Space = fix(nd.Attrs[i].Name.Space)
 			nd.Attrs[i].Value = fix(nd.Attrs[i].Value)
 		}
-		for _, ns := range nd.NS {
+		for _, ns := range nd.NSDecls() {
 			ns.Value = fix(ns.Value)
 		}
 		for _, ch := range nd.Children {
@@ -346,7 +346,14 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 	// strippable and only three tokens later turns out to be " x") — an
 	// eager per-token decision would permanently lose content a deferred one
 	// never sees as anything but the complete, correct run.
-	var pendingText strings.Builder
+	// pendingBuf is reused across runs (a strings.Builder was Reset — and so
+	// regrown from nothing — for every run, after string(t) had already copied
+	// the token once). The run's string is materialized exactly once, at the
+	// flush; whitespace-only runs (the indentation between elements, the bulk
+	// of a pretty-printed document's text nodes) are interned so identical
+	// "\n    " runs share one backing string.
+	var pendingBuf []byte
+	wsRuns := map[string]string{}
 	var pendingOpen bool
 	var pendingLine, pendingCol int
 	flushPending := func() {
@@ -354,8 +361,7 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 			return
 		}
 		pendingOpen = false
-		s := pendingText.String()
-		pendingText.Reset()
+		s := internText(&pendingBuf, wsRuns)
 		top := stack[len(stack)-1]
 		// Whitespace outside the document element (prolog/epilog "Misc") is
 		// not character data in the infoset: a document node has no
@@ -385,7 +391,7 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 				return
 			}
 		}
-		top.Append(&Node{Kind: KindText, Value: s, Line: pendingLine, Col: pendingCol})
+		top.Append(&Node{Kind: KindText, Value: s, Line: int32(pendingLine), Col: int32(pendingCol)})
 	}
 
 	for {
@@ -457,9 +463,9 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 			el := &Node{
 				Kind: KindElement,
 				Name: resolveRawName(frame, t.Name, false),
-				Line: line, Col: col,
-				NS: decls,
+				Line: int32(line), Col: int32(col),
 			}
+			el.SetNSDecls(decls)
 			for _, d := range decls {
 				d.Parent = el
 			}
@@ -471,7 +477,7 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 					Kind:  KindAttribute,
 					Name:  resolveRawName(frame, a.Name, true),
 					Value: a.Value,
-					Line:  line, Col: col,
+					Line:  int32(line), Col: int32(col),
 				}
 				if m := idKinds[t.Name.Local]; m != nil {
 					if k := m[a.Name.Local]; k != 0 {
@@ -502,7 +508,7 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 						Name:   Name{Local: name},
 						Value:  d.value,
 						Parent: el,
-						Line:   line, Col: col,
+						Line:   int32(line), Col: int32(col),
 					})
 				}
 			}
@@ -549,18 +555,18 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 				pendingOpen = true
 				pendingLine, pendingCol = line, col
 			}
-			pendingText.WriteString(string(t))
+			pendingBuf = append(pendingBuf, t...)
 
 		case xml.Comment:
 			flushPending()
-			top.Append(&Node{Kind: KindComment, Value: string(t), Line: line, Col: col})
+			top.Append(&Node{Kind: KindComment, Value: string(t), Line: int32(line), Col: int32(col)})
 
 		case xml.ProcInst:
 			flushPending()
 			if t.Target == "xml" {
 				continue // XML declaration, not a PI node
 			}
-			top.Append(&Node{Kind: KindPI, Name: Name{Local: t.Target}, Value: string(t.Inst), Line: line, Col: col})
+			top.Append(&Node{Kind: KindPI, Name: Name{Local: t.Target}, Value: string(t.Inst), Line: int32(line), Col: int32(col)})
 		}
 	}
 	flushPending()
@@ -766,7 +772,7 @@ func AssignOrder(root *Node) { assignOrder(root) }
 // to the same effect. See StreamReader.stamp for why leaving order at its
 // zero value is a correctness bug rather than a missing optimization.
 func SetOrder(n *Node, order int, tree uint64) {
-	n.order, n.tree = order, tree
+	n.order, n.tree = int32(order), tree
 }
 
 // treeSeq hands out Node.tree stamps in creation order (atomic: trees are
@@ -788,7 +794,7 @@ const ephemeralTreeBit = uint64(1) << 63
 // assignOrder walks the tree in document order assigning indices. Order is:
 // node, its namespace nodes, its attribute nodes, then its children.
 func assignOrder(root *Node) {
-	counter := 0
+	counter := int32(0)
 	tree := atomic.AddUint64(&treeSeq, 1)
 	if root != nil && root.Ephemeral() {
 		tree |= ephemeralTreeBit
@@ -798,7 +804,7 @@ func assignOrder(root *Node) {
 		n.order = counter
 		n.tree = tree
 		counter++
-		for _, ns := range n.NS {
+		for _, ns := range n.NSDecls() {
 			ns.order = counter
 			ns.tree = tree
 			counter++
@@ -865,7 +871,7 @@ func applyEntityBases(doc *Node, spans []entitySpan, lines []int) {
 	var walk func(n *Node)
 	walk = func(n *Node) {
 		if n.Kind == KindElement || n.Kind == KindPI {
-			off := offsetOf(lines, n.Line, n.Col)
+			off := offsetOf(lines, int(n.Line), int(n.Col))
 			for _, sp := range spans {
 				if off >= sp.start && off < sp.end {
 					if n.EntityBase() == "" {
@@ -902,4 +908,31 @@ func offsetOf(lines []int, line, col int) int {
 		return -1
 	}
 	return lines[line-1] + col - 1
+}
+
+// maxInternedWS bounds the whitespace runs worth sharing: indentation is short,
+// and a long run is rare enough that a map entry for it would only cost memory.
+const maxInternedWS = 64
+
+// internText returns the accumulated run as a string and empties the buffer
+// for reuse. A short run made only of XML whitespace is looked up in (and added
+// to) runs, so repeated indentation allocates once per distinct run, not once
+// per text node.
+func internText(buf *[]byte, runs map[string]string) string {
+	b := *buf
+	*buf = b[:0]
+	if len(b) == 0 || len(b) > maxInternedWS {
+		return string(b)
+	}
+	for _, c := range b {
+		if c != ' ' && c != '\t' && c != '\r' && c != '\n' {
+			return string(b)
+		}
+	}
+	if s, ok := runs[string(b)]; ok { // no allocation: map lookup by []byte conversion
+		return s
+	}
+	s := string(b)
+	runs[s] = s
+	return s
 }

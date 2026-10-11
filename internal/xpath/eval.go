@@ -1196,7 +1196,17 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 		}
 	}
 
-	for i, step := range n.Steps {
+	for i := 0; i < len(n.Steps); i++ {
+		step := n.Steps[i]
+		if step.Fuse != nil && ctx.PatternTop == nil {
+			// "//name": one descendant:: step in place of descendant-or-self::
+			// node() followed by child:: (see fuseSlashSlash). Not under a
+			// PatternTop: the child-or-top rule in evalStep adds the pattern's
+			// own top node as an extra child candidate, which only the literal
+			// two-step form can express.
+			step = step.Fuse
+			i++
+		}
 		if step.Postfix != nil {
 			// PostfixExpr step (function call etc.): evaluate per context node.
 			var items []Item
@@ -1234,8 +1244,9 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 			continue
 		}
 		var next NodeSet
+		var pc prefixCache // one prefix resolution for this step across ALL its context nodes
 		for _, cn := range current {
-			matched, err := evalStep(step, cn, ctx)
+			matched, err := evalStep(step, cn, ctx, &pc)
 			if err != nil {
 				return nil, err
 			}
@@ -1247,7 +1258,7 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 }
 
 // evalStep produces the nodes selected by step from context node cn.
-func evalStep(step *Step, cn *xmltree.Node, ctx *Context) (NodeSet, error) {
+func evalStep(step *Step, cn *xmltree.Node, ctx *Context, pc *prefixCache) (NodeSet, error) {
 	var matched NodeSet
 	switch step.Axis {
 	case "descendant", "descendant-or-self":
@@ -1257,7 +1268,7 @@ func evalStep(step *Step, cn *xmltree.Node, ctx *Context) (NodeSet, error) {
 		// count grows with the WHOLE subtree, not with one node's immediate
 		// neighborhood the way child/attribute/sibling do.
 		if step.Axis == "descendant-or-self" {
-			ok, err := matchTest(step.Test, step.Axis, cn, ctx)
+			ok, err := matchTestC(step.Test, step.Axis, cn, ctx, pc)
 			if err != nil {
 				return nil, err
 			}
@@ -1265,7 +1276,7 @@ func evalStep(step *Step, cn *xmltree.Node, ctx *Context) (NodeSet, error) {
 				matched = append(matched, cn)
 			}
 		}
-		if err := collectDescendantsFiltered(cn, step.Test, step.Axis, ctx, &matched); err != nil {
+		if err := collectDescendantsFiltered(cn, step.Test, step.Axis, ctx, pc, &matched); err != nil {
 			return nil, err
 		}
 	default:
@@ -1281,7 +1292,7 @@ func evalStep(step *Step, cn *xmltree.Node, ctx *Context) (NodeSet, error) {
 			candidates = append(NodeSet{cn}, candidates...)
 		}
 		for _, c := range candidates {
-			ok, err := matchTest(step.Test, step.Axis, c, ctx)
+			ok, err := matchTestC(step.Test, step.Axis, c, ctx, pc)
 			if err != nil {
 				return nil, err
 			}

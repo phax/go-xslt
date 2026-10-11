@@ -515,16 +515,16 @@ func atomicCompare(a, b *Atomic) (int, bool) {
 		return 1, true
 	case isDateTimeType(a.T) && isDateTimeType(b.T):
 		switch {
-		case a.tm.Before(b.tm):
+		case a.tmv().Before(b.tmv()):
 			return -1, true
-		case a.tm.After(b.tm):
+		case a.tmv().After(b.tmv()):
 			return 1, true
 		default:
 			return 0, true
 		}
 	case isDurationType(a.T) && isDurationType(b.T):
-		av := float64(a.dur.Months)*2629746 + a.dur.Secs
-		bv := float64(b.dur.Months)*2629746 + b.dur.Secs
+		av := float64(a.durv().Months)*2629746 + a.durv().Secs
+		bv := float64(b.durv().Months)*2629746 + b.durv().Secs
 		switch {
 		case av < bv:
 			return -1, true
@@ -537,12 +537,12 @@ func atomicCompare(a, b *Atomic) (int, bool) {
 		// QNames — and xs:NOTATION, which shares their value space — support
 		// only eq/ne: equal iff namespace+local match. The prefix is not part
 		// of the value.
-		if a.qn.Space == b.qn.Space && a.qn.Local == b.qn.Local {
+		if a.qnv().Space == b.qnv().Space && a.qnv().Local == b.qnv().Local {
 			return 0, true
 		}
 		return 1, true
 	case (a.T == XShexBinary || a.T == XSbase64Binary) && a.T == b.T:
-		return bytes.Compare(a.bin, b.bin), true
+		return bytes.Compare(a.binv(), b.binv()), true
 	case isComparableAsString(a) && isComparableAsString(b):
 		return strings.Compare(a.Lexical(), b.Lexical()), true
 	}

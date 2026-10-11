@@ -658,10 +658,12 @@ func (p *parser) parseLocationPath() (Expr, error) {
 	case tSlashSlash:
 		p.next()
 		path.Absolute = true
-		path.Steps = append(path.Steps, descendantOrSelfStep())
+		dos := descendantOrSelfStep()
+		path.Steps = append(path.Steps, dos)
 		if err := p.parseSteps(path); err != nil {
 			return nil, err
 		}
+		fuseSlashSlash(dos, path.Steps[1])
 	default:
 		if err := p.parseSteps(path); err != nil {
 			return nil, err
@@ -683,11 +685,13 @@ func (p *parser) parseRelativeInto(path *PathExpr) error {
 			path.Steps = append(path.Steps, step)
 		case tSlashSlash:
 			p.next()
-			path.Steps = append(path.Steps, descendantOrSelfStep())
+			dos := descendantOrSelfStep()
+			path.Steps = append(path.Steps, dos)
 			step, err := p.parseStep()
 			if err != nil {
 				return err
 			}
+			fuseSlashSlash(dos, step)
 			path.Steps = append(path.Steps, step)
 		default:
 			return nil
@@ -702,6 +706,71 @@ func (p *parser) parseSteps(path *PathExpr) error {
 	}
 	path.Steps = append(path.Steps, step)
 	return p.parseRelativeInto(path)
+}
+
+// fuseSlashSlash records on the "//" expansion's descendant-or-self::node()
+// step the single descendant:: step equivalent to it followed by next, when
+// that equivalence holds.
+//
+// A//B[p] is A/descendant-or-self::node()/child::B[p]: p's context position
+// and size count B among the CHILDREN OF EACH intermediate node, while
+// descendant::B[p] would count it among ALL descendants of A — so a
+// predicate that looks at position()/last(), or is numeric (which XPath
+// reads as [position() = n]), changes meaning (//x[1] is not
+// descendant::x[1]). Every predicate must therefore be provably focus-free
+// AND provably non-numeric: a comparison, and/or, a path of axis steps (a
+// node sequence, read by effective boolean value) or a call to one of a few
+// well-known boolean functions — with no position()/last() call anywhere
+// inside it, nested predicates included. Anything else is left unfused and
+// evaluated as the two literal steps, exactly as before.
+func fuseSlashSlash(dos, next *Step) {
+	if next == nil || next.Postfix != nil || next.Axis != "child" {
+		return
+	}
+	for _, pr := range next.Preds {
+		if !focusFreeBoolean(pr) {
+			return
+		}
+	}
+	dos.Fuse = &Step{Axis: "descendant", Test: next.Test, Preds: next.Preds}
+}
+
+func focusFreeBoolean(e Expr) bool {
+	return booleanOrNodes(e) && !walkFuncCalls(e, func(f *FuncCall) bool {
+		return f.Local == "position" || f.Local == "last"
+	})
+}
+
+var booleanFuncs = map[string]bool{
+	"not": true, "exists": true, "empty": true, "boolean": true, "true": true, "false": true,
+	"contains": true, "starts-with": true, "ends-with": true, "matches": true,
+	"deep-equal": true, "lang": true,
+}
+
+// booleanOrNodes reports whether e can only ever evaluate to a boolean or a
+// node sequence, never a number.
+func booleanOrNodes(e Expr) bool {
+	switch v := e.(type) {
+	case *CompareExpr:
+		return true
+	case *BinaryExpr:
+		return v.Op == "and" || v.Op == "or"
+	case *PathExpr:
+		if v.Start != nil {
+			return false
+		}
+		for _, s := range v.Steps {
+			if s.Postfix != nil {
+				return false
+			}
+		}
+		return true
+	case *UnionExpr:
+		return booleanOrNodes(v.L) && booleanOrNodes(v.R)
+	case *FuncCall:
+		return (v.Prefix == "" || v.Prefix == "fn") && booleanFuncs[v.Local]
+	}
+	return false
 }
 
 func descendantOrSelfStep() *Step {

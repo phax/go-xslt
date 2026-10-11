@@ -1414,6 +1414,8 @@ type engine struct {
 	// pattern matcher builds fresh sub-contexts for each predicate, which
 	// would drop a flag.
 	patternDepth int
+	// matchPool is the free list of matchScratch pairs (see matchingTemplates).
+	matchPool []*matchScratch
 	// streamedRoots holds the root of each document the stylesheet asked to
 	// process with xsl:source-document streamable="yes". The tree is built in
 	// full either way; the flag exists only so the rules that are conditional
@@ -2154,7 +2156,7 @@ func (eng *engine) evalVarDef(vd *VarDef, r rt) (xpath.Object, error) {
 	// must atomize the constructed text node; as-0111/0111b/0802/0802b: a
 	// body of xs:duration/xs:dateTime/… text must cast up to the typed atomic
 	// value, not stay the literal text node).
-	if vd.as == "" && (len(frag.Attrs) > 0 || len(frag.NS) > 0) {
+	if vd.as == "" && (len(frag.Attrs) > 0 || len(frag.NSDecls()) > 0) {
 		// With no @as the variable's value is a DOCUMENT node wrapping the
 		// constructed content, and the content of a document node may not
 		// contain an attribute or namespace node (error-0420b).
@@ -2175,7 +2177,7 @@ func (eng *engine) evalVarDef(vd *VarDef, r rt) (xpath.Object, error) {
 	// several instructions' contributions (even if individually or jointly
 	// empty) are a different, more established case (select-2301/2303,
 	// xsl-document-0601) left untouched.
-	if len(frag.Children) == 1 && len(frag.Attrs) == 0 && len(frag.NS) == 0 {
+	if len(frag.Children) == 1 && len(frag.Attrs) == 0 && len(frag.NSDecls()) == 0 {
 		if c := frag.Children[0]; c.Kind == xmltree.KindText && c.Value == "" {
 			frag.Children = nil
 		}
@@ -2193,7 +2195,7 @@ func (eng *engine) evalVarDef(vd *VarDef, r rt) (xpath.Object, error) {
 // xsl:copy-of followed by a conditional xsl:sequence must still return actual
 // NODES, not their concatenated string-value).
 func fragAsSequence(frag *xmltree.Node) xpath.Object {
-	ns := make(xpath.NodeSet, 0, len(frag.Attrs)+len(frag.NS)+len(frag.Children))
+	ns := make(xpath.NodeSet, 0, len(frag.Attrs)+len(frag.NSDecls())+len(frag.Children))
 	// A standalone attribute or namespace node (an xsl:attribute/xsl:namespace
 	// with no enclosing element constructor) is an ordinary member of the
 	// constructed sequence, but the tree keeps both kinds out-of-band, so they
@@ -2209,7 +2211,7 @@ func fragAsSequence(frag *xmltree.Node) xpath.Object {
 				ns = append(ns, a)
 			}
 		}
-		for _, a := range frag.NS {
+		for _, a := range frag.NSDecls() {
 			if a.SeqIndex() == at || (last && a.SeqIndex() > at) {
 				ns = append(ns, a)
 			}
@@ -2430,7 +2432,7 @@ func (eng *engine) execLitElement(n *litElement, r rt, out *xmltree.Node) error 
 	// invocation of this instruction, but each output element needs its own
 	// namespace nodes (correct Parent linkage, no cross-invocation aliasing).
 	for _, ns := range n.ns {
-		el.NS = append(el.NS, &xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: el})
+		el.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: el})
 	}
 	if err := eng.applyAttrSets(n.useSets, r, el); err != nil {
 		return err
@@ -3240,14 +3242,14 @@ func ensureNamespaceInScope(el *xmltree.Node, uri, preferPrefix string) {
 		return
 	}
 	for cur := el; cur != nil; cur = cur.Parent {
-		for _, ns := range cur.NS {
+		for _, ns := range cur.NSDecls() {
 			if ns.Value == uri {
 				return
 			}
 		}
 	}
 	taken := map[string]bool{}
-	for _, ns := range el.NS {
+	for _, ns := range el.NSDecls() {
 		taken[ns.Name.Local] = true
 	}
 	base := preferPrefix
@@ -3258,7 +3260,7 @@ func ensureNamespaceInScope(el *xmltree.Node, uri, preferPrefix string) {
 	for i := 0; taken[prefix]; i++ {
 		prefix = fmt.Sprintf("%s%d", base, i)
 	}
-	el.NS = append(el.NS, &xmltree.Node{Kind: xmltree.KindNamespace, Name: xmltree.Name{Local: prefix}, Value: uri, Parent: el})
+	el.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: xmltree.Name{Local: prefix}, Value: uri, Parent: el})
 }
 
 func (eng *engine) execElement(n *elemInstr, r rt, out *xmltree.Node) error {
@@ -3397,7 +3399,7 @@ func (eng *engine) execCopy(n *copyInstr, r rt, out *xmltree.Node) error {
 		el := xmltree.NewElement(node.Name)
 		for _, ns := range copiedNamespaceNodes(node) {
 			ns.Parent = el
-			el.NS = append(el.NS, ns)
+			el.AddNS(ns)
 		}
 		if err := eng.applyAttrSets(n.useSets, r, el); err != nil {
 			return err
@@ -3494,7 +3496,7 @@ func (eng *engine) execCopy(n *copyInstr, r rt, out *xmltree.Node) error {
 		if err := eng.execSequence(n.body, r, d); err != nil {
 			return err
 		}
-		if len(d.Attrs) > 0 || len(d.NS) > 0 {
+		if len(d.Attrs) > 0 || len(d.NSDecls()) > 0 {
 			return errAt(n.el, "err:XTDE0420: the content of a document node cannot contain an attribute or namespace node")
 		}
 		// Validated while the content is still gathered under its own document
@@ -3599,7 +3601,7 @@ func (eng *engine) execCopyOf(n *copyOf, r rt, out *xmltree.Node) error {
 			for _, ns := range nss {
 				ns.Parent = dst
 			}
-			dst.NS = nss
+			dst.SetNSDecls(nss)
 		}
 	}
 	if n.noCopyNS {
@@ -3703,8 +3705,8 @@ func cloneNode(n *xmltree.Node) *xmltree.Node {
 		el := xmltree.NewElement(n.Name)
 		el.SetNSBarrier(n.NSBarrier()) // see deepCopyInto's note on this field
 		xmltree.CopyTypeInfo(el, n)
-		for _, ns := range n.NS {
-			el.NS = append(el.NS, &xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: el})
+		for _, ns := range n.NSDecls() {
+			el.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: el})
 		}
 		for _, a := range n.Attrs {
 			xmltree.CopyTypeInfo(el.SetAttr(a.Name, a.Value), a)
@@ -4211,8 +4213,8 @@ func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
 		// xsl:copy-of, or the result-tree copy (namespace-0913/0914).
 		el.SetNSBarrier(node.NSBarrier())
 		xmltree.CopyTypeInfo(el, node)
-		for _, ns := range node.NS {
-			el.NS = append(el.NS, &xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: el})
+		for _, ns := range node.NSDecls() {
+			el.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: el})
 		}
 		for _, a := range node.Attrs {
 			xmltree.CopyTypeInfo(el.SetAttr(a.Name, a.Value), a)
@@ -4260,7 +4262,7 @@ func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
 		// OTHER binding (e.g. the element's own name prefix) collides with
 		// this explicit one, exactly as a real xsl:namespace would
 		// (namespace-2001).
-		out.NS = append(out.NS, &xmltree.Node{Kind: xmltree.KindNamespace, Name: node.Name, Value: node.Value, Parent: out})
+		out.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: node.Name, Value: node.Value, Parent: out})
 	case xmltree.KindComment:
 		out.Append(&xmltree.Node{Kind: xmltree.KindComment, Value: node.Value})
 	case xmltree.KindPI:
@@ -4324,7 +4326,7 @@ func attrPrefixConflicts(out *xmltree.Node, name xmltree.Name) bool {
 	if out.Name.Prefix == name.Prefix && out.Name.Space != name.Space {
 		return true
 	}
-	for _, ns := range out.NS {
+	for _, ns := range out.NSDecls() {
 		if ns.Name.Local == name.Prefix && ns.Value != name.Space {
 			return true
 		}

@@ -264,7 +264,7 @@ func fnCollationKey(c *Context, a []Object) (Object, error) {
 	if at, ok := items[0].(*Atomic); ok && !(isStringType(at.T) || at.T == XSuntypedAtomic || at.T == XSanyURI) {
 		return nil, fmt.Errorf("err:XPTY0004: collation-key requires a string, got %s", at.T)
 	}
-	return &Atomic{T: XSbase64Binary, bin: keyer(ToString(arg(a, 0)))}, nil
+	return &Atomic{T: XSbase64Binary, ext: &atomExt{bin: keyer(ToString(arg(a, 0)))}}, nil
 }
 
 // fnGenerateID implements fn:generate-id (XPath 3.0): a stable NCName-shaped

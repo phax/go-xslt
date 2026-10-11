@@ -173,7 +173,7 @@ func strbAppendFrag(out, frag *xmltree.Node) {
 	for _, a := range frag.Attrs {
 		appendAttrItem(out, a.Name, a.Value)
 	}
-	out.NS = append(out.NS, frag.NS...)
+	out.AddNS(frag.NSDecls()...)
 	for _, ch := range frag.Children {
 		if ch.Kind == xmltree.KindText && !ch.Atomic() && !out.NoAtomicMerge() {
 			if n := len(out.Children); n > 0 {

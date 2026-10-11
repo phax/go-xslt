@@ -4,7 +4,7 @@
 package xmltree
 
 // Kind enumerates the XDM node kinds we model.
-type Kind int
+type Kind uint8
 
 const (
 	KindDocument Kind = iota
@@ -61,13 +61,20 @@ type SchemaTypeName struct {
 // unchanged — see the accessor methods below (nodeext.go) for the read/write
 // surface every previous direct field access now goes through.
 type Node struct {
-	Kind     Kind
+	// The four small integers are declared first and together: Kind (1 byte)
+	// followed by three int32s packs into 16 bytes, where int-typed Kind/Line/
+	// Col/order cost 32 — what takes the whole struct from 192 to 176 bytes,
+	// the next Go allocator size class down. int32 holds 2 billion lines or
+	// nodes per document, far past what this engine can hold in memory.
+	Kind      Kind
+	order     int32 // document order, assigned during parse/build
+	Line, Col int32
+
 	Name     Name
 	Value    string
 	Parent   *Node
 	Children []*Node
 	Attrs    []*Node // attribute nodes
-	NS       []*Node // namespace nodes declared on this element
 
 	// extPtr holds every rarely-used field (see nodeext.go) behind one
 	// lazily allocated pointer — nil for a node that never sets any of them.
@@ -75,8 +82,6 @@ type Node struct {
 	// never directly (kept unexported so nothing outside this package can).
 	extPtr *nodeExt
 
-	Line, Col int
-	order     int // document order, assigned during parse/build
 	// tree identifies the tree the node was numbered in: a creation-ordered
 	// stamp every node of one parse/AssignOrder walk shares (0 = never
 	// numbered). Document order across trees is implementation-dependent
@@ -200,7 +205,7 @@ func (n *Node) Attr(space, local string) (string, bool) {
 func (n *Node) AttrLocal(local string) (string, bool) { return n.Attr("", local) }
 
 // Order returns the document-order index of the node.
-func (n *Node) Order() int { return n.order }
+func (n *Node) Order() int { return int(n.order) }
 
 // Tree returns the creation-ordered stamp of the tree the node was numbered
 // in (0 when it never was) — see the tree field.
@@ -234,7 +239,7 @@ func (n *Node) LookupPrefix(prefix string) (string, bool) {
 		return "http://www.w3.org/XML/1998/namespace", true
 	}
 	for cur := n; cur != nil; cur = cur.Parent {
-		for _, ns := range cur.NS {
+		for _, ns := range cur.NSDecls() {
 			if ns.Name.Local == prefix {
 				return ns.Value, true
 			}
@@ -250,7 +255,7 @@ func (n *Node) LookupPrefix(prefix string) (string, bool) {
 func (n *Node) InScopeNamespaces() map[string]string {
 	out := map[string]string{}
 	for cur := n; cur != nil; cur = cur.Parent {
-		for _, ns := range cur.NS {
+		for _, ns := range cur.NSDecls() {
 			if _, seen := out[ns.Name.Local]; !seen {
 				out[ns.Name.Local] = ns.Value
 			}

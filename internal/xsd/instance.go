@@ -409,7 +409,7 @@ func stampLoc(err *error, el *xmltree.Node) {
 	}
 	var e *Error
 	if errors.As(*err, &e) && e.Line == 0 && e.Col == 0 {
-		e.Line, e.Col = el.Line, el.Col
+		e.Line, e.Col = int(el.Line), int(el.Col)
 	}
 }
 
@@ -746,6 +746,7 @@ func (s *Schema) skipWildcardParseExcuses(p *particle, oc *openContent, kids []*
 		return false
 	}
 	probe := *kids[i]
+	probe.CloneExt()
 	probe.Name.Local = "\x00wildcard-probe" // unmatchable by any declaration
 	cp := make([]*xmltree.Node, len(kids))
 	copy(cp, kids)
@@ -837,6 +838,7 @@ func elementCapacityFor(p *particle, nn xname) int {
 // wildcards by earlier attribution decisions.
 func (s *Schema) wildcardParseExists(p *particle, oc *openContent, kids []*xmltree.Node, i int) bool {
 	probe := *kids[i]
+	probe.CloneExt()
 	probe.Name.Local = "\x00wildcard-probe"
 	cp := make([]*xmltree.Node, len(kids))
 	copy(cp, kids)
@@ -917,7 +919,7 @@ func (s *Schema) validateChildren(ct *ComplexType, el *xmltree.Node, kids []*xml
 	if !matched {
 		e := invalidf("cvc-complex-type.2.4", "element %s: content does not match its content model (%s; allowed child elements: %s)",
 			nameOf(el), describeChildren(kids), s.describeAllowedNames(p))
-		e.Line, e.Col = el.Line, el.Col
+		e.Line, e.Col = int(el.Line), int(el.Col)
 		return e
 	}
 	decls := map[xname]*ElementDecl{}
@@ -964,6 +966,7 @@ func (s *Schema) validateChildren(ct *ComplexType, el *xmltree.Node, kids []*xml
 						copy(pinned, kids)
 					}
 					pr := *kid
+					pr.CloneExt()
 					pr.Name.Local = "\x00wildcard-probe"
 					pinned[i] = &pr
 					continue

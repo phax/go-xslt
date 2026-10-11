@@ -97,7 +97,7 @@ func namespaceNodes(n *xmltree.Node, cache map[*xmltree.Node][]*xmltree.Node) No
 	seen := map[string]bool{}
 	var out NodeSet
 	for cur := n; cur != nil && cur.Kind == xmltree.KindElement; cur = cur.Parent {
-		for _, ns := range cur.NS {
+		for _, ns := range cur.NSDecls() {
 			if seen[ns.Name.Local] {
 				continue
 			}
@@ -161,16 +161,16 @@ func collectDescendants(n *xmltree.Node, out *NodeSet) {
 // must see every node to compute position before any test) keeps using the
 // plain, unfiltered collectDescendants — this is a distinct function, not a
 // behavior change to that one.
-func collectDescendantsFiltered(n *xmltree.Node, test NodeTest, axis string, ctx *Context, out *NodeSet) error {
+func collectDescendantsFiltered(n *xmltree.Node, test NodeTest, axis string, ctx *Context, pc *prefixCache, out *NodeSet) error {
 	for _, c := range n.Children {
-		ok, err := matchTest(test, axis, c, ctx)
+		ok, err := matchTestC(test, axis, c, ctx, pc)
 		if err != nil {
 			return err
 		}
 		if ok {
 			*out = append(*out, c)
 		}
-		if err := collectDescendantsFiltered(c, test, axis, ctx, out); err != nil {
+		if err := collectDescendantsFiltered(c, test, axis, ctx, pc, out); err != nil {
 			return err
 		}
 	}
@@ -284,8 +284,30 @@ func isAncestorOf(a, n *xmltree.Node) bool {
 	return false
 }
 
+// prefixCache memoizes the resolution of ONE name test's namespace prefix for
+// the duration of one step evaluation. A step applies the same test to every
+// candidate node, and resolving the prefix means asking the namespace
+// resolver — for an XSLT stylesheet a walk up the stylesheet element's
+// ancestors (LookupPrefix) — which, repeated per candidate, was the single
+// largest cost of a prefixed name test over a wide document. It is resolved
+// lazily, on the first candidate that actually reaches the prefix, not up
+// front: XPST0081 for an unbound prefix has only ever been raised when some
+// element candidate gets that far, and a step with no candidates must not
+// start raising it.
+type prefixCache struct {
+	done bool
+	uri  string
+	err  error
+}
+
 // matchTest reports whether node c satisfies the node test on the given axis.
 func matchTest(t NodeTest, axis string, c *xmltree.Node, ctx *Context) (bool, error) {
+	return matchTestC(t, axis, c, ctx, nil)
+}
+
+// matchTestC is matchTest with an optional per-step prefix cache (nil: resolve
+// afresh each time, exactly as matchTest always did).
+func matchTestC(t NodeTest, axis string, c *xmltree.Node, ctx *Context, pc *prefixCache) (bool, error) {
 	switch t.Kind {
 	case testNode:
 		return true, nil
@@ -299,7 +321,7 @@ func matchTest(t NodeTest, axis string, c *xmltree.Node, ctx *Context) (bool, er
 		}
 		return t.PITarget == "" || c.Name.Local == t.PITarget, nil
 	case testName:
-		ok, err := matchNameTest(t, axis, c, ctx)
+		ok, err := matchNameTestC(t, axis, c, ctx, pc)
 		if err != nil || !t.TypedElem {
 			return ok, err
 		}
@@ -595,6 +617,10 @@ func builtinTypeLocalName(name string, ctx *Context) (string, bool) {
 }
 
 func matchNameTest(t NodeTest, axis string, c *xmltree.Node, ctx *Context) (bool, error) {
+	return matchNameTestC(t, axis, c, ctx, nil)
+}
+
+func matchNameTestC(t NodeTest, axis string, c *xmltree.Node, ctx *Context, pc *prefixCache) (bool, error) {
 	// principal node type per axis
 	switch axis {
 	case "attribute":
@@ -622,7 +648,17 @@ func matchNameTest(t NodeTest, axis string, c *xmltree.Node, ctx *Context) (bool
 	if t.Braced {
 		return c.Name.Space == t.URI && (t.AnyName || c.Name.Local == t.Local), nil
 	}
-	uri, err := resolvePrefix(ctx, t.Prefix)
+	var uri string
+	var err error
+	if pc != nil {
+		if !pc.done {
+			pc.uri, pc.err = resolvePrefix(ctx, t.Prefix)
+			pc.done = true
+		}
+		uri, err = pc.uri, pc.err
+	} else {
+		uri, err = resolvePrefix(ctx, t.Prefix)
+	}
 	if err != nil {
 		return false, err
 	}

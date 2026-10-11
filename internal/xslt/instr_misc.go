@@ -78,12 +78,12 @@ func (n *nsInstr) exec(eng *engine, r rt, out *xmltree.Node) error {
 	// Prefixes"). If it was NOT excluded, it is a genuine, deliberately kept
 	// binding and a conflicting xsl:namespace for the same prefix is a real
 	// conflict — XTDE0430 (namespace-2618), not a silent rename.
-	for i, ns := range out.NS {
+	for i, ns := range out.NSDecls() {
 		if ns.Name.Local == prefix && ns.Value != uri {
 			if ns.Name.Local == out.Name.Prefix && ns.Value == out.Name.Space {
 				if n.el.Parent != nil {
 					if excl := excludedResultURIs(n.el.Parent); excl[ns.Value] {
-						out.NS[i].Value = uri // fixup: replace the self-binding
+						out.NSDecls()[i].Value = uri // fixup: replace the self-binding
 						return nil
 					}
 				}
@@ -92,7 +92,7 @@ func (n *nsInstr) exec(eng *engine, r rt, out *xmltree.Node) error {
 			return errAt(n.el, "err:XTDE0905: conflicting namespace binding for prefix %q", prefix)
 		}
 	}
-	out.NS = append(out.NS, &xmltree.Node{Kind: xmltree.KindNamespace, Name: xmltree.Name{Local: prefix}, Value: uri, Parent: out})
+	out.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: xmltree.Name{Local: prefix}, Value: uri, Parent: out})
 	return nil
 }
 
@@ -126,7 +126,7 @@ func (n *docInstr) exec(eng *engine, r rt, out *xmltree.Node) error {
 	if err := eng.execSequence(n.body, r, d); err != nil {
 		return err
 	}
-	if len(d.Attrs) > 0 || len(d.NS) > 0 {
+	if len(d.Attrs) > 0 || len(d.NSDecls()) > 0 {
 		// XTDE0420: the sequence used to construct a DOCUMENT node's content
 		// may not contain an attribute or namespace node at all (copy-4601:
 		// xsl:document whose body copies @* along with the elements).
@@ -186,7 +186,7 @@ func (n *wherePopulated) exec(eng *engine, r rt, out *xmltree.Node) error {
 			appendAttrItem(out, a.Name, a.Value)
 		}
 	}
-	out.NS = append(out.NS, frag.NS...)
+	out.AddNS(frag.NSDecls()...)
 	for _, ch := range frag.Children {
 		appendIfPopulated(out, ch)
 	}
@@ -603,7 +603,7 @@ func transferContent(frag, out *xmltree.Node) {
 	for _, a := range frag.Attrs {
 		out.SetAttr(a.Name, a.Value)
 	}
-	out.NS = append(out.NS, frag.NS...)
+	out.AddNS(frag.NSDecls()...)
 	for _, ch := range frag.Children {
 		if ch.Kind == xmltree.KindText && ch.Atomic() {
 			appendAtomicText(out, ch.Value)
@@ -616,7 +616,7 @@ func transferContent(frag, out *xmltree.Node) {
 // fragEmptyContent reports whether a scratch fragment counts as empty for
 // on-empty purposes: no attributes/namespaces, and only zero-length text nodes.
 func fragEmptyContent(frag *xmltree.Node) bool {
-	if len(frag.Attrs) > 0 || len(frag.NS) > 0 {
+	if len(frag.Attrs) > 0 || len(frag.NSDecls()) > 0 {
 		return false
 	}
 	for _, c := range frag.Children {

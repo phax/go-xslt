@@ -278,7 +278,7 @@ func dateDurationArith(op string, a, b *Atomic) (Object, error) {
 		}
 		// Not time.Sub: a time.Duration saturates at ±292 years, which
 		// truncates 0001-01-01 − 2005-07-06 (op-subtract-dates-yielding-DTD-8).
-		secs := float64(a.tm.Unix()-b.tm.Unix()) + float64(a.tm.Nanosecond()-b.tm.Nanosecond())/1e9
+		secs := float64(a.tmv().Unix()-b.tmv().Unix()) + float64(a.tmv().Nanosecond()-b.tmv().Nanosecond())/1e9
 		return NewDuration(XSdayTimeDuration, Duration{Secs: secs}), nil
 	case isDurationType(a.T) && isDurationType(b.T):
 		// +/-/div require the SAME duration subtype: yearMonth with yearMonth
@@ -292,18 +292,18 @@ func dateDurationArith(op string, a, b *Atomic) (Object, error) {
 		}
 		switch op {
 		case "+":
-			return NewDuration(a.T, Duration{Months: a.dur.Months + b.dur.Months, Secs: normDurSecs(a.dur.Secs + b.dur.Secs)}), nil
+			return NewDuration(a.T, Duration{Months: a.durv().Months + b.durv().Months, Secs: normDurSecs(a.durv().Secs + b.durv().Secs)}), nil
 		case "-":
-			return NewDuration(a.T, Duration{Months: a.dur.Months - b.dur.Months, Secs: normDurSecs(a.dur.Secs - b.dur.Secs)}), nil
+			return NewDuration(a.T, Duration{Months: a.durv().Months - b.durv().Months, Secs: normDurSecs(a.durv().Secs - b.durv().Secs)}), nil
 		case "div":
 			// duration div duration → xs:decimal ratio (same duration subtype),
 			// computed EXACTLY: a float64 quotient rounded back to a decimal
 			// misses the 16th digit (op-divide-dayTimeDuration-by-dTD-1).
 			var num, den *big.Rat
 			if ym {
-				num, den = new(big.Rat).SetInt64(int64(a.dur.Months)), new(big.Rat).SetInt64(int64(b.dur.Months))
+				num, den = new(big.Rat).SetInt64(int64(a.durv().Months)), new(big.Rat).SetInt64(int64(b.durv().Months))
 			} else {
-				num, den = new(big.Rat).SetFloat64(a.dur.Secs), new(big.Rat).SetFloat64(b.dur.Secs)
+				num, den = new(big.Rat).SetFloat64(a.durv().Secs), new(big.Rat).SetFloat64(b.durv().Secs)
 			}
 			if num == nil || den == nil {
 				return nil, fmt.Errorf("err:FOAR0002: duration division overflow")
@@ -366,9 +366,9 @@ func scaleDuration(d *Atomic, f float64, divide bool) (Object, error) {
 	}
 	var mf, sf float64
 	if divide {
-		mf, sf = float64(d.dur.Months)/f, d.dur.Secs/f
+		mf, sf = float64(d.durv().Months)/f, d.durv().Secs/f
 	} else {
-		mf, sf = float64(d.dur.Months)*f, d.dur.Secs*f
+		mf, sf = float64(d.durv().Months)*f, d.durv().Secs*f
 	}
 	months := math.Floor(float64(mf) + 0.5)
 	if math.Abs(months) > 1e15 {
@@ -405,12 +405,12 @@ func dateDurationPairOK(dt, dur AtomType) bool {
 }
 
 func addDurationToDate(d *Atomic, dur *Atomic, subtract bool) (Object, error) {
-	months := dur.dur.Months
-	secs := dur.dur.Secs
+	months := dur.durv().Months
+	secs := dur.durv().Secs
 	if subtract {
 		months, secs = -months, -secs
 	}
-	tm := d.tm
+	tm := d.tmv()
 	if months != 0 {
 		// XML Schema Appendix E: the day is clamped to the length of the
 		// target month rather than overflowing into the next one

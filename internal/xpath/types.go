@@ -58,13 +58,13 @@ func mapKey(it Item) string {
 			}
 			return "b:0"
 		case v.T == XSqname || v.T == XSnotation:
-			return "q:{" + v.qn.Space + "}" + v.qn.Local
+			return "q:{" + v.qnv().Space + "}" + v.qnv().Local
 		case v.T == XSstring || v.T == XSanyURI || v.T == XSuntypedAtomic || isStringType(v.T):
 			return "s:" + v.Lexical()
 		case isDurationType(v.T):
 			// Durations are the same key by VALUE, across subtypes and lexical
 			// forms (P1Y and P12M are one key; map-get-017).
-			return "dur:" + strconv.Itoa(v.dur.Months) + "/" + strconv.FormatFloat(v.dur.Secs, 'g', -1, 64)
+			return "dur:" + strconv.Itoa(v.durv().Months) + "/" + strconv.FormatFloat(v.durv().Secs, 'g', -1, 64)
 		case isDateTimeType(v.T):
 			// Date/time keys are the same key when they are eq: the same
 			// type family, the same timezone presence, and the same instant
@@ -75,9 +75,9 @@ func mapKey(it Item) string {
 				t = XSdateTime
 			}
 			if v.hasTZ {
-				return "x:" + t.String() + ":Z:" + formatDateTime(t, v.tm.UTC(), false)
+				return "x:" + t.String() + ":Z:" + formatDateTime(t, v.tmv().UTC(), false)
 			}
-			return "x:" + t.String() + "::" + formatDateTime(t, v.tm, false)
+			return "x:" + t.String() + "::" + formatDateTime(t, v.tmv(), false)
 		default:
 			// binary: distinguish by type then lexical form.
 			return "x:" + v.T.String() + ":" + v.Lexical()
@@ -137,9 +137,9 @@ func KeyString(it Item) string {
 			t = XSdateTime
 		}
 		if a.hasTZ {
-			return "x:" + t.String() + ":Z:" + formatDateTime(t, a.tm.UTC(), false)
+			return "x:" + t.String() + ":Z:" + formatDateTime(t, a.tmv().UTC(), false)
 		}
-		return "x:" + t.String() + "::" + formatDateTime(t, a.tm, false)
+		return "x:" + t.String() + "::" + formatDateTime(t, a.tmv(), false)
 	case a.T == XSqname || a.T == XSnotation:
 		// A QName/NOTATION value IS its expanded name (XSD 1.0 Part 2
 		// §3.2.18/§3.2.19), and "eq" compares exactly that — the prefix is
@@ -148,7 +148,7 @@ func KeyString(it Item) string {
 		// the whole point of notation-0305. The "q:" tag keeps such a value
 		// from colliding with an unrelated string that happens to be spelled
 		// the same way, exactly as "n:" does for numerics above.
-		return "q:{" + a.qn.Space + "}" + a.qn.Local
+		return "q:{" + a.qnv().Space + "}" + a.qnv().Local
 	default:
 		return a.Lexical()
 	}

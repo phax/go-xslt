@@ -232,26 +232,26 @@ func hofFunctionLookup(ctx *Context, args []Object) (Object, error) {
 		return nil, fmt.Errorf("err:XPTY0004: function-lookup expects exactly one arity")
 	}
 	arity := int(ToNumber(arg(args, 1)))
-	ns := q.qn.Space
-	if ns == "" && q.qn.Prefix != "" {
-		if n, ok := nsForKnownPrefix(q.qn.Prefix); ok {
+	ns := q.qnv().Space
+	if ns == "" && q.qnv().Prefix != "" {
+		if n, ok := nsForKnownPrefix(q.qnv().Prefix); ok {
 			ns = n
 		} else if ctx.NS != nil {
-			if n, ok := ctx.NS.ResolveNS(q.qn.Prefix); ok {
+			if n, ok := ctx.NS.ResolveNS(q.qnv().Prefix); ok {
 				ns = n
 			}
 		}
 	}
 	// Note: an empty namespace URI is NOT defaulted to the fn namespace — a QName
 	// in no namespace names no built-in function, so the lookup yields ().
-	if fn, ok := lookupFunction(ctx, ns, q.qn.Local, arity); ok {
+	if fn, ok := lookupFunction(ctx, ns, q.qnv().Local, arity); ok {
 		return fn, nil
 	}
 	// The built-in F&O catalog has no match — give the host (the XSLT
 	// engine, for a user-declared xsl:function) a chance, via
 	// Context.ResolveNamedFunction's own doc comment.
 	if ctx.ResolveNamedFunction != nil {
-		if fn, ok := ctx.ResolveNamedFunction(ns, q.qn.Local, arity); ok {
+		if fn, ok := ctx.ResolveNamedFunction(ns, q.qnv().Local, arity); ok {
 			return fn, nil
 		}
 	}

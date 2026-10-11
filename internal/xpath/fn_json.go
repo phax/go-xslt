@@ -429,7 +429,7 @@ func serAdaptiveItem(it Item, p serParams) (string, error) {
 			}
 			return "false()", nil
 		case v.T == XSqname || v.T == XSnotation:
-			return "Q{" + v.qn.Space + "}" + v.qn.Local, nil
+			return "Q{" + v.qnv().Space + "}" + v.qnv().Local, nil
 		case v.T == XSdouble || v.T == XSfloat:
 			return serAdaptiveDouble(v.Float()), nil
 		case v.T == XSdecimal:
@@ -1145,7 +1145,7 @@ func serSetMapValue(p *serParams, name string, v Object) error {
 			if !ok || a.T != XSqname {
 				return fmt.Errorf("err:XPTY0004: serialize: %s must be a sequence of xs:QName", name)
 			}
-			names = append(names, xmltree.Name{Space: a.qn.Space, Local: a.qn.Local})
+			names = append(names, xmltree.Name{Space: a.qnv().Space, Local: a.qnv().Local})
 		}
 		if name == "cdata-section-elements" {
 			p.cdataElems = append(p.cdataElems, names...)
@@ -2184,7 +2184,7 @@ func fnJSJSONToXML(ctx *Context, args []Object) (Object, error) {
 	// the root gives every descendant the binding by inheritance, exactly as a
 	// parsed document would have it.
 	if root != nil && root.Kind == xmltree.KindElement {
-		root.NS = append(root.NS, &xmltree.Node{
+		root.AddNS(&xmltree.Node{
 			Kind: xmltree.KindNamespace, Name: xmltree.Name{Local: ""}, Value: jsXFNS, Parent: root,
 		})
 	}
@@ -2269,6 +2269,7 @@ func serApplyCharMaps(n *xmltree.Node, maps map[string]string) *xmltree.Node {
 	var clone func(x *xmltree.Node, parent *xmltree.Node) *xmltree.Node
 	clone = func(x *xmltree.Node, parent *xmltree.Node) *xmltree.Node {
 		cp := *x
+		cp.CloneExt()
 		cp.Parent = parent
 		if x.Kind == xmltree.KindText {
 			cp.Value = mapStr(x.Value)
@@ -2276,6 +2277,7 @@ func serApplyCharMaps(n *xmltree.Node, maps map[string]string) *xmltree.Node {
 		cp.Attrs = make([]*xmltree.Node, len(x.Attrs))
 		for i, a := range x.Attrs {
 			ac := *a
+			ac.CloneExt()
 			ac.Parent = &cp
 			ac.Value = mapStr(a.Value)
 			cp.Attrs[i] = &ac

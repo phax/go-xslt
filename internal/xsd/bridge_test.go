@@ -572,7 +572,7 @@ func TestValidateNodeNormalizesConstructedText(t *testing.T) {
 	s := bridgeCompile(t)
 	mk := func(parts ...string) *xmltree.Node {
 		head := xmltree.NewElement(xmltree.Name{Space: "urn:t", Local: "head", Prefix: "t"})
-		head.NS = append(head.NS, &xmltree.Node{Kind: xmltree.KindNamespace,
+		head.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace,
 			Name: xmltree.Name{Local: "t"}, Value: "urn:t", Parent: head})
 		zip := xmltree.NewElement(xmltree.Name{Space: "urn:t", Local: "zip", Prefix: "t"})
 		for _, p := range parts {

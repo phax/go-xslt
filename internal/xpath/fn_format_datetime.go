@@ -151,7 +151,7 @@ func monthWeekdayNames(opts *dtOptions) ([]string, []string) {
 
 // formatDateTimePicture renders a date/time per the XPath [component] picture.
 func formatDateTimePicture(at *Atomic, picture string, opts *dtOptions) (Object, error) {
-	tm := at.tm
+	tm := at.tmv()
 	var b strings.Builder
 	b.WriteString(opts.calPrefix)
 	rs := []rune(picture)

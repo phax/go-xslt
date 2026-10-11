@@ -328,7 +328,7 @@ func qnNCName(s string) *Atomic {
 // atomics retain their namespace URI; a lexical-only QName yields "".
 func qnURIOf(q *Atomic) string {
 	if q != nil && q.T == XSqname {
-		return q.qn.Space
+		return q.qnv().Space
 	}
 	return ""
 }
