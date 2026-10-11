@@ -65,7 +65,7 @@ same input — confirmed by running the disputed case through a live,
 independent reference processor (SaxonJS), not assumed — rather than an
 engine gap; see `CLAUDE.md` for the specific cases.
 
-Measured 2026-10-11, against these suite commits:
+Measured 2026-10-11 on engine commit [`35ffebc`](https://github.com/tim-riep/go-xslt/commit/35ffebc) (release `v0.0.6`), against these suite commits:
 
 | Suite | Source | Commit | Pass rate | Detail |
 |---|---|---|---|---|
