@@ -27,12 +27,8 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      # -p 1: the streaming tests assert a peak-heap SLOPE, which only means
-      # something when the package under test is not fighting the other
-      # packages' test binaries for CPU (on a shared 2-core runner the collector
-      # falls behind and bounded runs read as growing).
       - name: go test
-        run: go test -p 1 ./...
+        run: go test ./...
 
   windows:
     # Filesystem-relative resolution (BaseDir, file: URIs) is OS-specific, so the

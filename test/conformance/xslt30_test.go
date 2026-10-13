@@ -23,7 +23,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 	"github.com/tim-riep/go-xslt/internal/xpath"
@@ -630,34 +629,24 @@ func runXSLTSet(setFile string, cache *ssCache, verbose bool) *xsltResult {
 	return r
 }
 
-func safeRunXSLT(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, string) {
-	type res struct{ st, rs string }
-	ch := make(chan res, 1)
-	go func() {
-		defer func() {
-			if e := recover(); e != nil {
-				if os.Getenv("XSLT30_PANICDUMP") != "" {
-					fmt.Printf("PANIC %s/%s: %v\n%s\n", set.Name, tc.Name, e, debug.Stack())
-				}
-				ch <- res{"fail", "panic"}
+// safeRunXSLT runs one case with panic recovery and NO wall-clock limit. A
+// verdict that depends on how long a case took depends on how busy the machine
+// was: the earlier per-case timeout (first 8 s, then 30 s) made cases flip
+// between pass and "timeout" from one run to the next, which is exactly what a
+// conformance number must not do. A case that cannot finish is stopped by the
+// engine's own deterministic budgets (instruction steps and recursion depth,
+// both counted, not timed); anything slower than that is a hang, and `go test
+// -timeout` ends the whole run loudly instead of failing one case quietly.
+func safeRunXSLT(tc xsltCase, set xsltSet, dir string, cache *ssCache) (st, rs string) {
+	defer func() {
+		if e := recover(); e != nil {
+			if os.Getenv("XSLT30_PANICDUMP") != "" {
+				fmt.Printf("PANIC %s/%s: %v\n%s\n", set.Name, tc.Name, e, debug.Stack())
 			}
-		}()
-		st, rs := runXSLTCase(tc, set, dir, cache)
-		ch <- res{st, rs}
+			st, rs = "fail", "panic"
+		}
 	}()
-	select {
-	case r := <-ch:
-		return r.st, r.rs
-	case <-time.After(30 * time.Second):
-		// The engine's depth/step guards prevent unrecoverable overflow, so an
-		// abandoned goroutine is safe; a genuine hang is counted as a failure.
-		// The cap is generous because a few suite cases legitimately do a LOT
-		// of work — the catalog-* cases each compile and inspect every
-		// stylesheet in the suite — and at 8s they flaked in and out of
-		// passing depending on how loaded the machine was, which made the
-		// fail set non-reproducible between runs.
-		return "fail", "timeout"
-	}
+	return runXSLTCase(tc, set, dir, cache)
 }
 
 func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, string) {

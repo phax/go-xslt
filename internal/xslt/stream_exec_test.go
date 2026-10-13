@@ -5,11 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 )
@@ -519,54 +517,37 @@ func TestStreamKeyIsRefused(t *testing.T) {
 // the memory-bound proof
 // ---------------------------------------------------------------------------
 
-// strbPeakHeap runs fn while sampling the heap, returning the largest
-// HeapAlloc observed during it. Sampling (rather than a before/after reading)
-// is what makes it a PEAK: the non-streaming path frees its tree eventually,
-// so only an observation taken while the tree is live distinguishes the two.
+// strbPeakHeap runs fn and returns the largest LIVE heap observed during it.
 //
-// The collector is tightened for the duration. HeapAlloc counts garbage that
-// has not been collected yet, and at the default GOGC the heap is allowed to
-// double before a cycle runs — so an allocation-heavy streamed run would
-// report a "peak" made mostly of dead records, and one that moved with
-// whatever the rest of the test binary had left on the heap. At GOGC=20 the
-// reading tracks the LIVE heap, which is the quantity the claim is about.
+// The readings are taken at fixed points of the run — every strbProbeEvery
+// executed instructions, right after a forced collection (stepProbe) — so the
+// number is a property of the program: the same on a loaded CI runner as on an
+// idle laptop. An earlier version sampled HeapAlloc every 2 ms at GOGC=20; that
+// measured the collector's lag as much as the engine, and a slow machine made a
+// bounded run look like a growing one. A reading after runtime.GC() counts live
+// objects only (dead records of a streamed run cost nothing), and "peak" still
+// means what it did: the non-streaming path holds its whole tree live at the
+// later probes, the streaming one never does.
 func strbPeakHeap(fn func()) uint64 {
-	prevGC := debug.SetGCPercent(20)
-	defer debug.SetGCPercent(prevGC)
-	runtime.GC()
-	debug.FreeOSMemory()
 	var peak uint64
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	prevProbe, prevEvery := stepProbe, stepProbeEvery
+	stepProbe, stepProbeEvery = func() {
+		runtime.GC()
 		var m runtime.MemStats
-		for tick := 0; ; tick++ {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			// Collect on a clock of our own: with GOGC=20 the runtime's pacing
-			// is all that bounds the garbage in HeapAlloc, and on a slow or
-			// busy CI runner it lags enough to make a bounded run look like a
-			// growing one. A forced collection every ~30ms caps that noise
-			// without hiding retention (retained data survives it).
-			if tick%15 == 14 {
-				runtime.GC()
-			}
-			runtime.ReadMemStats(&m)
-			if m.HeapAlloc > peak {
-				peak = m.HeapAlloc
-			}
-			time.Sleep(2 * time.Millisecond)
+		runtime.ReadMemStats(&m)
+		if m.HeapAlloc > peak {
+			peak = m.HeapAlloc
 		}
-	}()
+	}, strbProbeEvery
+	defer func() { stepProbe, stepProbeEvery = prevProbe, prevEvery }()
+	runtime.GC()
 	fn()
-	close(stop)
-	<-done
 	return peak
 }
+
+// strbProbeEvery is how many instructions pass between two heap readings: the
+// 400,000-record documents of the memory tests take a few hundred readings.
+const strbProbeEvery = 20000
 
 // TestStreamIsMemoryBounded is the actual deliverable of the streaming
 // executor, and the one thing the W3C conformance suite cannot check: its

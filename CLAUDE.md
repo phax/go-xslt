@@ -158,6 +158,16 @@ Desktop GUI (**run from `desktop/`**):
 
 ## Conventions / gotchas
 
+- **Tests are deterministic — no verdict may depend on wall-clock time or on how
+  busy the machine is.** No per-case timeouts in the harnesses (a case that
+  cannot finish is stopped by the engine's counted budgets — instruction steps,
+  recursion depth — and a true hang by `go test -timeout`, loudly); no heap
+  sampling on a timer. The memory-bound tests read the LIVE heap (forced GC) at
+  fixed points of the run via `stepProbe` (`internal/xslt/probe.go`: every N
+  executed instructions), so a bounded run reads the same on a loaded CI runner
+  and an idle laptop. Verified: three combined-conformance runs started at once
+  under a load average of ~60 gave identical fail lists.
+
 - The Windows build must be `CGO_ENABLED=0` with `-ldflags "-H=windowsgui"`
   (the Makefile does this). macOS build is native CGo (webkit).
 - `react-resizable-panels` is pinned to **v2** (v4 renamed the API).

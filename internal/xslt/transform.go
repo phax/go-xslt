@@ -2487,6 +2487,9 @@ func (eng *engine) execInstrRaw(in instruction, r rt, out *xmltree.Node) error {
 	// Step budget: bounds a single transform's runtime so a non-terminating-but-
 	// non-deepening loop (e.g. unbounded xsl:iterate) errors instead of hanging.
 	eng.steps++
+	if stepProbe != nil && stepProbeEvery > 0 && eng.steps%stepProbeEvery == 0 {
+		stepProbe()
+	}
 	if eng.steps > maxSteps {
 		return fmt.Errorf("err:XTDE0040: step budget exhausted (possible non-terminating stylesheet)")
 	}
