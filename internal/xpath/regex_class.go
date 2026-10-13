@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // expandClassSubtraction rewrites XSD character-class subtraction
@@ -174,27 +175,63 @@ func parseClassRanges(s string) ([][2]rune, bool) {
 				i++
 				continue
 			case 'p', 'P':
-				// \p{IsBlock} expands to a range; categories make this unreducible.
-				if n == 'P' || i+2 >= len(rs) || rs[i+2] != '{' {
+				// \p{IsBlock} expands to its range; \p{L}, \p{Nd}, \p{Cn}, ... to
+				// the code points of that general category; \P{..} to the
+				// complement of either.
+				if i+2 >= len(rs) || rs[i+2] != '{' {
 					return nil, false
 				}
 				e := i + 3
 				for e < len(rs) && rs[e] != '}' {
 					e++
 				}
+				if e >= len(rs) {
+					return nil, false
+				}
 				name := string(rs[i+3 : e])
-				if !strings.HasPrefix(name, "Is") {
-					return nil, false
+				var set [][2]rune
+				if strings.HasPrefix(name, "Is") {
+					r, ok := xsdBlockRanges[name[2:]]
+					if !ok || r[0] < 0 {
+						return nil, false
+					}
+					set = [][2]rune{r}
+				} else {
+					var ok bool
+					if set, ok = categoryRanges(name); !ok {
+						return nil, false
+					}
 				}
-				r, ok := xsdBlockRanges[name[2:]]
-				if !ok || r[0] < 0 {
-					return nil, false
+				if n == 'P' {
+					set = complementRanges(set)
 				}
-				out = append(out, r)
+				out = append(out, set...)
 				i = e
 				continue
+			case 'd', 'D', 's', 'S', 'w', 'W':
+				// XSD multi-character escapes (Unicode semantics, not RE2's ASCII
+				// ones): \d = \p{Nd}, \s = [ \t\n\r], \w = everything except
+				// \p{P}, \p{Z}, \p{C}; the capital forms are their complements.
+				var set [][2]rune
+				switch n {
+				case 'd', 'D':
+					set, _ = categoryRanges("Nd")
+				case 's', 'S':
+					set = [][2]rune{{9, 10}, {13, 13}, {32, 32}}
+				default:
+					p, _ := categoryRanges("P")
+					z, _ := categoryRanges("Z")
+					c, _ := categoryRanges("C")
+					set = complementRanges(unionRanges(unionRanges(p, z), c))
+				}
+				if n == 'D' || n == 'S' || n == 'W' {
+					set = complementRanges(set)
+				}
+				out = append(out, set...)
+				i++
+				continue
 			default:
-				return nil, false // \d \w \s etc — not reducible
+				return nil, false // \\ escapes this cannot reduce
 			}
 			i++
 		default:
@@ -263,7 +300,7 @@ func subtractRanges(base, sub [][2]rune) [][2]rune {
 
 func emitRanges(ranges [][2]rune) string {
 	var b strings.Builder
-	for _, r := range ranges {
+	for _, r := range clipSurrogates(ranges) {
 		if r[0] == r[1] {
 			b.WriteString(classEscape(r[0]))
 		} else {
@@ -409,3 +446,92 @@ var (
 	NameStartComplement = complementBody(xmlNameStartRanges)
 	NameCharComplement  = complementBody(xmlNameCharRanges)
 )
+
+// clipSurrogates removes U+D800..U+DFFF: a Go string cannot hold a surrogate
+// code point, so a class listing one literally would silently become U+FFFD.
+func clipSurrogates(rs [][2]rune) [][2]rune {
+	var out [][2]rune
+	for _, r := range rs {
+		lo, hi := r[0], r[1]
+		if hi < 0xD800 || lo > 0xDFFF {
+			out = append(out, r)
+			continue
+		}
+		if lo < 0xD800 {
+			out = append(out, [2]rune{lo, 0xD7FF})
+		}
+		if hi > 0xDFFF {
+			out = append(out, [2]rune{0xE000, hi})
+		}
+	}
+	return out
+}
+
+// complementRanges returns the gaps of a (sorted or unsorted) range set over
+// U+0000..U+10FFFF.
+func complementRanges(rs [][2]rune) [][2]rune {
+	merged := unionRanges(rs, nil)
+	var out [][2]rune
+	next := rune(0)
+	for _, r := range merged {
+		if r[0] > next {
+			out = append(out, [2]rune{next, r[0] - 1})
+		}
+		if r[1]+1 > next {
+			next = r[1] + 1
+		}
+	}
+	if next <= 0x10FFFF {
+		out = append(out, [2]rune{next, 0x10FFFF})
+	}
+	return out
+}
+
+// tableRanges turns a Go range table into sorted ranges.
+func tableRanges(t *unicode.RangeTable) [][2]rune {
+	var out [][2]rune
+	for _, r := range t.R16 {
+		if r.Stride == 1 {
+			out = append(out, [2]rune{rune(r.Lo), rune(r.Hi)})
+			continue
+		}
+		for c := rune(r.Lo); c <= rune(r.Hi); c += rune(r.Stride) {
+			out = append(out, [2]rune{c, c})
+		}
+	}
+	for _, r := range t.R32 {
+		if r.Stride == 1 {
+			out = append(out, [2]rune{rune(r.Lo), rune(r.Hi)})
+			continue
+		}
+		for c := rune(r.Lo); c <= rune(r.Hi); c += rune(r.Stride) {
+			out = append(out, [2]rune{c, c})
+		}
+	}
+	return out
+}
+
+// categoryRanges returns the code points of an XSD general-category escape
+// (\p{L}, \p{Lu}, \p{Cn}, \p{C}, ...). Go's unicode.C is Cc|Cf|Co|Cs and has no
+// Cn, whereas XSD's C includes the unassigned code points, so C and Cn are
+// derived as the complement of every other (assigned) category.
+func categoryRanges(name string) ([][2]rune, bool) {
+	switch name {
+	case "C", "Cn":
+		var assigned [][2]rune
+		for _, g := range []string{"L", "M", "N", "P", "S", "Z"} {
+			assigned = append(assigned, tableRanges(unicode.Categories[g])...)
+		}
+		if name == "Cn" {
+			for _, g := range []string{"Cc", "Cf", "Co", "Cs"} {
+				assigned = append(assigned, tableRanges(unicode.Categories[g])...)
+			}
+		}
+		return complementRanges(assigned), true
+	}
+	t, ok := unicode.Categories[name]
+	if !ok {
+		return nil, false
+	}
+	return unionRanges(tableRanges(t), nil), true
+}

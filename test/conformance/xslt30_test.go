@@ -354,7 +354,7 @@ func xsltSkip(deps ...xsltDeps) string {
 			// Tests pinned to an exact old Unicode version compare character
 			// ranges Go's Unicode 15 tables can never reproduce (see the
 			// unicode-90 cluster) — the dependency is unsatisfied by design.
-			if u.Satisfied != "false" {
+			if u.Satisfied != "false" && os.Getenv("XSLT30_U90") == "" {
 				return "unicode-version-pinned"
 			}
 		}
@@ -604,6 +604,9 @@ func runXSLTSet(setFile string, cache *ssCache, verbose bool) *xsltResult {
 		return r
 	}
 	for _, tc := range set.Cases {
+		if f := os.Getenv("XSLT30_CASE"); f != "" && !strings.Contains(tc.Name, f) {
+			continue
+		}
 		st, reason := safeRunXSLT(tc, set, dir, cache)
 		switch st {
 		case "pass":
@@ -661,12 +664,18 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 	if reason := xsltSkip(set.Deps, tc.Deps); reason != "" {
 		return "skip", reason
 	}
-	// The unicode-90 set asserts exact Unicode character counts pinned to an old
-	// Unicode version (e.g. \d=\p{Nd} expects 370; \p{L} expects 48739). Go's
-	// unicode package ships Unicode 15.0 (\p{Nd}=680, \p{L}=136103), so these
-	// version-pinned counts can never match without bundling obsolete Unicode
-	// tables. Our regex semantics are correct for current Unicode; skip by design.
-	if strings.Contains(set.Name, "unicode-90") {
+	// The unicode-90 set is skipped, for three reasons that are about the suite
+	// and not about the engine: the Unicode version is implementation-defined
+	// (F&O 3.1, Conformance — Go ships Unicode 15, the data here is 9.0);
+	// the 16 count cases assert exact 9.0 totals (\d = 370, \p{L} = 48739);
+	// and the 1,444 generated cases never pass the charclass parameter their
+	// stylesheet needs (it defaults to 'Ll', so the Zs case asks whether the Zs
+	// characters are Ll) and take minutes each. What they are FOR — the category
+	// escapes agreeing with Unicode 9.0 — is checked directly, over every code
+	// point, by TestUnicodeCategoryEscapesAgainstSuiteData. XSLT30_U90=1 runs
+	// the set anyway (slow; expect failures for the reasons above); XSLT30_CASE
+	// narrows a run to cases whose name contains the given text.
+	if strings.Contains(set.Name, "unicode-90") && os.Getenv("XSLT30_U90") == "" {
 		return "skip", "unicode-version-pinned"
 	}
 	if len(tc.Result.Children) == 0 {

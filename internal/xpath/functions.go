@@ -1547,7 +1547,10 @@ func xsdRegexToGo(p string, ignoreWS, dotAll, caseInsensitive, allowBackref bool
 				case 'd', 'D':
 					body = `\p{Nd}`
 				case 'w', 'W':
-					body = `\p{P}\p{Z}\p{C}` // \w is the complement of this set
+					// \w is the complement of P|Z|C, and C includes the unassigned
+					// code points (see the \p{C} case): spelled as the union of
+					// the other categories, \W as P|Z plus C's explicit ranges.
+					body = `\p{P}\p{Z}` + wordComplementC()
 				case 's', 'S':
 					body = `\x{20}\t\n\r`
 				}
@@ -1559,6 +1562,8 @@ func xsdRegexToGo(p string, ignoreWS, dotAll, caseInsensitive, allowBackref bool
 				case inClass && n == 'w':
 					// \w = ¬(P∪Z∪C) = exactly L∪M∪N∪S — no underscore (reZ002)
 					b.WriteString(`\p{L}\p{M}\p{N}\p{S}`)
+				case n == 'w':
+					b.WriteString(`[\p{L}\p{M}\p{N}\p{S}]`)
 				case inClass && n == 'S':
 					// \S = ¬{space, tab, nl, cr}, emitted as explicit ranges (reG25)
 					b.WriteString(`\x00-\x08\x0B\x0C\x0E-\x1F\x{21}-\x{10FFFF}`)
@@ -1588,12 +1593,19 @@ func xsdRegexToGo(p string, ignoreWS, dotAll, caseInsensitive, allowBackref bool
 					// runes, Cs needs no mention) — reJ80's \p{Cn}* is valid
 					// XSD. Inside a class the union form is inexpressible;
 					// leave that to the compile stage.
-					if name == "Cn" && !inClass {
-						const assigned = `\p{L}\p{M}\p{N}\p{P}\p{S}\p{Z}\p{Cc}\p{Cf}\p{Co}`
+					// XSD's C is Cc|Cf|Co|Cs|Cn — RE2's \p{C} lacks Cn (the code
+					// points no category assigns), so both C and Cn are emitted as
+					// explicit ranges, inside or outside a class.
+					if name == "C" || name == "Cn" {
+						set, _ := categoryRanges(name)
 						if neg {
-							b.WriteString("[" + assigned + "]")
+							set = complementRanges(set)
+						}
+						body := classBody(clipSurrogates(set))
+						if inClass {
+							b.WriteString(body)
 						} else {
-							b.WriteString("[^" + assigned + "]")
+							b.WriteString("[" + body + "]")
 						}
 						i = j
 						continue
@@ -1835,4 +1847,11 @@ func validReplacement(s string) bool {
 		}
 	}
 	return true
+}
+
+// wordComplementC is the explicit class body of XSD's \p{C} (surrogates left
+// out, a Go string cannot contain one), for the \W escape.
+func wordComplementC() string {
+	set, _ := categoryRanges("C")
+	return classBody(clipSurrogates(set))
 }

@@ -251,6 +251,23 @@ Desktop GUI (**run from `desktop/`**):
     file used to say so) — all three were built from scratch and are now
     real, load-bearing features (see their own entries below), not
     conformance-only paper capabilities.
+  - **Skipped by design, not counted** (see the `skip reasons` line of any
+    run): `unicode-90` (1,580 cases) — the Unicode version is
+    implementation-defined (F&O 3.1 Conformance: "which version of Unicode is
+    supported" is implementation-defined, latest recommended; XSD 1.1 Part 2
+    says the same for the Unicode database), Go ships 15.0 and the cases
+    assert 9.0 totals, and the 1,444 generated ones also omit the `charclass`
+    parameter their stylesheet needs (every case but `Ll` tests the wrong
+    class) and take minutes each. The substitute is
+    `test/conformance/unicode_categories_test.go`: every `\p{..}`/`\P{..}`
+    category escape against the suite's own 9.0 data for every code point —
+    the engine must agree everywhere except exactly the 21,066 code points
+    whose category changed between 9.0 and 15.0. (Writing it found and fixed
+    real bugs: XSD class subtraction with category/`\d`/`\w`/`\s` operands
+    was handed to RE2 unreduced and matched wrongly, and `\p{C}`/`\w`/`\W`
+    ignored the unassigned code points that XSD's C includes.) Other skips:
+    `spec:XSLT20`-only cases, features not claimed in a given mode,
+    `feat-not:*` cases that want a processor WITHOUT a feature we implement.
   - **Residual, default mode** (12 fails; not winnable without
     disproportionate effort, or genuinely impossible — do not re-attempt
     without new evidence): network-dependent assertions (`unparsed-text-2002/
