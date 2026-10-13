@@ -11,7 +11,10 @@ import (
 )
 
 type (
-	Request         = engine.Request
+	Request          = engine.Request
+	TransformRequest = engine.TransformRequest
+	// Stylesheet is a stylesheet compiled once by Compile and run many times.
+	Stylesheet      = engine.Stylesheet
 	Result          = engine.Result
 	Diagnostic      = engine.Diagnostic
 	SecondaryOutput = engine.SecondaryOutput
@@ -65,3 +68,12 @@ func Validate(req ValidateRequest) ValidateResult { return engine.Validate(req) 
 // XML context document (req.Source). It never panics; errors are reported as
 // Diagnostics.
 func EvalXPath(req XPathRequest) XPathResult { return engine.EvalXPath(req) }
+
+// Compile compiles req.Stylesheet (imports and includes resolved against
+// req.BaseDir) without running it, so the same stylesheet can then be run many
+// times against changing data — Stylesheet.Transform, TransformTo and
+// TransformFromReader. A *Stylesheet is immutable and safe for concurrent use.
+// Source, Params and InitialTemplate of req are ignored; they belong to each
+// run (TransformRequest). On failure the Stylesheet is nil and the diagnostics
+// carry the error with its line and column in the stylesheet. It never panics.
+func Compile(req Request) (*Stylesheet, []Diagnostic) { return engine.Compile(req) }

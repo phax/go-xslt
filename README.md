@@ -139,6 +139,55 @@ func main() {
 `xsl:import`/`document()`/`unparsed-text()`/`xsl:result-document`); `Result`
 carries `Output`, `Diagnostics`, `Messages`, and `SecondaryOutputs`.
 
+### Compile once, run many times
+
+`engine.Transform` compiles the stylesheet on every call. To run the same
+stylesheet against changing data (a live preview, a service), compile it once:
+
+```go
+sheet, diags := engine.Compile(engine.Request{Stylesheet: src, BaseDir: dir})
+if sheet == nil {
+	// diags[0].Line / .Col point into the stylesheet
+}
+res := sheet.Transform(engine.TransformRequest{Source: xml, Params: params})
+```
+
+A `*engine.Stylesheet` is immutable and **safe for concurrent use** (every run
+builds its own state; there is a `-race` test for it). `Transform`,
+`TransformTo(io.Writer, …)` and `TransformFromReader(io.Reader, …)` mirror the
+package-level functions. A failure carries the W3C error `Code` and, for a
+runtime error, the `Line`/`Col` of the stylesheet instruction it arose in, so a
+host that *generates* the stylesheet can map it back to its own source.
+
+### Reading a schema: `xsd`
+
+Package `github.com/tim-riep/go-xslt/xsd` is a read-only view of a compiled
+XSD 1.0/1.1 schema — useful for checking, without an instance document, that a
+path exists, has the right type, and has the right cardinality:
+
+```go
+schema, diags := xsd.Compile(xsd.Request{Schemas: docs, BaseDir: dir, Version: xsd.V10})
+
+for _, el := range schema.GlobalElements() {
+	if ct, ok := el.Type().(*xsd.ComplexType); ok {
+		for _, p := range ct.ContentParticles() {
+			// p.MinOccurs, p.MaxOccurs (xsd.Unbounded = -1), p.Term: *xsd.Element,
+			// *xsd.ModelGroup (sequence/choice/all) or *xsd.Wildcard
+		}
+		for _, a := range ct.Attributes() { /* a.Name, a.Type, a.Use */ }
+	}
+}
+td := schema.Type(xml.Name{Space: ns, Local: "Money"})
+td.IsSimple(); td.BuiltinBase() // {xs}decimal, through restriction chains
+```
+
+`xs:import`/`include`/`redefine`/`override` across files resolve against
+`BaseDir`; `schema.SubstitutionMembers(head)` lists a substitution group
+transitively. Content models and attributes are the *effective* ones (after
+extension/restriction). A `*xsd.Schema` is immutable and safe for concurrent
+use; `schema.Unresolved()` lists references to types the schema never defines
+(`Compile` also reports them as warnings).
+
 `engine/` is a thin re-export of the stable `internal/engine` facade —
 everything behind it can evolve without breaking callers.
 

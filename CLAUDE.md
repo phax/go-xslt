@@ -22,6 +22,16 @@ dragging in the GUI's Wails/CGo dependencies:
   `github.com/tim-riep/go-xslt/engine`). Re-exports `internal/engine` via type
   aliases: `Transform(Request) Result`, `TransformTo(io.Writer, Request) Result`
   (bounded-memory output), `Request`/`Result`/`Diagnostic`/…
+- `xsd/` — **public read-only schema component model** (`Compile` →
+  `*Schema`: global elements/types/attributes, substitution members, content
+  particles with min/max, attribute uses, builtin bases through restriction
+  chains). It is a thin alias layer over `internal/xsd/model.go`'s `*View`
+  wrappers, so the compiler's own components stay private and free to change.
+  `engine.Compile` → `*engine.Stylesheet` (immutable, concurrent-safe,
+  `-race`-tested) is the precompiled-stylesheet API; a runtime error carries the
+  stylesheet `Line`/`Col` of the innermost instruction it passed through
+  (`engine.errSite`, set in `execInstr`, applied once at the top so error
+  identity is untouched) and its W3C `Code`.
 - `internal/engine` — **stable internal facade**. `Transform(Request) Result`.
   Panic-safe. The `engine/` re-export, GUI, and tests depend only on this;
   rewrite anything behind it freely.

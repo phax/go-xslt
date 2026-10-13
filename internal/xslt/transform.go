@@ -754,7 +754,13 @@ func bracedName(s string) (uri, local string, ok bool) {
 	return s[1:i], s[i+1:], true
 }
 
-func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string, tgt ...*outTarget) (*engine, *xmltree.Node, error) {
+func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string, tgt ...*outTarget) (retEng *engine, retRoot *xmltree.Node, retErr error) {
+	var runEng *engine // set once the engine exists; lets a failure be tied to a stylesheet position
+	defer func() {
+		if retErr != nil && runEng != nil {
+			retErr = runEng.positionedErr(retErr)
+		}
+	}()
 	var doc *xmltree.Node
 	if strings.TrimSpace(srcXML) != "" {
 		d, err := xmltree.ParseLenient11WithBaseStripSpace(srcXML, baseDir, ss.stripSpaceHook())
@@ -794,6 +800,7 @@ func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string,
 	// plain-string paramOverrides path instead, arriving as its own LITERAL
 	// EXPRESSION TEXT rather than that text's evaluated value.
 	eng := &engine{sheet: ss, doc: doc, globals: map[string]xpath.Object{}, baseDir: baseDir, resolver: res, now: time.Now().UTC(), principalSealedAt: -1, paramSelects: e.ParamSelects, outURI: e.BaseOutputURI, srcSchemas: e.SourceSchemas}
+	runEng = eng
 	if doc != nil && e.SourceStreamed {
 		// Deliberately NOT eng.streamedRoots, which drives XTDE3362: that
 		// error's own text ends "Implementations may raise this error but are
@@ -1380,6 +1387,8 @@ type engine struct {
 	globalDefs     map[string]*VarDef                         // global declarations for on-demand evaluation
 	globalBusy     map[string]bool                            // globals being evaluated (circularity -> XTDE0640)
 	paramOverrides map[string]string                          // externally-supplied top-level param values, keyed by local name
+	// errSite: where the error currently propagating arose (see execInstr).
+	errSite errSite
 	// streamedVarsNoFocus: the initial mode is streamable, so global VARIABLES
 	// have no context item (streamable-116).
 	streamedVarsNoFocus bool
@@ -2406,7 +2415,68 @@ func (eng *engine) execSequence(instrs []instruction, r rt, out *xmltree.Node) e
 	return nil
 }
 
+// execInstr runs one instruction. An error leaves it unchanged — error
+// identity matters to try/catch, termination and the iterate/break signals —
+// but the innermost instruction an error passed through is remembered
+// (errSite), so the host can be told WHERE in the stylesheet it arose.
 func (eng *engine) execInstr(in instruction, r rt, out *xmltree.Node) error {
+	err := eng.execInstrRaw(in, r, out)
+	if err != nil && !sameErr(eng.errSite.err, err) {
+		eng.errSite = errSite{err: err, in: in}
+	}
+	return err
+}
+
+// errSite records the innermost instruction an error propagated through.
+type errSite struct {
+	err error
+	in  instruction
+}
+
+// sameErr compares two errors by identity without panicking on an
+// uncomparable dynamic type.
+func sameErr(a, b error) (same bool) {
+	if a == nil || b == nil {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			same = false
+		}
+	}()
+	return a == b
+}
+
+// positionedErr returns err with the stylesheet position of the instruction it
+// arose in, when it carries none of its own. The message is unchanged.
+func (eng *engine) positionedErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	ce, isCE := err.(*CompileError)
+	if isCE && ce.Line > 0 {
+		return err
+	}
+	if !sameErr(eng.errSite.err, err) || eng.errSite.in == nil {
+		return err
+	}
+	sh, ok := eng.errSite.in.(strmShaper)
+	if !ok {
+		return err
+	}
+	el := sh.strmShape().el
+	if el == nil {
+		return err
+	}
+	if isCE {
+		cp := *ce
+		cp.Line, cp.Col = int(el.Line), int(el.Col)
+		return &cp
+	}
+	return &CompileError{Line: int(el.Line), Col: int(el.Col), Msg: err.Error()}
+}
+
+func (eng *engine) execInstrRaw(in instruction, r rt, out *xmltree.Node) error {
 	// Universal recursion guard: a non-terminating stylesheet (template/function/
 	// accumulator/key recursion) errors out rather than overflowing the stack.
 	eng.depth++
