@@ -225,6 +225,14 @@ func (a *strmAnalyzer) strmInstr(in instruction, sc xpath.StreamContext) (xpath.
 		return a.reject(nil, "instruction %T has no streamability rule", in)
 	}
 	shape := sh.strmShape()
+	// XSLT 3.0 §3.9.1: an instruction processed in 1.0 compatibility mode is
+	// roaming and free-ranging — a rule stated unconditionally, so a body it
+	// disqualifies is reported (streamable-141). Only where this run actually
+	// processes in that mode (the backwards-compatibility claim).
+	if shape.el != nil && backwardsCompatRun() && inBackwardsCompatScope(shape.el) {
+		sc.MarkDefinite()
+		return a.reject(shape.el, "%s is processed in XSLT 1.0 compatibility mode, which is roaming and free-ranging", shape.name())
+	}
 	if shape.el != nil {
 		// Track the innermost element so a function-call prefix inside this
 		// instruction's expressions resolves against the right namespaces.
@@ -544,6 +552,13 @@ func (a *strmAnalyzer) strmForEach(sh strmShape, sc xpath.StreamContext) (xpath.
 		// The REC's answer is roaming; the suite wants it to run. Classifying
 		// it unstreamable and falling back silently gives the suite what it
 		// asks for without this analysis claiming something false.
+		// A select that is crawling because of a descendant step it WRITES (the
+		// root-anchored "//ITEM/TITLE" of si-for-each-806) is not the sx-union
+		// case above: nothing about it is "streamable in Saxon" by the suite's
+		// own account, and the rule applies as stated, so it is reported.
+		if strmWritesDescendantStep(sh.sel) {
+			return a.rejectREC(sc, sh.el, "xsl:for-each body consumes a crawling selection")
+		}
 		return a.reject(sh.el, "xsl:for-each body consumes a crawling selection")
 	}
 	if !xpath.Streamable(sp, ss) {
@@ -2569,4 +2584,40 @@ func strmSortedKeys(m map[string]*avt) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// strmWritesDescendantStep reports whether the expression's text contains a
+// descendant-or-self shorthand ("//") or an explicit descendant axis outside
+// any predicate or string literal — a crawling posture that comes from the
+// path itself, not from combining striding operands (union, if/else, ...).
+func strmWritesDescendantStep(p *xpath.Parsed) bool {
+	if p == nil {
+		return false
+	}
+	t := p.Text()
+	depth := 0
+	var quote rune
+	rs := []rune(t)
+	for i := 0; i < len(rs); i++ {
+		r := rs[i]
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '[' || r == '(':
+			depth++
+		case r == ']' || r == ')':
+			depth--
+		case depth == 0 && r == '/' && i+1 < len(rs) && rs[i+1] == '/':
+			return true
+		case depth == 0 && r == 'd' && strings.HasPrefix(string(rs[i:]), "descendant"):
+			return true
+		case depth == 0 && r == '|':
+			return false // a union: handled as the sx-union case
+		}
+	}
+	return false
 }

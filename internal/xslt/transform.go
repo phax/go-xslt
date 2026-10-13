@@ -883,6 +883,20 @@ func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string,
 			eng.globalCtx = gc
 		}
 	}
+	// When the initial mode is declared streamable the principal source is read
+	// as a stream, which gives global variables NO context item: one whose
+	// initializer navigates from it (count(//*)) is XPDY0002 (streamable-116).
+	if e.Template == "" && strmClaim.Load() {
+		im := e.Mode
+		if im == "" || im == "#default" {
+			im = ss.defaultMode
+		} else if im == "#unnamed" {
+			im = ""
+		}
+		if md := ss.modes[im]; md != nil && isXSLTTrue(strings.TrimSpace(md.attrs["streamable"])) {
+			eng.streamedVarsNoFocus = true
+		}
+	}
 	if err := eng.resolveGlobals(e.Params); err != nil {
 		return nil, nil, err
 	}
@@ -1366,18 +1380,21 @@ type engine struct {
 	globalDefs     map[string]*VarDef                         // global declarations for on-demand evaluation
 	globalBusy     map[string]bool                            // globals being evaluated (circularity -> XTDE0640)
 	paramOverrides map[string]string                          // externally-supplied top-level param values, keyed by local name
-	origGlobals    map[*VarDef]xpath.Object                   // cached values of overridden globals read as $xsl:original
-	paramSelects   map[string]string                          // externally-supplied top-level param values as XPath expressions (Entry.ParamSelects)
-	evaluateDepth  int                                        // >0 while evaluating an xsl:evaluate @xpath expression
-	pendingErr     error                                      // error raised in a context without an error channel
-	regexGroups    [][]string                                 // xsl:analyze-string group stack
-	baseDir        string                                     // workspace dir for resolving/writing files
-	resolver       xpath.ResourceResolver                     // fn:doc / unparsed-text / document() resolver
-	srcSchemas     []string                                   // Entry.SourceSchemas: the host's schema documents for SOURCE validation (see applySourceDocValidation)
-	messages       []string                                   // xsl:message output
-	secondary      []SecondaryDoc                             // xsl:result-document output
-	rdOutput       *Output                                    // serialization override from an empty-href xsl:result-document
-	principalRoot  *xmltree.Node                              // the true top-level result tree (a nested/empty-href xsl:result-document always redirects here)
+	// streamedVarsNoFocus: the initial mode is streamable, so global VARIABLES
+	// have no context item (streamable-116).
+	streamedVarsNoFocus bool
+	origGlobals         map[*VarDef]xpath.Object // cached values of overridden globals read as $xsl:original
+	paramSelects        map[string]string        // externally-supplied top-level param values as XPath expressions (Entry.ParamSelects)
+	evaluateDepth       int                      // >0 while evaluating an xsl:evaluate @xpath expression
+	pendingErr          error                    // error raised in a context without an error channel
+	regexGroups         [][]string               // xsl:analyze-string group stack
+	baseDir             string                   // workspace dir for resolving/writing files
+	resolver            xpath.ResourceResolver   // fn:doc / unparsed-text / document() resolver
+	srcSchemas          []string                 // Entry.SourceSchemas: the host's schema documents for SOURCE validation (see applySourceDocValidation)
+	messages            []string                 // xsl:message output
+	secondary           []SecondaryDoc           // xsl:result-document output
+	rdOutput            *Output                  // serialization override from an empty-href xsl:result-document
+	principalRoot       *xmltree.Node            // the true top-level result tree (a nested/empty-href xsl:result-document always redirects here)
 	// grouping/merge runtime context (set during for-each-group / merge):
 	curGroup        xpath.NodeSet
 	curGroupOK      bool
@@ -1687,6 +1704,9 @@ func (eng *engine) evalGlobal(key string, vd *VarDef) (xpath.Object, error) {
 	// A global of a USED library package has no global context item: its
 	// initializer cannot read the source document (package-912, spec 2.3.2).
 	if ss := eng.sheet; ss.multiPkg && !ss.inPrincipal(vd.el) {
+		return eng.evalVarDef(vd, rt{noFocus: true})
+	}
+	if eng.streamedVarsNoFocus && !vd.isParam {
 		return eng.evalVarDef(vd, rt{noFocus: true})
 	}
 	return eng.evalVarDef(vd, rt{node: eng.globalCtx, pos: 1, size: 1, noFocus: eng.globalCtx == nil})

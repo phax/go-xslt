@@ -194,7 +194,7 @@ Desktop GUI (**run from `desktop/`**):
   claims streaming + schema-awareness + backwards-compatibility together —
   see below):
   - **Default (basic processor): 99.9% (8,126/8,138)**. **Combined
-    (`XSLT30_FULL=1`): 99.7% (11,774/11,808)**.
+    (`XSLT30_FULL=1`): 99.7% (11,777/11,808)**.
   - `<test><package role="principal"></test>` catalog entries (347 cases)
     used to be hard-skipped unconditionally; the engine already accepted a
     top-level `xsl:package` as a module root and already fully implemented
@@ -276,11 +276,14 @@ Desktop GUI (**run from `desktop/`**):
     broad `xsl:source-document` static enforcement (measured net-negative
     every time it's been tried); a handful of streaming/backwards-compat
     edge cases individually root-caused and reported, not forced (e.g.
-    `streamable-141` needs the streamability classifier to know "1.0
-    compat mode is roaming and free-ranging", correctly left to that
-    separately-owned, historically sensitive area rather than a one-test
-    patch; `backwards-018` needs the same undecided XHTML meta-tag
-    heuristic as `output-0130/0715`, not a real backwards-compat gap).
+    `backwards-018` needs the same undecided XHTML meta-tag heuristic as
+    `output-0130/0715`, not a real backwards-compat gap). Streamability now
+    also reports (definite, so XTSE3430): an instruction processed in 1.0
+    compatibility mode (§3.9.1 — roaming/free-ranging), and an xsl:for-each
+    whose select WRITES a descendant step (`//a/b`) over a consuming body;
+    the union-of-striding-paths crawling case stays silent (sx-union). A
+    streamable initial mode gives global VARIABLES (not params) no context
+    item (XPDY0002, streamable-116).
 - 🟢 **XSLT 3.0 guaranteed streaming** — real bounded-memory execution, not
   conformance-only. Streaming-only conformance **99.6% (10,398/10,442)**.
   - **Architecture** ("bound the tree, don't abstract the node" — the reason
