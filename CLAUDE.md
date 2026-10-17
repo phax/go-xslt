@@ -111,6 +111,13 @@ dragging in the GUI's Wails/CGo dependencies:
   `RunXPath`, engine-only) and `ProjectService` (project registry/CRUD, file
   tree scan, file CRUD, manifest save, reveal-in-Finder). Both import the
   engine via the public `engine/` path.
+- `desktop/schemamodel.go` + `frontend/src/components/SchemaStructureView.tsx` —
+  read-only **XSD structure view** (a Code | Structure toggle on `.xsd` file
+  tabs): `XsltService.SchemaStructure` compiles the schema set through the
+  public `xsd` package (imports/includes resolved against the file's dir) and
+  returns a flat model — types listed ONCE and referenced by id, so a type used
+  thousands of times stays small and the view expands it lazily; recursion is
+  cut by the id on the path. Every element/group/any shows its `min..max`.
 - `desktop/internal/project` — the Postman-like project model: a **project**
   is a real directory (new ones seeded under `~/Documents/go-xslt`, or any
   existing folder opened in place) holding arbitrary files/folders plus a

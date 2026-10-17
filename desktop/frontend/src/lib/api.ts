@@ -10,7 +10,14 @@
 //     project.Ref  -> ProjectRef: the bare Go names are too generic once
 //     they sit next to everything else in this module.
 import { XsltService, ProjectService, LicenseService } from "../../bindings/github.com/tim-riep/go-xslt/desktop";
-import { type License } from "../../bindings/github.com/tim-riep/go-xslt/desktop/models";
+import {
+  type License,
+  type SchemaModel,
+  type SchemaModelRequest,
+  type SMNode,
+  type SMType,
+  type SMAttr,
+} from "../../bindings/github.com/tim-riep/go-xslt/desktop/models";
 // The "engine" package barrel only re-exports the request/response types that
 // are themselves a bound method's parameter/return type (Request, Result, …);
 // field-only types (Diagnostic, SecondaryOutput, XPathItem) and XSDVersion
@@ -54,6 +61,11 @@ export type {
   FileNode,
   ProjectRef,
   License,
+  SchemaModel,
+  SchemaModelRequest,
+  SMNode,
+  SMType,
+  SMAttr,
 };
 export { XSDVersion, FileKind, RunKind };
 
@@ -65,6 +77,10 @@ export function runTransform(req: TransformRequest) {
 
 export function runValidate(req: ValidateRequest) {
   return XsltService.RunValidate(req);
+}
+
+export function schemaStructure(req: SchemaModelRequest) {
+  return XsltService.SchemaStructure(req);
 }
 
 export function runXPath(req: XPathRequest) {

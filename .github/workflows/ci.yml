@@ -30,6 +30,29 @@ jobs:
       - name: go test
         run: go test ./...
 
+  frontend:
+    # The desktop GUI's TypeScript is type-checked against the GENERATED Wails
+    # bindings. A changed engine struct without `make bindings` only broke the
+    # release build (v0.0.9/v0.0.10) — catch it on every push instead.
+    name: Frontend (tsc + vite build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: npm ci
+        working-directory: desktop/frontend
+        run: npm ci
+
+      - name: tsc + vite build
+        working-directory: desktop/frontend
+        run: npm run build
+
   windows:
     # Filesystem-relative resolution (BaseDir, file: URIs) is OS-specific, so the
     # Linux job cannot see regressions in it (issue #1). Run the targeted tests

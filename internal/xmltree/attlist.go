@@ -203,11 +203,11 @@ func attlistDefaults(src string) map[string]map[string]attlistDefault {
 					continue
 				}
 				pos = dp2
-				if lit, ok := unquoteAttlist(val); ok {
+				if lit, ok := unquoteAttlist(val); ok && !isNSDecl(name) {
 					recordAttlistDefault(out, elem, localPart(name), attlistDefault{value: lit, fixed: true})
 				}
 			default:
-				if lit, ok := unquoteAttlist(def); ok {
+				if lit, ok := unquoteAttlist(def); ok && !isNSDecl(name) {
 					recordAttlistDefault(out, elem, localPart(name), attlistDefault{value: lit})
 				}
 			}
@@ -218,6 +218,12 @@ func attlistDefaults(src string) map[string]map[string]attlistDefault {
 	}
 	return out
 }
+
+// isNSDecl reports an ATTLIST name that declares a namespace (xmlns, xmlns:p).
+// That is not an attribute of the data model, so it must not be supplied as
+// one: UBL's xmldsig schema declares `xmlns:ds #FIXED "…"` and would otherwise
+// grow a bogus attribute "ds" on xs:schema.
+func isNSDecl(name string) bool { return name == "xmlns" || strings.HasPrefix(name, "xmlns:") }
 
 func recordAttlistDefault(out map[string]map[string]attlistDefault, elem, attr string, d attlistDefault) {
 	if out[elem] == nil {

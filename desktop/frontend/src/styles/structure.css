@@ -1,0 +1,80 @@
+/* ---- XSD structure view ---- */
+.struct { display: flex; height: 100%; min-height: 0; background: var(--bg); }
+.struct-side { width: 240px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--bg-2); min-height: 0; }
+.struct-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.struct-tabs button { flex: 1; padding: 6px 4px; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--fg-dim); font-size: var(--text-sm); cursor: pointer; }
+.struct-tabs button.on { color: var(--fg); border-bottom-color: var(--accent-hover); }
+.struct-tabs .count { color: var(--fg-dim); font-size: var(--text-xs); }
+.struct-filter { margin: 6px; padding: 4px 6px; background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); font-size: var(--text-sm); user-select: text; }
+.struct-list { list-style: none; margin: 0; padding: 0 0 8px; overflow: auto; flex: 1; }
+.struct-list li { display: flex; align-items: center; gap: 6px; padding: 2px 10px; height: var(--row-h); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-sm); }
+.struct-list li:hover { background: var(--bg-hover); }
+.struct-list li.sel { background: var(--bg-selected); }
+.struct-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.struct-bar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--bg-2); }
+.struct-bar button { background: var(--bg-3); border: 1px solid var(--border); color: var(--fg); border-radius: var(--r-sm); padding: 2px 8px; font-size: var(--text-xs); cursor: pointer; }
+.struct-bar button:hover { background: var(--bg-hover); }
+.struct-bar .spacer { flex: 1; }
+.struct-tree { flex: 1; overflow: auto; padding: 12px 14px; user-select: text; }
+.struct-empty { padding: 20px; color: var(--fg-dim); }
+
+.struct .tree { list-style: none; margin: 0; padding: 0 0 0 22px; position: relative; }
+.struct .tree > li { position: relative; padding-top: 3px; }
+/* connector lines: a vertical guide per level and a tick into each row */
+.struct .tree > li::before { content: ""; position: absolute; left: -12px; top: 0; bottom: 0; border-left: 1px solid var(--border); }
+.struct .tree > li:last-child::before { bottom: auto; height: 15px; }
+.struct .tree > li::after { content: ""; position: absolute; left: -12px; top: 15px; width: 10px; border-top: 1px solid var(--border); }
+.struct .tree.body { margin-left: 4px; }
+.struct li.root::before, .struct li.root::after { display: none; }
+.struct .struct-tree > .tree { padding-left: 0; }
+
+.struct .row { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 8px 2px 4px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-3); font-size: var(--text-sm); cursor: default; max-width: 100%; }
+.struct .row.element, .struct .row.group { cursor: pointer; }
+.struct .row.element:hover, .struct .row.group:hover { border-color: var(--accent-hover); }
+.struct .row.optional-box { border-style: dashed; }
+.struct .row.abstract .name { font-style: italic; }
+.struct .row.attr { background: transparent; border-color: transparent; padding-left: 4px; }
+.struct .row.note { background: transparent; border-color: transparent; }
+.struct .row.any { color: var(--fg-dim); }
+.struct .row.group { background: var(--bg-2); }
+.struct .row.group.choice { border-color: #b180d7; }
+.struct .row.group.sequence { border-color: #4a8fcf; }
+.struct .row.group.all { border-color: #c98a3a; }
+.struct .gicon { color: var(--fg-dim); }
+.struct .gicon.choice { color: #b180d7; }
+.struct .gicon.sequence { color: #4a8fcf; }
+.struct .gicon.all { color: #c98a3a; }
+.struct .gname { color: var(--fg-dim); text-transform: uppercase; font-size: var(--text-xs); letter-spacing: 0.5px; }
+.struct .name { font-weight: 600; }
+.struct .chev { display: inline-block; width: 12px; color: var(--fg-dim); transition: transform 0.1s; text-align: center; }
+.struct .chev.open { transform: rotate(90deg); }
+.struct .chev.none { visibility: hidden; }
+
+.struct .glyph { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 3px; font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0; }
+.struct .glyph.el { background: #2d7fb8; }
+.struct .glyph.ct { background: #7a5ab8; }
+.struct .glyph.st { background: #3a9a7a; }
+.struct .glyph.at { background: #b5832a; }
+
+.struct .tchip { font-family: var(--font-mono); font-size: var(--text-xs); padding: 0 6px; border-radius: 9px; border: 1px solid var(--border); color: var(--fg-dim); }
+.struct .tchip.ct { color: #b9a2e6; }
+.struct .tchip.st { color: #6fd2b3; }
+.struct .tchip.link { cursor: pointer; text-decoration: underline dotted; }
+.struct .tchip.link:hover { border-color: var(--accent-hover); color: var(--fg); }
+.struct .occ { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--warning); padding: 0 5px; border: 1px solid var(--border); border-radius: 9px; }
+.struct .occ.many { color: #e5995a; }
+.struct .flag { font-size: var(--text-xs); color: var(--fg-dim); padding: 0 5px; border: 1px solid var(--border); border-radius: 9px; }
+.struct .flag.required { color: var(--error); border-color: var(--error); }
+.struct .flag.prohibited { color: var(--fg-dim); text-decoration: line-through; }
+.struct .rec { font-size: var(--text-xs); color: var(--warning); }
+.struct .details { margin: 4px 0 2px 18px; display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); }
+.struct .kv { display: flex; align-items: baseline; gap: 8px; }
+.struct .kv .k { width: 62px; color: var(--fg-dim); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.4px; flex-shrink: 0; }
+.struct .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.struct .enum { font-family: var(--font-mono); font-size: var(--text-xs); padding: 0 6px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 3px; }
+
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; }
+.seg button { background: var(--bg-3); border: 0; color: var(--fg-dim); padding: 2px 10px; font-size: var(--text-xs); cursor: pointer; }
+.seg button.on { background: var(--accent); color: #fff; }
+.pane-header select { background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); font-size: var(--text-xs); padding: 1px 4px; }
+.struct .occ.once { color: var(--fg-dim); }

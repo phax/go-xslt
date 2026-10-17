@@ -16,6 +16,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as engine$0 from "../engine/models.js";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as $models from "./models.js";
+
 /**
  * RunTransform compiles and executes an XSLT transformation and returns the
  * serialized output together with any diagnostics.
@@ -39,4 +43,12 @@ export function RunValidate(req: engine$0.ValidateRequest): $CancellablePromise<
  */
 export function RunXPath(req: engine$0.XPathRequest): $CancellablePromise<engine$0.XPathResult> {
     return $Call.ByID(3140449084, req);
+}
+
+/**
+ * SchemaStructure compiles the schema set and returns its component model for
+ * the structure view.
+ */
+export function SchemaStructure(req: $models.SchemaModelRequest): $CancellablePromise<$models.SchemaModel> {
+    return $Call.ByID(3469877316, req);
 }

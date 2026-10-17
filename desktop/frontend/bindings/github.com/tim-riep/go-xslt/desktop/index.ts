@@ -11,5 +11,10 @@ export {
 };
 
 export type {
-    License
+    License,
+    SMAttr,
+    SMNode,
+    SMType,
+    SchemaModel,
+    SchemaModelRequest
 } from "./models.js";

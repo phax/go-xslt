@@ -5,6 +5,8 @@
 // @ts-ignore: Unused imports
 import * as engine$0 from "../internal/engine/models.js";
 
+export type Diagnostic = engine$0.Diagnostic;
+
 export type Request = engine$0.Request;
 
 export type Result = engine$0.Result;
