@@ -473,6 +473,7 @@ func (c *compiler) parseComplexTypeInto(ct *ComplexType, node *xmltree.Node) err
 		return err
 	}
 	c.allCTs = append(c.allCTs, ct) // named and anonymous alike (whole-schema checks)
+	ct.docs = c.docsOf(node)
 	ct.abstract = attrIs(node, "abstract", "true")
 	if f, ok := node.AttrLocal("final"); ok {
 		ct.final = parseBlockSet(f)
@@ -892,7 +893,11 @@ func (c *compiler) parseParticle(ch *xmltree.Node) (*particle, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &particle{min: min, max: max, term: ed}, nil
+		p := &particle{min: min, max: max, term: ed}
+		if d := c.docsOf(ch); d != nil {
+			p.docs = &d
+		}
+		return p, nil
 	case "any":
 		w, err := c.parseWildcard(ch)
 		if err != nil {
@@ -2159,7 +2164,7 @@ func builtinAttrDecl(n xname) (*AttributeDecl, bool) {
 }
 
 func (c *compiler) parseAttrUse(ch *xmltree.Node) (*attrUse, error) {
-	u := &attrUse{}
+	u := &attrUse{docs: c.docsOf(ch)}
 	// Use-level {inheritable}: an explicit attribute on the use wins over the
 	// referenced declaration's (cta0012); resolved after the decl below.
 	useInh, hasUseInh := ch.AttrLocal("inheritable")
@@ -2221,7 +2226,7 @@ func (c *compiler) parseAttrUse(ch *xmltree.Node) (*attrUse, error) {
 			return nil, err
 		}
 		u.decl = &AttributeDecl{name: xname{ns, name}, typ: st,
-			inheritable: boolAttrTrue(ch, "inheritable")}
+			inheritable: boolAttrTrue(ch, "inheritable"), docs: u.docs}
 	}
 	if hasUseInh {
 		u.inheritable = applyWhiteSpace("collapse", useInh) == "true" || applyWhiteSpace("collapse", useInh) == "1"

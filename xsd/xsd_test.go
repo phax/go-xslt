@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -245,4 +246,91 @@ func TestConcurrentWalks(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+const docsSchema = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:t" targetNamespace="urn:t" elementFormDefault="qualified">
+ <xs:element name="Doc" type="t:DocType">
+  <xs:annotation><xs:documentation xml:lang="en" source="urn:src">The <b>root</b>
+    element.</xs:documentation><xs:documentation xml:lang="de">Das Wurzelelement.</xs:documentation></xs:annotation>
+ </xs:element>
+ <xs:element name="Global"><xs:annotation><xs:documentation>Declared globally.</xs:documentation></xs:annotation></xs:element>
+ <xs:attribute name="lang" type="xs:string"><xs:annotation><xs:documentation>Language of the declaration.</xs:documentation></xs:annotation></xs:attribute>
+ <xs:complexType name="DocType">
+  <xs:annotation><xs:documentation>The document type.</xs:documentation></xs:annotation>
+  <xs:sequence>
+   <xs:element name="Code" type="t:Code"><xs:annotation><xs:documentation>A local element.</xs:documentation></xs:annotation></xs:element>
+   <xs:element ref="t:Global"><xs:annotation><xs:documentation>Used by reference.</xs:documentation></xs:annotation></xs:element>
+  </xs:sequence>
+  <xs:attribute name="id" type="xs:string"><xs:annotation><xs:documentation>The id.</xs:documentation></xs:annotation></xs:attribute>
+  <xs:attribute ref="t:lang"><xs:annotation><xs:documentation>Reference to lang.</xs:documentation></xs:annotation></xs:attribute>
+ </xs:complexType>
+ <xs:simpleType name="Base"><xs:annotation><xs:documentation>Base code.</xs:documentation></xs:annotation>
+  <xs:restriction base="xs:string"><xs:minLength value="2"/><xs:maxLength value="10"/><xs:pattern value="[A-Z]+"/><xs:pattern value="[A-Z]+X"/></xs:restriction></xs:simpleType>
+ <xs:simpleType name="Code"><xs:restriction base="t:Base"><xs:maxLength value="5"/><xs:pattern value="A.*"/><xs:whiteSpace value="collapse"/></xs:restriction></xs:simpleType>
+ <xs:simpleType name="Amount"><xs:restriction base="xs:decimal"><xs:totalDigits value="8"/><xs:fractionDigits value="2"/><xs:minInclusive value="0"/><xs:maxExclusive value="1000"/></xs:restriction></xs:simpleType>
+</xs:schema>`
+
+func TestDocumentationAndFacets(t *testing.T) {
+	s, diags := xsd.Compile(xsd.Request{Schemas: []string{docsSchema}})
+	if s == nil {
+		t.Fatal(diags)
+	}
+	text := func(d []xsd.Documentation) string {
+		var out []string
+		for _, x := range d {
+			out = append(out, x.Lang+"|"+x.Source+"|"+x.Text)
+		}
+		return strings.Join(out, " // ")
+	}
+	doc := s.Element(xml.Name{Space: "urn:t", Local: "Doc"})
+	if got := text(doc.Documentation()); !strings.HasPrefix(got, "en|urn:src|The root") || !strings.Contains(got, "// de||Das Wurzelelement.") {
+		t.Errorf("element docs: %q", got)
+	}
+	ct := doc.Type().(*xsd.ComplexType)
+	if got := text(ct.Documentation()); got != "||The document type." {
+		t.Errorf("complex type docs: %q", got)
+	}
+	parts := ct.ContentParticles()
+	if got := text(parts[0].Term.(*xsd.Element).Documentation()); got != "||A local element." {
+		t.Errorf("local element docs: %q", got)
+	}
+	// a reference: the reference's note on the particle, the declaration's on the element
+	if got := text(parts[1].Documentation); got != "||Used by reference." {
+		t.Errorf("ref particle docs: %q", got)
+	}
+	if got := text(parts[1].Term.(*xsd.Element).Documentation()); got != "||Declared globally." {
+		t.Errorf("ref decl docs: %q", got)
+	}
+	var id, lang *xsd.AttributeUse
+	for _, a := range ct.Attributes() {
+		if a.Name.Local == "id" {
+			id = a
+		} else {
+			lang = a
+		}
+	}
+	if text(id.Documentation) != "||The id." || text(lang.Documentation) != "||Reference to lang." ||
+		text(lang.Declaration.Documentation()) != "||Language of the declaration." {
+		t.Errorf("attribute docs: %q %q %q", text(id.Documentation), text(lang.Documentation), text(lang.Declaration.Documentation()))
+	}
+	if got := text(s.Type(xml.Name{Space: "urn:t", Local: "Base"}).(*xsd.SimpleType).Documentation()); got != "||Base code." {
+		t.Errorf("simple type docs: %q", got)
+	}
+
+	// facets: nearest step wins, inherited ones are included, patterns AND across steps
+	f := s.Type(xml.Name{Space: "urn:t", Local: "Code"}).(*xsd.SimpleType).Facets()
+	if f.MaxLength == nil || *f.MaxLength != 5 || f.MinLength == nil || *f.MinLength != 2 || f.Length != nil {
+		t.Errorf("lengths: %+v", f)
+	}
+	if f.WhiteSpace != "collapse" {
+		t.Errorf("whiteSpace %q", f.WhiteSpace)
+	}
+	if len(f.Patterns) != 2 || strings.Join(f.Patterns[0], ",") != "A.*" || strings.Join(f.Patterns[1], ",") != "[A-Z]+,[A-Z]+X" {
+		t.Errorf("patterns: %q", f.Patterns)
+	}
+	a := s.Type(xml.Name{Space: "urn:t", Local: "Amount"}).(*xsd.SimpleType).Facets()
+	if a.TotalDigits == nil || *a.TotalDigits != 8 || a.FractionDigits == nil || *a.FractionDigits != 2 ||
+		a.MinInclusive == nil || *a.MinInclusive != "0" || a.MaxExclusive == nil || *a.MaxExclusive != "1000" || a.MaxInclusive != nil {
+		t.Errorf("amount: %+v", a)
+	}
 }

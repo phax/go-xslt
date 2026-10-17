@@ -55,6 +55,10 @@ type (
 	Schema = xsd.SchemaView
 	// Element is an element declaration; it is also a Term.
 	Element = xsd.ElementView
+	// Documentation is one xs:documentation (Lang, Source, Text).
+	Documentation = xsd.Documentation
+	// Facets are the effective constraining facets of a simple type.
+	Facets = xsd.Facets
 	// TypeDefinition is a simple or complex type: *SimpleType or *ComplexType.
 	TypeDefinition = xsd.TypeDefinitionView
 	// SimpleType is an atomic, list or union type.
@@ -120,7 +124,7 @@ func Compile(req Request) (schema *Schema, diags []Diagnostic) {
 	if req.Version == V11 {
 		v = xsd.Version11
 	}
-	s, err := xsd.Compile(req.Schemas, req.BaseDir, v)
+	s, err := xsd.CompileWithDocs(req.Schemas, req.BaseDir, v)
 	if err != nil {
 		d := Diagnostic{Severity: engine.SeverityError, Phase: "compile", Message: err.Error()}
 		var xe xsd.Error

@@ -15,6 +15,18 @@ import (
 // A handful of not-yet-handled constructs yield ErrUnsupported; anything
 // genuinely malformed yields a normal invalid error.
 func Compile(docs []string, baseDir string, v Version) (*Schema, error) {
+	return compile(docs, baseDir, v, false)
+}
+
+// CompileWithDocs is Compile that also keeps what a tool reading the component
+// model wants and a validator does not: the xs:documentation of declarations
+// and types (see Documentation), and the source text of pattern facets. It
+// compiles the same components, so the verdicts are identical.
+func CompileWithDocs(docs []string, baseDir string, v Version) (*Schema, error) {
+	return compile(docs, baseDir, v, true)
+}
+
+func compile(docs []string, baseDir string, v Version, keepDocs bool) (*Schema, error) {
 	if len(docs) == 0 {
 		return nil, ErrUnsupported
 	}
@@ -38,6 +50,7 @@ func Compile(docs []string, baseDir string, v Version) (*Schema, error) {
 		anon:         &anonReg{byType: map[Type]xname{}, byName: map[xname]Type{}},
 	}
 	c := &compiler{
+		keepDocs:   keepDocs,
 		sch:        sch,
 		groups:     map[xname]*modelGroup{},
 		attrGroups: map[xname]*attrGroupDef{},
@@ -494,6 +507,7 @@ func Compile(docs []string, baseDir string, v Version) (*Schema, error) {
 }
 
 type compiler struct {
+	keepDocs           bool // keep xs:documentation / pattern sources (CompileWithDocs)
 	sch                *Schema
 	tns                string
 	chameleonNS        string // adopted ns when the current doc is a chameleon include ("" otherwise)
@@ -1007,6 +1021,7 @@ func (c *compiler) parseGlobalElement(node *xmltree.Node) error {
 // fillElementCommon resolves an element's type (type= | inline | default anyType)
 // and nillable/default/fixed. Used for global and local elements.
 func (c *compiler) fillElementCommon(decl *ElementDecl, node *xmltree.Node) error {
+	decl.docs = c.docsOf(node)
 	decl.nillable = attrIs(node, "nillable", "true")
 	if b, ok := node.AttrLocal("block"); ok {
 		decl.blocked = parseBlockSet(b)
@@ -1075,6 +1090,7 @@ func (c *compiler) parseGlobalAttribute(node *xmltree.Node) error {
 		return err
 	}
 	ad.typ = st
+	ad.docs = c.docsOf(node)
 	ad.inheritable = boolAttrTrue(node, "inheritable")
 	if d, ok := node.AttrLocal("default"); ok {
 		ad.def, ad.hasDefault = d, true
@@ -1322,6 +1338,7 @@ func (c *compiler) parseSimpleTypeInto(st *SimpleType, node *xmltree.Node) error
 		return err
 	}
 	st.declared = true
+	st.docs = c.docsOf(node)
 	if f, ok := node.AttrLocal("final"); ok {
 		st.final = parseBlockSet(f)
 	} else if c.finalDefault != "" {
@@ -1807,6 +1824,7 @@ func (c *compiler) parseUnion(st *SimpleType, u *xmltree.Node) error {
 
 func (c *compiler) parseFacets(st *SimpleType, r *xmltree.Node) error {
 	var patternGroup []*regexp.Regexp
+	var patternSrc []string
 	seen := map[string]bool{}
 	for _, f := range r.Children {
 		if f.Kind != xmltree.KindElement || f.Name.Space != xsNS {
@@ -1842,6 +1860,9 @@ func (c *compiler) parseFacets(st *SimpleType, r *xmltree.Node) error {
 				return ErrUnsupported
 			}
 			patternGroup = append(patternGroup, re)
+			if c.keepDocs {
+				patternSrc = append(patternSrc, val)
+			}
 		case "enumeration":
 			st.facets.enumeration = append(st.facets.enumeration, val)
 			// Expanded here, where the facet element's own namespace bindings
@@ -1909,6 +1930,9 @@ func (c *compiler) parseFacets(st *SimpleType, r *xmltree.Node) error {
 	}
 	if len(patternGroup) > 0 {
 		st.facets.patterns = [][]*regexp.Regexp{patternGroup}
+		if c.keepDocs {
+			st.facets.patternSrc = [][]string{patternSrc}
+		}
 	}
 	return nil
 }

@@ -279,6 +279,13 @@ type ElementView struct {
 
 func (e *ElementView) Name() xml.Name { return qn(e.d.name) }
 
+// Documentation is the declaration's own xs:documentation (needs CompileWithDocs).
+// For a reference (<xs:element ref=…/>) the reference's annotation is on the
+// ParticleView, the declaration's here.
+func (e *ElementView) Documentation() []Documentation {
+	return append([]Documentation(nil), e.d.docs...)
+}
+
 // Type is the declared type; xs:anyType when the declaration names none.
 func (e *ElementView) Type() TypeDefinitionView {
 	if t := e.v.typeDef(e.d.typ); t != nil {
@@ -307,6 +314,86 @@ type SimpleTypeView struct {
 }
 
 func (t *SimpleTypeView) IsSimple() bool { return true }
+
+// Documentation is the type's xs:documentation (needs CompileWithDocs).
+func (t *SimpleTypeView) Documentation() []Documentation {
+	return append([]Documentation(nil), t.t.docs...)
+}
+
+// Facets are the constraining facets in force for the type: each one as
+// declared by the nearest restriction step that sets it, so inherited facets
+// are included. Only facets written in a schema are reported — the intrinsic
+// bounds of a built-in (xs:byte's range, say) are not; BuiltinBase says which
+// built-in the type rests on. Facets of a list type constrain the list, those
+// of its item type are on ItemType.
+func (t *SimpleTypeView) Facets() Facets {
+	var f Facets
+	for s, n := t.t, 0; s != nil && n < 64; s, n = s.base, n+1 {
+		fs := &s.facets
+		if f.Length == nil && fs.hasLength {
+			v := fs.length
+			f.Length = &v
+		}
+		if f.MinLength == nil && fs.hasMinLength {
+			v := fs.minLength
+			f.MinLength = &v
+		}
+		if f.MaxLength == nil && fs.hasMaxLength {
+			v := fs.maxLength
+			f.MaxLength = &v
+		}
+		if f.MinInclusive == nil && fs.hasMinIncl {
+			v := fs.minIncl
+			f.MinInclusive = &v
+		}
+		if f.MaxInclusive == nil && fs.hasMaxIncl {
+			v := fs.maxIncl
+			f.MaxInclusive = &v
+		}
+		if f.MinExclusive == nil && fs.hasMinExcl {
+			v := fs.minExcl
+			f.MinExclusive = &v
+		}
+		if f.MaxExclusive == nil && fs.hasMaxExcl {
+			v := fs.maxExcl
+			f.MaxExclusive = &v
+		}
+		if f.TotalDigits == nil && fs.hasTotalDigits {
+			v := fs.totalDigits
+			f.TotalDigits = &v
+		}
+		if f.FractionDigits == nil && fs.hasFractionDigits {
+			v := fs.fractionDigits
+			f.FractionDigits = &v
+		}
+		if f.ExplicitTimezone == "" {
+			f.ExplicitTimezone = fs.explicitTZ
+		}
+		// every restriction step's patterns must all hold (steps AND, the
+		// alternatives within one step OR); base-most step last
+		f.Patterns = append(f.Patterns, fs.patternSrc...)
+	}
+	f.WhiteSpace = t.t.effectiveWhiteSpace()
+	return f
+}
+
+// Facets is the effective set of constraining facets of a simple type; see
+// SimpleTypeView.Facets. A nil pointer means the facet is not set. Bounds are
+// lexical strings, in the type's own lexical space.
+type Facets struct {
+	Length, MinLength, MaxLength                           *int
+	MinInclusive, MaxInclusive, MinExclusive, MaxExclusive *string
+	TotalDigits, FractionDigits                            *int
+	// WhiteSpace is "preserve", "replace" or "collapse" — always set, since
+	// every type has one (the built-in default when no step declares it).
+	WhiteSpace string
+	// Patterns has one entry per restriction step that declares patterns,
+	// nearest step first. A value must match every entry, and within an entry
+	// at least one of its alternatives. Needs CompileWithDocs.
+	Patterns [][]string
+	// ExplicitTimezone is XSD 1.1's "required", "prohibited" or "optional"; "" when unset.
+	ExplicitTimezone string
+}
 
 // Name is the type's expanded name; for a reference to a built-in type that is
 // the built-in's own ({xs}decimal); empty for an anonymous type.
@@ -413,6 +500,11 @@ func (t *ComplexTypeView) BuiltinBase() xml.Name {
 
 func (t *ComplexTypeView) Abstract() bool { return t.t.abstract }
 
+// Documentation is the type's xs:documentation (needs CompileWithDocs).
+func (t *ComplexTypeView) Documentation() []Documentation {
+	return append([]Documentation(nil), t.t.docs...)
+}
+
 // Base is the type this one is derived from; nil for xs:anyType and types with
 // no explicit base.
 func (t *ComplexTypeView) Base() TypeDefinitionView {
@@ -496,7 +588,9 @@ func (t *ComplexTypeView) Attributes() []*AttributeUseView {
 		if !hasDef && !hasFix {
 			def, hasDef, fix, hasFix = u.decl.def, u.decl.hasDefault, u.decl.fixed, u.decl.hasFixed
 		}
-		out = append(out, &AttributeUseView{Name: qn(u.decl.name), Type: t.v.simple(u.decl.typ), Use: use,
+		out = append(out, &AttributeUseView{Documentation: append([]Documentation(nil), u.docs...),
+			Declaration: t.v.attr(u.decl),
+			Name:        qn(u.decl.name), Type: t.v.simple(u.decl.typ), Use: use,
 			Default: def, HasDefault: hasDef, Fixed: fix, HasFixed: hasFix})
 	}
 	return out
@@ -513,9 +607,13 @@ func (t *ComplexTypeView) AttributeWildcard() *WildcardView {
 
 // ParticleView is a term with occurrence bounds.
 type ParticleView struct {
-	MinOccurs int
-	MaxOccurs int // Unbounded (-1) for maxOccurs="unbounded"
-	Term      TermView
+	// Documentation is the annotation of the particle's own xs:element — for a
+	// reference (<xs:element ref=…/>) the reference's; the declaration's is
+	// Term.(*Element).Documentation(). Needs CompileWithDocs.
+	Documentation []Documentation
+	MinOccurs     int
+	MaxOccurs     int // Unbounded (-1) for maxOccurs="unbounded"
+	Term          TermView
 }
 
 // ModelGroupView is a sequence, choice or all group.
@@ -539,24 +637,39 @@ type AttributeDeclView struct {
 	d *AttributeDecl
 }
 
-func (a *AttributeDeclView) Name() xml.Name          { return qn(a.d.name) }
+func (a *AttributeDeclView) Name() xml.Name { return qn(a.d.name) }
+
+// Documentation is the declaration's xs:documentation (needs CompileWithDocs).
+func (a *AttributeDeclView) Documentation() []Documentation {
+	return append([]Documentation(nil), a.d.docs...)
+}
 func (a *AttributeDeclView) Type() *SimpleTypeView   { return a.v.simple(a.d.typ) }
 func (a *AttributeDeclView) Default() (string, bool) { return a.d.def, a.d.hasDefault }
 func (a *AttributeDeclView) Fixed() (string, bool)   { return a.d.fixed, a.d.hasFixed }
 
 // AttributeUseView is an attribute of a complex type.
 type AttributeUseView struct {
-	Name       xml.Name
-	Type       *SimpleTypeView
-	Use        Use
-	Default    string
-	HasDefault bool
-	Fixed      string
-	HasFixed   bool
+	// Documentation is the annotation of the use's own xs:attribute: for a
+	// local declaration that is its annotation, for a reference
+	// (<xs:attribute ref=…/>) the reference's — the referenced declaration's is
+	// on Declaration. Needs CompileWithDocs.
+	Documentation []Documentation
+	// Declaration is the attribute declaration the use refers to.
+	Declaration *AttributeDeclView
+	Name        xml.Name
+	Type        *SimpleTypeView
+	Use         Use
+	Default     string
+	HasDefault  bool
+	Fixed       string
+	HasFixed    bool
 }
 
 func (v *SchemaView) particle(p *particle) *ParticleView {
 	out := &ParticleView{MinOccurs: p.min, MaxOccurs: p.max}
+	if p.docs != nil {
+		out.Documentation = append([]Documentation(nil), *p.docs...)
+	}
 	switch t := p.term.(type) {
 	case *ElementDecl:
 		out.Term = v.element(t)

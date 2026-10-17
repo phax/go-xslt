@@ -56,6 +56,7 @@ type SimpleType struct {
 	base        *SimpleType    // immediate base simple type (nil when the base is a built-in)
 	baseBuiltin bool           // true when base is a built-in (prim is authoritative)
 	facets      facetSet
+	docs        []Documentation // CompileWithDocs only
 
 	item    *SimpleType   // list
 	members []*SimpleType // union
@@ -78,6 +79,8 @@ type SimpleType struct {
 // facetSet holds the constraining facets declared at one restriction step.
 type facetSet struct {
 	patterns [][]*regexp.Regexp
+	// patternSrc is patterns' source text, group for group (CompileWithDocs only).
+	patternSrc [][]string
 
 	enumeration []string
 	// enumQName is enumeration expanded against the FACET element's own
@@ -124,8 +127,9 @@ type ComplexType struct {
 	name xname // zero for anonymous types
 
 	kind         contentKind
-	simpleType   *SimpleType // contentSimple
-	particle     *particle   // this step's element/mixed content (nil ⇒ empty)
+	docs         []Documentation // CompileWithDocs only
+	simpleType   *SimpleType     // contentSimple
+	particle     *particle       // this step's element/mixed content (nil ⇒ empty)
 	attrUses     []*attrUse
 	attrWildcard *wildcard
 	abstract     bool
@@ -173,6 +177,7 @@ type typeAlternative struct {
 type particle struct {
 	min, max int
 	term     term
+	docs     *[]Documentation // an xs:element particle's own annotation (CompileWithDocs only)
 }
 
 const unbounded = -1
@@ -228,6 +233,7 @@ type wildcard struct {
 // ElementDecl is a compiled element declaration (global or local).
 type ElementDecl struct {
 	name        xname
+	docs        []Documentation // CompileWithDocs only
 	typ         Type
 	nillable    bool
 	abstract    bool
@@ -266,6 +272,7 @@ type identityConstraint struct {
 // AttributeDecl is a compiled attribute declaration.
 type AttributeDecl struct {
 	name xname
+	docs []Documentation // CompileWithDocs only
 	typ  *SimpleType
 	// inheritable: the XSD 1.1 {inheritable} property — descendants' CTA tests
 	// see the attribute (cta0009/cta0014).
@@ -278,6 +285,7 @@ type AttributeDecl struct {
 }
 
 type attrUse struct {
+	docs       []Documentation // the xs:attribute's own annotation (CompileWithDocs only)
 	decl       *AttributeDecl
 	required   bool
 	prohibited bool
