@@ -1,8 +1,10 @@
 package xmltree
 
 import (
+	"encoding/xml"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -203,12 +205,12 @@ func attlistDefaults(src string) map[string]map[string]attlistDefault {
 					continue
 				}
 				pos = dp2
-				if lit, ok := unquoteAttlist(val); ok && !isNSDecl(name) {
-					recordAttlistDefault(out, elem, localPart(name), attlistDefault{value: lit, fixed: true})
+				if lit, ok := unquoteAttlist(val); ok {
+					recordAttlistDefault(out, elem, attlistKey(name), attlistDefault{value: lit, fixed: true})
 				}
 			default:
-				if lit, ok := unquoteAttlist(def); ok && !isNSDecl(name) {
-					recordAttlistDefault(out, elem, localPart(name), attlistDefault{value: lit})
+				if lit, ok := unquoteAttlist(def); ok {
+					recordAttlistDefault(out, elem, attlistKey(name), attlistDefault{value: lit})
 				}
 			}
 		}
@@ -220,10 +222,64 @@ func attlistDefaults(src string) map[string]map[string]attlistDefault {
 }
 
 // isNSDecl reports an ATTLIST name that declares a namespace (xmlns, xmlns:p).
-// That is not an attribute of the data model, so it must not be supplied as
-// one: UBL's xmldsig schema declares `xmlns:ds #FIXED "…"` and would otherwise
-// grow a bogus attribute "ds" on xs:schema.
+// Such a default is a namespace DECLARATION, not an attribute (Namespaces in
+// XML 1.0 §3: these attributes "may be provided directly or by default"): it
+// binds the prefix on every element of that name that does not declare it
+// itself, and never shows up in the attribute list. The W3C XML Signature
+// schema, for one, has `<!ATTLIST schema xmlns:ds CDATA #FIXED "…">`.
 func isNSDecl(name string) bool { return name == "xmlns" || strings.HasPrefix(name, "xmlns:") }
+
+// attlistKey is the key a default is filed under: the attribute's local name,
+// but a namespace declaration keeps its full xmlns[:p] name.
+func attlistKey(name string) string {
+	if isNSDecl(name) {
+		return name
+	}
+	return localPart(name)
+}
+
+// withNSDefaults adds the DTD-defaulted namespace declarations missing from an
+// element's attributes (as the xmlns attributes the decoder itself reports, so
+// the callers' ordinary declaration handling binds them). The slice is copied
+// before it grows: the decoder owns the original.
+func withNSDefaults(attrs []xml.Attr, defaults map[string]attlistDefault) []xml.Attr {
+	var names []string
+	for name := range defaults {
+		if isNSDecl(name) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return attrs
+	}
+	sort.Strings(names)
+	out := attrs
+	copied := false
+	for _, name := range names {
+		var an xml.Name
+		if name == "xmlns" {
+			an = xml.Name{Local: "xmlns"}
+		} else {
+			an = xml.Name{Space: "xmlns", Local: strings.TrimPrefix(name, "xmlns:")}
+		}
+		declared := false
+		for _, a := range attrs {
+			if a.Name == an {
+				declared = true
+				break
+			}
+		}
+		if declared {
+			continue
+		}
+		if !copied {
+			out = append([]xml.Attr(nil), attrs...)
+			copied = true
+		}
+		out = append(out, xml.Attr{Name: an, Value: defaults[name].value})
+	}
+	return out
+}
 
 func recordAttlistDefault(out map[string]map[string]attlistDefault, elem, attr string, d attlistDefault) {
 	if out[elem] == nil {

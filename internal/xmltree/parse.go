@@ -443,6 +443,9 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 			frame := nsStack[len(nsStack)-1]
 			cloned := false
 			var decls []*Node
+			if d := attrDefaults[t.Name.Local]; len(d) > 0 {
+				t.Attr = withNSDefaults(t.Attr, d) // DTD-defaulted xmlns[:p] declarations
+			}
 			for _, a := range t.Attr {
 				local, isNS := "", false
 				switch {
@@ -494,6 +497,9 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 				// per the XML infoset, such an attribute IS present with its
 				// declared default, exactly as if the author had typed it.
 				for name, d := range defaults {
+					if isNSDecl(name) {
+						continue // bound above, not an attribute
+					}
 					present := false
 					for _, a := range el.Attrs {
 						if a.Name.Space == "" && a.Name.Local == name {

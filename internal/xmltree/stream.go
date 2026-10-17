@@ -333,6 +333,9 @@ func (s *StreamReader) startElement(t xml.StartElement) *Node {
 	frame := s.nsStack[len(s.nsStack)-1]
 	cloned := false
 	var decls []*Node
+	if d := s.attrDefaults[t.Name.Local]; len(d) > 0 {
+		t.Attr = withNSDefaults(t.Attr, d) // DTD-defaulted xmlns[:p] declarations
+	}
 	for _, a := range t.Attr {
 		local, isNS := "", false
 		switch {
@@ -381,6 +384,9 @@ func (s *StreamReader) startElement(t xml.StartElement) *Node {
 	}
 	if defaults := s.attrDefaults[t.Name.Local]; len(defaults) > 0 {
 		for name, d := range defaults {
+			if isNSDecl(name) {
+				continue
+			}
 			present := false
 			for _, a := range el.Attrs {
 				if a.Name.Space == "" && a.Name.Local == name {
