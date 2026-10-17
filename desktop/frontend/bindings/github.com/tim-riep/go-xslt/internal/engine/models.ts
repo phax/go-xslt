@@ -20,6 +20,18 @@ export interface Diagnostic {
      * Phase is where the diagnostic originated: "parse", "compile" or "run".
      */
     "phase": string;
+
+    /**
+     * Rule is the rule identifier (msg:message/@rule) of a failed XSD
+     * assertion; empty when not applicable.
+     */
+    "rule"?: string;
+
+    /**
+     * Path locates the element a failed XSD assertion was evaluated on, e.g.
+     * /Doc[1]/Item[2]; empty when not applicable.
+     */
+    "path"?: string;
 }
 
 /**
@@ -120,6 +132,20 @@ export interface ValidateRequest {
      * xsi:schemaLocation). Empty disables disk resolution.
      */
     "baseDir": string;
+
+    /**
+     * Language selects the xml:lang of assertion messages (msg:message in an
+     * xs:assert's xs:appinfo), e.g. "de". Empty means the default message. It
+     * only affects diagnostic wording, never validity.
+     */
+    "language": string;
+
+    /**
+     * MaxErrors stops validation after this many errors; 0 means no limit.
+     * Validation reports every error it finds (in document order), not only
+     * the first.
+     */
+    "maxErrors": number;
 }
 
 /**
