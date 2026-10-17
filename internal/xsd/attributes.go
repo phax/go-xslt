@@ -121,7 +121,27 @@ func (s *Schema) validateAttributes(ct *ComplexType, el *xmltree.Node) error {
 	}
 	for _, u := range uses {
 		if u.required && !present[u.decl.name] {
-			return invalidf("cvc-complex-type.4", "required attribute %s is missing", u.decl.name)
+			e := invalidf("cvc-complex-type.4", "required attribute %s is missing", u.decl.name)
+			// own wording: the xs:attribute's appinfo (the use's, else the
+			// referenced declaration's), msg:message on="missing" or unspecified
+			for _, ms := range [][]assertMsg{u.msgs, u.decl.msgs} {
+				for _, m := range ms {
+					if m.on == "" || m.on == "missing" {
+						e.msgs = append(e.msgs, m)
+					}
+				}
+				if len(e.msgs) > 0 {
+					break
+				}
+			}
+			if s.coll == nil {
+				return e
+			}
+			// collecting: every missing attribute is reported, not only the first
+			if cont, ret := s.soft(e, el); !cont {
+				return ret
+			}
+			continue
 		}
 		// An absent attribute with a value constraint contributes that value to
 		// the instance, so an ID default still binds (and an IDREF default still

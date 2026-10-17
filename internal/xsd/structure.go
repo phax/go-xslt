@@ -2164,7 +2164,7 @@ func builtinAttrDecl(n xname) (*AttributeDecl, bool) {
 }
 
 func (c *compiler) parseAttrUse(ch *xmltree.Node) (*attrUse, error) {
-	u := &attrUse{docs: c.docsOf(ch)}
+	u := &attrUse{docs: c.docsOf(ch), msgs: assertMessages(ch)}
 	// Use-level {inheritable}: an explicit attribute on the use wins over the
 	// referenced declaration's (cta0012); resolved after the decl below.
 	useInh, hasUseInh := ch.AttrLocal("inheritable")
@@ -2226,7 +2226,7 @@ func (c *compiler) parseAttrUse(ch *xmltree.Node) (*attrUse, error) {
 			return nil, err
 		}
 		u.decl = &AttributeDecl{name: xname{ns, name}, typ: st,
-			inheritable: boolAttrTrue(ch, "inheritable"), docs: u.docs}
+			inheritable: boolAttrTrue(ch, "inheritable"), docs: u.docs, msgs: u.msgs}
 	}
 	if hasUseInh {
 		u.inheritable = applyWhiteSpace("collapse", useInh) == "true" || applyWhiteSpace("collapse", useInh) == "1"

@@ -408,7 +408,11 @@ assertion's `xs:appinfo`, in the namespace
 The same `msg:message` can sit in the `xs:appinfo` of an **element
 declaration** or an **`xs:choice`/`xs:sequence`**, to word its cardinality
 errors; `on="missing"` or `on="too-many"` narrows it to one kind (no `on`: both),
-and a choice's message speaks for all its alternatives:
+and a choice's message speaks for all its alternatives. A second alternative of
+a choice that may occur once is reported as `too-many` of the choice (with the
+choice's messages), not as out of order. A missing **required attribute** takes
+`msg:message` with `on="missing"` from the `xs:attribute`'s appinfo the same way,
+and every missing attribute is reported, not only the first:
 
 ```xml
 <xs:element name="DocumentNumber" type="…"><xs:annotation><xs:appinfo>

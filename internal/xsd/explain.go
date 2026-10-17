@@ -32,8 +32,15 @@ const (
 type nfaLabel struct {
 	decl *ElementDecl
 	wc   *wildcard
-	part *particle     // the element/wildcard particle (its occurrence bounds)
-	anc  []*modelGroup // enclosing groups, innermost first
+	part *particle  // the element/wildcard particle (its occurrence bounds)
+	anc  []ancEntry // enclosing groups, innermost first
+}
+
+// ancEntry is an enclosing group together with the particle that holds it (the
+// group's own occurrence bounds).
+type ancEntry struct {
+	g *modelGroup
+	p *particle
 }
 
 type nfaEdge struct {
@@ -52,7 +59,7 @@ type nfa struct {
 
 type nfaBuilder struct {
 	n     *nfa
-	anc   []*modelGroup
+	anc   []ancEntry
 	depth int
 	fail  bool
 }
@@ -139,7 +146,7 @@ func (b *nfaBuilder) term(p *particle) (in, out int) {
 			return
 		}
 		saved := b.anc
-		b.anc = append([]*modelGroup{t}, b.anc...)
+		b.anc = append([]ancEntry{{t, p}}, b.anc...)
 		b.depth++
 		if t.compositor == cChoice {
 			for _, sub := range t.particles {
@@ -308,6 +315,7 @@ type cardDefect struct {
 	kid  *xmltree.Node
 	alts []*nfaLabel // missing: the alternatives; order: what was expected
 	prev *nfaLabel   // too-many: the label the earlier occurrences used
+	grp  *ancEntry   // too-many: the group that occurs more often than allowed
 }
 
 // explainContent names what keeps kids from satisfying p, or returns nil when
@@ -332,6 +340,7 @@ func (s *Schema) explainContent(p *particle, kids []*xmltree.Node) []cardDefect 
 	}
 	cur := n.closure(map[int]bool{n.start: true})
 	var consumed []*nfaLabel
+	var lastLabs []*nfaLabel        // the labels the previous child was matched by
 	moved := map[*ElementDecl]int{} // elements reported as misplaced, expected to turn up later
 	insert := func(steps [][]*nfaLabel) {
 		for _, alts := range steps {
@@ -346,6 +355,7 @@ func (s *Schema) explainContent(p *particle, kids []*xmltree.Node) []cardDefect 
 		if next, labs := n.step(s, cur, nn); len(next) > 0 {
 			cur = next
 			consumed = append(consumed, labs...)
+			lastLabs = labs
 			continue
 		}
 		// a misplaced element reported earlier turns up where it belongs
@@ -401,6 +411,7 @@ func (s *Schema) explainContent(p *particle, kids []*xmltree.Node) []cardDefect 
 			next, labs := n.step(s, reached, nn)
 			cur = next
 			consumed = append(consumed, labs...)
+			lastLabs = labs
 			continue
 		}
 		// nothing can be inserted to make the child acceptable: it is surplus
@@ -411,9 +422,17 @@ func (s *Schema) explainContent(p *particle, kids []*xmltree.Node) []cardDefect 
 				break
 			}
 		}
+		var grp *ancEntry
+		// The element's own wording wins; otherwise a group that has used up its
+		// occurrences (below the content model itself) is the better culprit.
+		if prev == nil || len(cardMessages("too-many", []*nfaLabel{prev})) == 0 {
+			grp = s.exhaustedGroup(p, lastLabs, nn)
+		}
 		switch {
-		case prev != nil:
+		case prev != nil && grp == nil:
 			defects = append(defects, cardDefect{kind: "too-many", kid: kid, prev: prev})
+		case grp != nil:
+			defects = append(defects, cardDefect{kind: "too-many", kid: kid, prev: prev, grp: grp})
 		default:
 			known := false
 			for d := range declared {
@@ -541,7 +560,7 @@ func cardMessages(kind string, labs []*nfaLabel) []assertMsg {
 		for _, l := range labs[1:] {
 			found := false
 			for _, a := range l.anc {
-				if a == g {
+				if a.g == g.g {
 					found = true
 					break
 				}
@@ -552,7 +571,7 @@ func cardMessages(kind string, labs []*nfaLabel) []assertMsg {
 			}
 		}
 		if inAll {
-			if ms := filter(g.msgs); len(ms) > 0 {
+			if ms := filter(g.g.msgs); len(ms) > 0 {
 				return ms
 			}
 		}
@@ -590,6 +609,21 @@ func (s *Schema) cardinalityErrors(el *xmltree.Node, p *particle, kids []*xmltre
 			k := d.kid
 			e.Line, e.Col, e.Path = int(k.Line), int(k.Col), elementPath(k)
 			e.Particle = clark(nameOf(k))
+			if d.grp != nil {
+				var names []string
+				groupElementNames(el, d.grp.g, &names, map[*modelGroup]bool{})
+				if len(names) > 6 {
+					names = append(names[:6], "…")
+				}
+				e.Message = "element " + displayName(el, nameOf(k)) + ": the " + groupKindWord(d.grp.g) + " of " +
+					strings.Join(names, ", ") + " occurs more often than allowed (maximum " + strconv.Itoa(d.grp.p.max) + ") in " + parent
+				for _, m := range d.grp.g.msgs {
+					if m.on == "" || m.on == "too-many" {
+						e.msgs = append(e.msgs, m)
+					}
+				}
+				break
+			}
 			limit := ""
 			if d.prev.part != nil && d.prev.part.max != unbounded {
 				limit = " (maximum " + strconv.Itoa(d.prev.part.max) + ")"
@@ -613,4 +647,55 @@ func (s *Schema) cardinalityErrors(el *xmltree.Node, p *particle, kids []*xmltre
 		out = append(out, e)
 	}
 	return out
+}
+
+// exhaustedGroup finds the enclosing group of the child just consumed that has
+// used up its occurrences although the next child would be valid as the start
+// of one more iteration of it — a second alternative of a choice that may occur
+// once, say. That child is "too many" of the group, not out of order.
+func (s *Schema) exhaustedGroup(root *particle, last []*nfaLabel, nn xname) *ancEntry {
+	for _, l := range last {
+		for i := range l.anc {
+			a := l.anc[i]
+			if a.p == nil || a.p == root || a.p.max == unbounded {
+				continue
+			}
+			n, ok := buildNFA(&particle{min: 1, max: 1, term: a.g})
+			if !ok {
+				continue
+			}
+			start := n.closure(map[int]bool{n.start: true})
+			if next, _ := n.step(s, start, nn); len(next) > 0 {
+				return &a
+			}
+		}
+	}
+	return nil
+}
+
+// groupElementNames lists the element names a group is made of, depth first,
+// for "the choice of A, B".
+func groupElementNames(el *xmltree.Node, g *modelGroup, out *[]string, seen map[*modelGroup]bool) {
+	if seen[g] {
+		return
+	}
+	seen[g] = true
+	for _, p := range g.particles {
+		switch t := p.term.(type) {
+		case *ElementDecl:
+			*out = append(*out, displayName(el, t.name))
+		case *modelGroup:
+			groupElementNames(el, t, out, seen)
+		}
+	}
+}
+
+func groupKindWord(g *modelGroup) string {
+	switch g.compositor {
+	case cChoice:
+		return "choice"
+	case cAll:
+		return "all group"
+	}
+	return "sequence"
 }

@@ -1092,6 +1092,7 @@ func (c *compiler) parseGlobalAttribute(node *xmltree.Node) error {
 	}
 	ad.typ = st
 	ad.docs = c.docsOf(node)
+	ad.msgs = assertMessages(node)
 	ad.inheritable = boolAttrTrue(node, "inheritable")
 	if d, ok := node.AttrLocal("default"); ok {
 		ad.def, ad.hasDefault = d, true

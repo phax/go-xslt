@@ -113,3 +113,104 @@ func TestCardinalityFallbackForAll(t *testing.T) {
 		t.Errorf("%+v", r)
 	}
 }
+
+func choiceSchema(withMsg bool) string {
+	msg := ""
+	if withMsg {
+		msg = `<xs:annotation><xs:appinfo>
+          <msg:message rule="BR-CO-3" xml:lang="en">Tax point date and its code must not both be given.</msg:message>
+          <msg:message rule="BR-CO-3" xml:lang="de">Datum und Code dürfen nicht beide angegeben werden.</msg:message>
+        </xs:appinfo></xs:annotation>`
+	}
+	return `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:msg="https://github.com/tim-riep/go-xslt/xsd/messages">
+  <xs:element name="Doc"><xs:complexType><xs:sequence>
+    <xs:element name="A" type="xs:string"/>
+    <xs:choice minOccurs="0">` + msg + `
+      <xs:element name="TaxPointDate" type="xs:string"/>
+      <xs:element name="TaxPointDateCode" type="xs:string"/>
+    </xs:choice>
+    <xs:element name="B" type="xs:string" minOccurs="0"/>
+  </xs:sequence></xs:complexType></xs:element></xs:schema>`
+}
+
+func validateWith(t *testing.T, schema, inst, lang string) []engine.Diagnostic {
+	t.Helper()
+	r := engine.Validate(engine.ValidateRequest{Schemas: []string{schema}, Instance: inst, Version: engine.XSD11, Language: lang})
+	if r.Valid != (len(r.Diagnostics) == 0) {
+		t.Fatalf("valid=%v, %d diagnostics", r.Valid, len(r.Diagnostics))
+	}
+	return r.Diagnostics
+}
+
+// A second alternative of a choice that may occur once is "too many" of the
+// CHOICE: its message and rule apply, not "out of order".
+func TestExhaustedChoiceIsTooMany(t *testing.T) {
+	const inst = `<Doc><A/><TaxPointDate/><TaxPointDateCode/></Doc>`
+	d := validateWith(t, choiceSchema(true), inst, "de")
+	if len(d) != 1 || d[0].Kind != "too-many" || d[0].Rule != "BR-CO-3" || d[0].Particle != "TaxPointDateCode" ||
+		d[0].Path != "/Doc[1]/TaxPointDateCode[1]" || d[0].Message != "Datum und Code dürfen nicht beide angegeben werden." {
+		t.Errorf("with message: %+v", d)
+	}
+	// without a message the generic text names the excess
+	d = validateWith(t, choiceSchema(false), inst, "")
+	want := "element TaxPointDateCode: the choice of TaxPointDate, TaxPointDateCode occurs more often than allowed (maximum 1) in Doc"
+	if len(d) != 1 || d[0].Kind != "too-many" || d[0].Message != want || d[0].Rule != "" {
+		t.Errorf("generic: %+v", d)
+	}
+	// the same alternative twice is the choice used up as well
+	d = validateWith(t, choiceSchema(true), `<Doc><A/><TaxPointDate/><TaxPointDate/></Doc>`, "en")
+	if len(d) != 1 || d[0].Kind != "too-many" || d[0].Rule != "BR-CO-3" {
+		t.Errorf("same alternative twice: %+v", d)
+	}
+	// an element that belongs to an EARLIER particle stays "order"
+	d = validateWith(t, choiceSchema(true), `<Doc><A/><B/><TaxPointDate/></Doc>`, "en")
+	if len(d) != 1 || d[0].Kind != "order" || d[0].Rule != "" {
+		t.Errorf("order: %+v", d)
+	}
+	// valid use of the choice stays valid
+	if d = validateWith(t, choiceSchema(true), `<Doc><A/><TaxPointDateCode/><B/></Doc>`, ""); len(d) != 0 {
+		t.Errorf("valid: %+v", d)
+	}
+}
+
+// A repeated group that has run out of repetitions is named as such.
+func TestExhaustedSequenceGroupIsTooMany(t *testing.T) {
+	const sch = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r"><xs:complexType><xs:sequence>
+	  <xs:sequence maxOccurs="2"><xs:element name="a"/><xs:element name="b"/></xs:sequence></xs:sequence></xs:complexType></xs:element></xs:schema>`
+	d := validateWith(t, sch, `<r><a/><b/><a/><b/><a/><b/></r>`, "")
+	if len(d) == 0 || d[0].Kind != "too-many" || d[0].Path != "/r[1]/a[3]" ||
+		d[0].Message != "element a: the sequence of a, b occurs more often than allowed (maximum 2) in r" {
+		t.Errorf("%+v", d)
+	}
+}
+
+func TestMissingRequiredAttributeMessages(t *testing.T) {
+	const sch = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:msg="https://github.com/tim-riep/go-xslt/xsd/messages">
+	  <xs:attribute name="lang" type="xs:string"><xs:annotation><xs:appinfo>
+	    <msg:message rule="R-LANG" on="missing">The language is always stated.</msg:message></xs:appinfo></xs:annotation></xs:attribute>
+	  <xs:element name="r"><xs:complexType>
+	   <xs:attribute name="scheme" type="xs:string" use="required"><xs:annotation><xs:appinfo>
+	     <msg:message rule="BR-62" on="missing" xml:lang="en">The scheme is always stated.</msg:message>
+	     <msg:message rule="BR-62" on="missing" xml:lang="de">Das Schema wird immer angegeben.</msg:message>
+	     <msg:message rule="IGNORED" on="too-many">not for attributes</msg:message></xs:appinfo></xs:annotation></xs:attribute>
+	   <xs:attribute name="plain" type="xs:string" use="required"/>
+	   <xs:attribute ref="lang" use="required"/>
+	  </xs:complexType></xs:element></xs:schema>`
+	d := validateWith(t, sch, `<r/>`, "de")
+	var got []string
+	for _, x := range d {
+		got = append(got, x.Rule+"|"+x.Message+"|"+x.Path)
+	}
+	want := []string{
+		"BR-62|Das Schema wird immer angegeben.|/r[1]",
+		"|required attribute plain is missing|/r[1]",
+		"R-LANG|The language is always stated.|/r[1]",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got %q", got)
+	}
+	// present attributes: valid
+	if d = validateWith(t, sch, `<r scheme="s" plain="p" lang="en"/>`, ""); len(d) != 0 {
+		t.Errorf("valid: %+v", d)
+	}
+}

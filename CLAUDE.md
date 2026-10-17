@@ -110,7 +110,11 @@ dragging in the GUI's Wails/CGo dependencies:
   missing/too-many/unexpected/order, `Particle`, own `msg:message` (`on=`) from
   the element declaration or enclosing choice. Never decides validity; `xs:all`,
   open content and huge bounds fall back to the generic message (~11% of the
-  suite's content-model errors).
+  suite's content-model errors). A child that would start one more iteration of
+  a non-root group that has used up its occurrences (a choice's second
+  alternative) is `too-many` of that GROUP (`exhaustedGroup`), with the group's
+  messages. Missing required attributes take `on="missing"` messages from the
+  `xs:attribute` (use, else declaration) and are all reported (`attributes.go`).
   **Gotcha**: `Compile` returns `ErrUnsupported` (not a verdict) for anything
   beyond what's implemented — keep that discipline so the pass rate stays honest.
 - `desktop/main.go`, `desktop/xsltservice.go`, `desktop/projectservice.go` —

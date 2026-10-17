@@ -277,6 +277,7 @@ type identityConstraint struct {
 type AttributeDecl struct {
 	name xname
 	docs []Documentation // CompileWithDocs only
+	msgs []assertMsg     // msg:message entries of the declaration's appinfo
 	typ  *SimpleType
 	// inheritable: the XSD 1.1 {inheritable} property — descendants' CTA tests
 	// see the attribute (cta0009/cta0014).
@@ -290,6 +291,7 @@ type AttributeDecl struct {
 
 type attrUse struct {
 	docs       []Documentation // the xs:attribute's own annotation (CompileWithDocs only)
+	msgs       []assertMsg     // msg:message entries of the xs:attribute's appinfo
 	decl       *AttributeDecl
 	required   bool
 	prohibited bool
