@@ -272,7 +272,7 @@ func (p *parser) parseOr() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.cur().kind == tOp && p.cur().text == "or" {
+	for p.kwOp("or") {
 		p.next()
 		right, err := p.parseAnd()
 		if err != nil {
@@ -288,7 +288,7 @@ func (p *parser) parseAnd() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.cur().kind == tOp && p.cur().text == "and" {
+	for p.kwOp("and") {
 		p.next()
 		right, err := p.parseComparison()
 		if err != nil {
@@ -324,9 +324,9 @@ func (p *parser) parseComparison() (Expr, error) {
 		kind, op = compNode, "<<"
 	case p.cur().kind == tNodegt:
 		kind, op = compNode, ">>"
-	case p.cur().kind == tOp && isValueComp(p.cur().text):
+	case (p.cur().kind == tOp || p.cur().kind == tName) && isValueComp(p.cur().text):
 		kind, op = compValue, p.cur().text
-	case p.cur().kind == tOp && p.cur().text == "is":
+	case p.kwOp("is"):
 		kind, op = compNode, "is"
 	default:
 		return left, nil
@@ -372,7 +372,7 @@ func (p *parser) parseRange() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.cur().kind == tOp && p.cur().text == "to" {
+	if p.kwOp("to") {
 		p.next()
 		right, err := p.parseAdditive()
 		if err != nil {
@@ -399,6 +399,18 @@ func (p *parser) parseAdditive() (Expr, error) {
 	return left, nil
 }
 
+// kwOp reports whether the current token is the operator keyword text. The
+// lexer reads a word as an operator only when an operand precedes it, and it
+// does not see that the '*', '+' or '?' closing the SequenceType of an
+// `instance of` / `treat as` is an occurrence indicator and not an operator:
+// it expects an operand next and hands the keyword over as a name. Where the
+// grammar asks for an operator a name can only be that operator, so both are
+// accepted here (XPath 3.1 A.1.2, occurrence-indicators).
+func (p *parser) kwOp(text string) bool {
+	t := p.cur()
+	return (t.kind == tOp || t.kind == tName) && t.text == text
+}
+
 func (p *parser) parseMultiplicative() (Expr, error) {
 	left, err := p.parseUnion()
 	if err != nil {
@@ -408,7 +420,7 @@ func (p *parser) parseMultiplicative() (Expr, error) {
 	// lexer classed it as a wildcard star — after the '?' occurrence
 	// indicator of a SequenceType no wildcard can follow
 	// (K-SeqExprTreat-14: 3 treat as xs:integer ? * 3).
-	for (p.cur().kind == tOp && (p.cur().text == "*" || p.cur().text == "div" || p.cur().text == "mod" || p.cur().text == "idiv")) || p.cur().kind == tStar {
+	for (p.cur().kind == tOp && p.cur().text == "*") || p.kwOp("div") || p.kwOp("mod") || p.kwOp("idiv") || p.cur().kind == tStar {
 		op := p.next().text
 		right, err := p.parseUnion()
 		if err != nil {
@@ -424,7 +436,7 @@ func (p *parser) parseUnion() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.cur().kind == tPipe || (p.cur().kind == tOp && p.cur().text == "union") {
+	for p.cur().kind == tPipe || (p.kwOp("union")) {
 		p.next()
 		right, err := p.parseIntersectExcept()
 		if err != nil {
@@ -440,7 +452,7 @@ func (p *parser) parseIntersectExcept() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.cur().kind == tOp && (p.cur().text == "intersect" || p.cur().text == "except") {
+	for p.kwOp("intersect") || p.kwOp("except") {
 		op := p.next().text
 		right, err := p.parseInstanceof()
 		if err != nil {
@@ -456,7 +468,7 @@ func (p *parser) parseInstanceof() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.cur().kind == tOp && p.cur().text == "instance" {
+	if p.kwOp("instance") {
 		p.next()
 		if !p.isKeyword("of") {
 			return nil, fmt.Errorf("expected 'of' after 'instance'")
@@ -476,7 +488,7 @@ func (p *parser) parseTreat() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.cur().kind == tOp && p.cur().text == "treat" {
+	if p.kwOp("treat") {
 		p.next()
 		if !p.isKeyword("as") {
 			return nil, fmt.Errorf("expected 'as' after 'treat'")
@@ -496,7 +508,7 @@ func (p *parser) parseCastable() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.cur().kind == tOp && p.cur().text == "castable" {
+	if p.kwOp("castable") {
 		p.next()
 		if !p.isKeyword("as") {
 			return nil, fmt.Errorf("expected 'as' after 'castable'")
@@ -516,7 +528,7 @@ func (p *parser) parseCast() (Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.cur().kind == tOp && p.cur().text == "cast" {
+	if p.kwOp("cast") {
 		p.next()
 		if !p.isKeyword("as") {
 			return nil, fmt.Errorf("expected 'as' after 'cast'")
