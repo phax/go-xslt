@@ -96,6 +96,8 @@ func runValidate(req ValidateRequest) ValidateResult {
 			Message:  e.Message,
 			Rule:     e.Rule,
 			Path:     e.Path,
+			Particle: e.Particle,
+			Kind:     e.Kind,
 		})
 	}
 	return res

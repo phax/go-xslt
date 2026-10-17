@@ -1022,6 +1022,7 @@ func (c *compiler) parseGlobalElement(node *xmltree.Node) error {
 // and nillable/default/fixed. Used for global and local elements.
 func (c *compiler) fillElementCommon(decl *ElementDecl, node *xmltree.Node) error {
 	decl.docs = c.docsOf(node)
+	decl.msgs = assertMessages(node)
 	decl.nillable = attrIs(node, "nillable", "true")
 	if b, ok := node.AttrLocal("block"); ok {
 		decl.blocked = parseBlockSet(b)

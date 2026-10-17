@@ -42,9 +42,13 @@ type Error struct {
 	Message   string
 	// Rule is the msg:message/@rule of a failed assertion ("" otherwise).
 	Rule string
-	// Path locates the failing element, e.g. /Doc[1]/Item[2], for assertion
-	// failures ("" otherwise).
+	// Path locates the failing element, e.g. /Doc[1]/Item[2] ("" for errors
+	// that have no instance location).
 	Path string
+	// Kind and Particle describe a content-model error: Kind is "missing",
+	// "too-many", "unexpected" or "order", Particle the expanded name of the
+	// element declaration concerned ("" otherwise).
+	Kind, Particle string
 
 	msgs []assertMsg // candidate messages of a failed assertion
 }

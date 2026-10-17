@@ -32,6 +32,18 @@ export interface Diagnostic {
      * /Doc[1]/Item[2]; empty when not applicable.
      */
     "path"?: string;
+
+    /**
+     * Particle is the element declaration a content-model error refers to, as
+     * an expanded name ({namespace}local); empty otherwise.
+     */
+    "particle"?: string;
+
+    /**
+     * Kind tells content-model errors apart: "missing", "too-many",
+     * "unexpected" or "order"; empty otherwise.
+     */
+    "kind"?: string;
 }
 
 /**

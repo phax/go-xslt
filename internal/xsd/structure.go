@@ -909,7 +909,7 @@ func (c *compiler) parseParticle(ch *xmltree.Node) (*particle, error) {
 }
 
 func (c *compiler) parseModelGroup(node *xmltree.Node) (*modelGroup, error) {
-	mg := &modelGroup{}
+	mg := &modelGroup{msgs: assertMessages(node)}
 	switch node.Name.Local {
 	case "choice":
 		mg.compositor = cChoice

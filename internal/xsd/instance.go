@@ -965,6 +965,19 @@ func (s *Schema) validateChildren(ct *ComplexType, el *xmltree.Node, kids []*xml
 		if s.coll == nil {
 			return e
 		}
+		// Collecting: say precisely what is wrong when that can be worked out
+		// (no open content, a model the explainer can express); the generic
+		// message above is the fallback.
+		if oc == nil {
+			if cards := s.cardinalityErrors(el, p, kids); len(cards) > 0 {
+				for _, ce := range cards {
+					if cont, ret := s.soft(ce, el); !cont {
+						return ret
+					}
+				}
+				return errModelMismatch
+			}
+		}
 		if cont, ret := s.soft(e, el); !cont {
 			return ret
 		}

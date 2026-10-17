@@ -199,6 +199,9 @@ const (
 type modelGroup struct {
 	compositor compositor
 	particles  []*particle
+	// msgs are the group's msg:message entries (see messages.go): own wording
+	// for a cardinality error of the group's members.
+	msgs []assertMsg
 }
 
 // wildcard is an xs:any / xs:anyAttribute.
@@ -234,6 +237,7 @@ type wildcard struct {
 type ElementDecl struct {
 	name        xname
 	docs        []Documentation // CompileWithDocs only
+	msgs        []assertMsg     // msg:message entries of the declaration's appinfo
 	typ         Type
 	nillable    bool
 	abstract    bool

@@ -56,6 +56,12 @@ type Diagnostic struct {
 	// Path locates the element a failed XSD assertion was evaluated on, e.g.
 	// /Doc[1]/Item[2]; empty when not applicable.
 	Path string `json:"path,omitempty"`
+	// Particle is the element declaration a content-model error refers to, as
+	// an expanded name ({namespace}local); empty otherwise.
+	Particle string `json:"particle,omitempty"`
+	// Kind tells content-model errors apart: "missing", "too-many",
+	// "unexpected" or "order"; empty otherwise.
+	Kind string `json:"kind,omitempty"`
 }
 
 // Result is the outcome of a transformation. Output holds the serialized

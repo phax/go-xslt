@@ -378,6 +378,18 @@ when all its children could be matched to declarations. `Valid` is exactly what
 it would be without collecting; `ValidateRequest.MaxErrors` (0 = unlimited)
 stops after that many.
 
+### Precise content-model errors
+
+A child that is missing, occurs too often, is not allowed or stands in the
+wrong place is reported as exactly that, not as one generic mismatch of the
+parent: `Diagnostic.Kind` is `missing` (at the parent), `too-many` (one per
+surplus occurrence, at that occurrence), `unexpected` or `order`, and
+`Diagnostic.Particle` is the element's expanded name. Messages name the
+element with the prefix the instance uses (`element cac:Party is missing in
+Invoice`) and carry no lists of names. Independent defects of one parent are all
+reported. Models the explainer does not cover (`xs:all`, open content) keep the
+generic diagnostic; the validity verdict is never affected.
+
 ### Readable messages for failed assertions
 
 XSD 1.1 has no message slot on `xs:assert`, so a schema can carry one in the
@@ -391,6 +403,17 @@ assertion's `xs:appinfo`, in the namespace
     <msg:message rule="BR-33" xml:lang="de">Grund oder Grundcode fehlt.</msg:message>
   </xs:appinfo></xs:annotation>
 </xs:assert>
+```
+
+The same `msg:message` can sit in the `xs:appinfo` of an **element
+declaration** or an **`xs:choice`/`xs:sequence`**, to word its cardinality
+errors; `on="missing"` or `on="too-many"` narrows it to one kind (no `on`: both),
+and a choice's message speaks for all its alternatives:
+
+```xml
+<xs:element name="DocumentNumber" type="…"><xs:annotation><xs:appinfo>
+  <msg:message rule="BR-2" on="missing" xml:lang="en">The document number is missing.</msg:message>
+</xs:appinfo></xs:annotation></xs:element>
 ```
 
 A failed assertion (on a complex type, inherited by extension, or an

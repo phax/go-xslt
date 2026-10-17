@@ -24,7 +24,9 @@ import (
 const MessagesNS = "https://github.com/tim-riep/go-xslt/xsd/messages"
 
 type assertMsg struct {
-	rule, lang, text string
+	// on narrows a message on an element declaration or group to one kind of
+	// cardinality error ("missing", "too-many"); "" applies to both.
+	rule, lang, text, on string
 }
 
 // assertMessages collects the msg:message entries of an xs:assert/xs:assertion.
@@ -44,6 +46,7 @@ func assertMessages(a *xmltree.Node) []assertMsg {
 				}
 				am := assertMsg{text: strings.TrimSpace(m.StringValue())}
 				am.rule, _ = m.AttrLocal("rule")
+				am.on, _ = m.AttrLocal("on")
 				for _, at := range m.Attrs {
 					if at.Name.Space == xmlNS && at.Name.Local == "lang" {
 						am.lang = strings.TrimSpace(at.Value)

@@ -104,6 +104,13 @@ dragging in the GUI's Wails/CGo dependencies:
   `errModelMismatch`); the skip-wildcard excuse withdraws what a child already
   recorded (`uncollect`). After a first error an `ErrUnsupported`/panic ends
   the list instead of replacing the invalid verdict.
+  `explain.go`: when the matcher says "no" and a collecting `Validate` is
+  running, a small position automaton (unrolled occurrence bounds, shortest
+  insertion path) replays the children and names each defect — `Kind`
+  missing/too-many/unexpected/order, `Particle`, own `msg:message` (`on=`) from
+  the element declaration or enclosing choice. Never decides validity; `xs:all`,
+  open content and huge bounds fall back to the generic message (~11% of the
+  suite's content-model errors).
   **Gotcha**: `Compile` returns `ErrUnsupported` (not a verdict) for anything
   beyond what's implemented — keep that discipline so the pass rate stays honest.
 - `desktop/main.go`, `desktop/xsltservice.go`, `desktop/projectservice.go` —
