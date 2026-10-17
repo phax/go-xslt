@@ -367,6 +367,28 @@ fails are documented suite self-contradictions, not engine gaps. `Compile`/
 what's implemented, so the pass rate stays honest. Progress detail:
 `tools/xsd_results.txt`.
 
+### Readable messages for failed assertions
+
+XSD 1.1 has no message slot on `xs:assert`, so a schema can carry one in the
+assertion's `xs:appinfo`, in the namespace
+`https://github.com/tim-riep/go-xslt/xsd/messages`:
+
+```xml
+<xs:assert test="exists(en:Reason) or exists(en:ReasonCode)">
+  <xs:annotation><xs:appinfo>
+    <msg:message rule="BR-33" xml:lang="en">Reason or reason code is missing.</msg:message>
+    <msg:message rule="BR-33" xml:lang="de">Grund oder Grundcode fehlt.</msg:message>
+  </xs:appinfo></xs:annotation>
+</xs:assert>
+```
+
+A failed assertion (on a complex type, inherited by extension, or an
+`xs:assertion` facet) then reports `Diagnostic.Message` and `Diagnostic.Rule`
+from the entry matching `ValidateRequest.Language` (else the entry without
+`xml:lang`, else the first), plus `Line`/`Col` and `Path` (e.g.
+`/Doc[1]/Allowance[2]`) of the failing element. Other processors ignore the
+appinfo, and the messages never change validity.
+
 ## License / contributing
 
 Apache License 2.0 — see [LICENSE](LICENSE). The desktop GUI also shows this

@@ -29,6 +29,10 @@ type ValidateRequest struct {
 	// BaseDir resolves relative schema locations (xs:import/xs:include/
 	// xsi:schemaLocation). Empty disables disk resolution.
 	BaseDir string `json:"baseDir"`
+	// Language selects the xml:lang of assertion messages (msg:message in an
+	// xs:assert's xs:appinfo), e.g. "de". Empty means the default message. It
+	// only affects diagnostic wording, never validity.
+	Language string `json:"language"`
 }
 
 // ValidateResult is the outcome of a validation. Valid is true iff the instance
@@ -65,7 +69,11 @@ func runValidate(req ValidateRequest) ValidateResult {
 	if req.Version == XSD11 {
 		v = xsd.Version11
 	}
-	r, err := xsd.Validate(req.Schemas, req.Instance, req.BaseDir, v)
+	sch, err := xsd.Compile(req.Schemas, req.BaseDir, v)
+	var r *xsd.Result
+	if err == nil {
+		r, err = sch.ValidateLang(req.Instance, req.Language)
+	}
 	if err != nil {
 		return ValidateResult{Valid: false, Diagnostics: []Diagnostic{{
 			Severity: SeverityError,
@@ -82,6 +90,8 @@ func runValidate(req ValidateRequest) ValidateResult {
 			Col:      e.Col,
 			Code:     e.Code,
 			Message:  e.Message,
+			Rule:     e.Rule,
+			Path:     e.Path,
 		})
 	}
 	return res

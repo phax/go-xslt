@@ -40,6 +40,13 @@ type Error struct {
 	Line, Col int
 	Code      string
 	Message   string
+	// Rule is the msg:message/@rule of a failed assertion ("" otherwise).
+	Rule string
+	// Path locates the failing element, e.g. /Doc[1]/Item[2], for assertion
+	// failures ("" otherwise).
+	Path string
+
+	msgs []assertMsg // candidate messages of a failed assertion
 }
 
 func (e Error) Error() string { return e.Message }

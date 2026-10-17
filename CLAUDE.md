@@ -93,6 +93,10 @@ dragging in the GUI's Wails/CGo dependencies:
   `Validate` via a standing differential test over the whole XSD conformance
   corpus. Content-model matching: a memoized position-set NFA (`content.go`)
   for ≤600 children; `bigmatch.go`'s linear counting matcher above that.
+  `messages.go`: a failed `xs:assert`/`xs:assertion` reports the
+  `msg:message` (namespace `…/xsd/messages`, in its `xs:appinfo`) matching
+  `ValidateRequest.Language`, plus `Rule`/`Path`/`Line`/`Col` — wording only,
+  never the verdict.
   **Gotcha**: `Compile` returns `ErrUnsupported` (not a verdict) for anything
   beyond what's implemented — keep that discipline so the pass rate stays honest.
 - `desktop/main.go`, `desktop/xsltservice.go`, `desktop/projectservice.go` —

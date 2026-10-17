@@ -18,6 +18,13 @@ const xmlNS = "http://www.w3.org/XML/1998/namespace"
 // verdict); err is non-nil only when the verdict cannot be determined
 // (ErrUnsupported).
 func (s *Schema) Validate(instance string) (*Result, error) {
+	return s.ValidateLang(instance, "")
+}
+
+// ValidateLang is Validate with a preferred xml:lang for the msg:message
+// entries of failed assertions (see messages.go). The language only selects
+// the wording of a diagnostic; it never changes the verdict.
+func (s *Schema) ValidateLang(instance, lang string) (*Result, error) {
 	doc, err := xmltree.ParseLenient11(instance)
 	if err != nil {
 		return &Result{Valid: false, Errors: []Error{{Message: "instance not well-formed: " + err.Error()}}}, nil
@@ -57,6 +64,7 @@ func (s *Schema) Validate(instance string) (*Result, error) {
 		}
 		var e *Error
 		if errors.As(verr, &e) {
+			e.pickMessage(lang)
 			return &Result{Valid: false, Errors: []Error{*e}}, nil
 		}
 		return nil, verr
@@ -408,8 +416,13 @@ func stampLoc(err *error, el *xmltree.Node) {
 		return
 	}
 	var e *Error
-	if errors.As(*err, &e) && e.Line == 0 && e.Col == 0 {
-		e.Line, e.Col = int(el.Line), int(el.Col)
+	if errors.As(*err, &e) {
+		if e.Line == 0 && e.Col == 0 {
+			e.Line, e.Col = int(el.Line), int(el.Col)
+		}
+		if e.Path == "" && strings.HasPrefix(e.Code, "cvc-assertion") {
+			e.Path = elementPath(el)
+		}
 	}
 }
 

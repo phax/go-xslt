@@ -50,6 +50,12 @@ type Diagnostic struct {
 	Message string `json:"message"`
 	// Phase is where the diagnostic originated: "parse", "compile" or "run".
 	Phase string `json:"phase"`
+	// Rule is the rule identifier (msg:message/@rule) of a failed XSD
+	// assertion; empty when not applicable.
+	Rule string `json:"rule,omitempty"`
+	// Path locates the element a failed XSD assertion was evaluated on, e.g.
+	// /Doc[1]/Item[2]; empty when not applicable.
+	Path string `json:"path,omitempty"`
 }
 
 // Result is the outcome of a transformation. Output holds the serialized

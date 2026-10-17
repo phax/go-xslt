@@ -39,6 +39,7 @@ func (c *compiler) parseAssert(ch *xmltree.Node) (*assertion, error) {
 	}
 	a := &assertion{test: p, ns: ch.InScopeNamespaces()}
 	a.defaultNS = c.resolveXPathDefaultNS(ch)
+	a.msgs = assertMessages(ch)
 	return a, nil
 }
 
@@ -191,7 +192,9 @@ func evalSimpleAssertions(asserts []*assertion, value xpath.Object) error {
 			NoFocus:       true,
 		})
 		if err != nil || !xpath.ToBool(obj) {
-			return invalidf("cvc-assertions-valid", "assertion on the value failed")
+			e := invalidf("cvc-assertions-valid", "assertion on the value failed")
+			e.msgs = a.msgs
+			return e
 		}
 	}
 	return nil
@@ -329,6 +332,7 @@ func (s *Schema) checkAsserts(ct *ComplexType, el *xmltree.Node) error {
 	if ct.kind == contentSimple && ct.simpleType != nil {
 		value = typedValueOf(ct.simpleType, elementText(el))
 	}
+	orig := el
 	el = s.assertTree(el)
 	for _, a := range asserts {
 		obj, err := a.test.Eval(&xpath.Context{
@@ -343,10 +347,10 @@ func (s *Schema) checkAsserts(ct *ComplexType, el *xmltree.Node) error {
 			// (§3.13.4.1): the rootless-tree '/' error (d4_3_15ii31/ii32),
 			// division by zero (assert012), an unavailable doc() (assert011
 			// expects BOTH instances invalid).
-			return invalidf("cvc-assertion", "assertion failed on %s", nameOf(el))
+			return assertionFailed(a, orig)
 		}
 		if !xpath.ToBool(obj) {
-			return invalidf("cvc-assertion", "assertion failed on %s", nameOf(el))
+			return assertionFailed(a, orig)
 		}
 	}
 	return nil

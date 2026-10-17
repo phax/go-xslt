@@ -154,6 +154,9 @@ type assertion struct {
 	test      *xpath.Parsed
 	ns        map[string]string
 	defaultNS string
+	// msgs are the msg:message entries of the assertion's xs:appinfo (see
+	// messages.go); they only enrich the diagnostic, never the verdict.
+	msgs []assertMsg
 }
 
 // typeAlternative is an XSD 1.1 xs:alternative (conditional type assignment). A
