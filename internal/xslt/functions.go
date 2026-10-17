@@ -730,8 +730,14 @@ func (eng *engine) callUserFunc(fd *FuncDef, args []xpath.Object, env *evalEnv) 
 			}
 		}
 	}
+	// A function body is lexically scoped (XSLT 3.0 §9.10): it sees the global
+	// variables, its own parameters and its own locals — NOT the local
+	// variables of whatever happens to be calling it. The scope stack is the
+	// dynamic call chain, so run the body on a stack of its own.
+	callerScopes := eng.scopes
+	eng.scopes = nil
 	eng.pushScope()
-	defer eng.popScope()
+	defer func() { eng.scopes = callerScopes }()
 	// Calling a stylesheet function establishes a fresh, EMPTY tunnel
 	// parameter set: unlike xsl:call-template/apply-templates (which forward
 	// the ambient tunnel set unless a NEW one is supplied), a function

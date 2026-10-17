@@ -3146,12 +3146,18 @@ func (eng *engine) invokeTemplate(tmpl *Template, r rt, out *xmltree.Node, calle
 		}
 		supplied[clark(p.name.Space, p.name.Local)] = suppliedParam{v, cp}
 	}
+	// A template body is lexically scoped like a function body: globals, its
+	// own parameters and locals — never the local variables of the template or
+	// instruction that happened to invoke it. (The supplied values were all
+	// evaluated above, in the caller's scope.)
+	callerScopes := eng.scopes
+	eng.scopes = nil
 	eng.pushScope()
 	prevTunnel := eng.tunnel
 	if tunnelIn != nil {
 		eng.tunnel = tunnelIn
 	}
-	defer func() { eng.popScope(); eng.tunnel = prevTunnel }()
+	defer func() { eng.scopes = callerScopes; eng.tunnel = prevTunnel }()
 
 	for _, p := range tmpl.params {
 		var val xpath.Object
