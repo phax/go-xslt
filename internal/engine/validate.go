@@ -33,6 +33,10 @@ type ValidateRequest struct {
 	// xs:assert's xs:appinfo), e.g. "de". Empty means the default message. It
 	// only affects diagnostic wording, never validity.
 	Language string `json:"language"`
+	// MaxErrors stops validation after this many errors; 0 means no limit.
+	// Validation reports every error it finds (in document order), not only
+	// the first.
+	MaxErrors int `json:"maxErrors"`
 }
 
 // ValidateResult is the outcome of a validation. Valid is true iff the instance
@@ -72,7 +76,7 @@ func runValidate(req ValidateRequest) ValidateResult {
 	sch, err := xsd.Compile(req.Schemas, req.BaseDir, v)
 	var r *xsd.Result
 	if err == nil {
-		r, err = sch.ValidateLang(req.Instance, req.Language)
+		r, err = sch.ValidateOpts(req.Instance, req.Language, req.MaxErrors)
 	}
 	if err != nil {
 		return ValidateResult{Valid: false, Diagnostics: []Diagnostic{{

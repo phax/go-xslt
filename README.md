@@ -367,6 +367,17 @@ fails are documented suite self-contradictions, not engine gaps. `Compile`/
 what's implemented, so the pass rate stays honest. Progress detail:
 `tools/xsd_results.txt`.
 
+### All errors, not only the first
+
+`engine.Validate` keeps going after an error and reports **every** problem it
+can find, ordered by document position, each with `Line`/`Col`/`Path`: content
+model errors and simple-type/facet errors of different elements, and every
+failed assertion (also those inherited by extension). A content-model error
+does not hide its children's errors, and the element's own assertions still run
+when all its children could be matched to declarations. `Valid` is exactly what
+it would be without collecting; `ValidateRequest.MaxErrors` (0 = unlimited)
+stops after that many.
+
 ### Readable messages for failed assertions
 
 XSD 1.1 has no message slot on `xs:assert`, so a schema can carry one in the

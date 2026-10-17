@@ -330,6 +330,8 @@ type Schema struct {
 	// assertTypes: per-Validate-call typed-XDM annotations (element -> the
 	// primitive its simple content validated against); consumed by assertTree.
 	assertTypes map[*xmltree.Node]xpath.AtomType
+	// coll collects every error of a Validate call (nil on ValidateNode).
+	coll *collector
 	// assertLists is assertTypes for a LIST-varietied simple type, whose typed
 	// value is a SEQUENCE and so cannot be described by one primitive alone —
 	// the same {item primitive, item type name} pair xmltree.Node.TypeAnno +

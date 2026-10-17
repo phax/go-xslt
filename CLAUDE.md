@@ -97,6 +97,13 @@ dragging in the GUI's Wails/CGo dependencies:
   `msg:message` (namespace `…/xsd/messages`, in its `xs:appinfo`) matching
   `ValidateRequest.Language`, plus `Rule`/`Path`/`Line`/`Col` — wording only,
   never the verdict.
+  `collect.go`: `Validate` collects ALL errors (document order, `MaxErrors`)
+  through a `collector` on the per-call Schema copy — nil on the `ValidateNode`
+  path, which still stops at the first. Recording points are `soft()` calls
+  (child errors, attributes, each assertion, content-model mismatch →
+  `errModelMismatch`); the skip-wildcard excuse withdraws what a child already
+  recorded (`uncollect`). After a first error an `ErrUnsupported`/panic ends
+  the list instead of replacing the invalid verdict.
   **Gotcha**: `Compile` returns `ErrUnsupported` (not a verdict) for anything
   beyond what's implemented — keep that discipline so the pass rate stays honest.
 - `desktop/main.go`, `desktop/xsltservice.go`, `desktop/projectservice.go` —

@@ -18,13 +18,19 @@ const xmlNS = "http://www.w3.org/XML/1998/namespace"
 // verdict); err is non-nil only when the verdict cannot be determined
 // (ErrUnsupported).
 func (s *Schema) Validate(instance string) (*Result, error) {
-	return s.ValidateLang(instance, "")
+	return s.ValidateOpts(instance, "", 0)
 }
 
 // ValidateLang is Validate with a preferred xml:lang for the msg:message
 // entries of failed assertions (see messages.go). The language only selects
 // the wording of a diagnostic; it never changes the verdict.
 func (s *Schema) ValidateLang(instance, lang string) (*Result, error) {
+	return s.ValidateOpts(instance, lang, 0)
+}
+
+// ValidateOpts is ValidateLang that stops after maxErrors errors (0 = no
+// limit). Result.Errors lists every error found, in document order.
+func (s *Schema) ValidateOpts(instance, lang string, maxErrors int) (res *Result, rerr error) {
 	doc, err := xmltree.ParseLenient11(instance)
 	if err != nil {
 		return &Result{Valid: false, Errors: []Error{{Message: "instance not well-formed: " + err.Error()}}}, nil
@@ -57,17 +63,38 @@ func (s *Schema) ValidateLang(instance, lang string) (*Result, error) {
 	// identical verdict on the identical document — the invariant
 	// TestValidateNodeMatchesValidate pins across 51,245 instances.
 	local.nodeDefaults = map[*xmltree.Node][]defaultAttr{}
+	local.coll = &collector{max: maxErrors}
 	s = &local
-	if verr := s.validateElement(root); verr != nil {
+	finish := func() *Result {
+		for _, e := range s.coll.errs {
+			e.pickMessage(lang)
+		}
+		return &Result{Valid: false, Errors: s.coll.sorted()}
+	}
+	// Once an error is known, anything further the walk trips over (an
+	// unsupported construct, a panic) must not turn that verdict into "no
+	// verdict": the instance IS invalid, the list just ends early.
+	defer func() {
+		if r := recover(); r != nil {
+			if len(s.coll.errs) == 0 {
+				panic(r)
+			}
+			res, rerr = finish(), nil
+		}
+	}()
+	if verr := s.validateElement(root); verr != nil && verr != errStopped {
 		if errors.Is(verr, ErrUnsupported) {
+			if len(s.coll.errs) > 0 {
+				return finish(), nil
+			}
 			return nil, ErrUnsupported
 		}
-		var e *Error
-		if errors.As(verr, &e) {
-			e.pickMessage(lang)
-			return &Result{Valid: false, Errors: []Error{*e}}, nil
+		if cont, ret := s.soft(verr, root); !cont && ret != errStopped {
+			return nil, ret
 		}
-		return nil, verr
+	}
+	if len(s.coll.errs) > 0 {
+		return finish(), nil
 	}
 	if verr := s.ids.check(); verr != nil {
 		var e *Error
@@ -420,7 +447,7 @@ func stampLoc(err *error, el *xmltree.Node) {
 		if e.Line == 0 && e.Col == 0 {
 			e.Line, e.Col = int(el.Line), int(el.Col)
 		}
-		if e.Path == "" && strings.HasPrefix(e.Code, "cvc-assertion") {
+		if e.Path == "" {
 			e.Path = elementPath(el)
 		}
 	}
@@ -667,7 +694,9 @@ func (s *Schema) validateComplex(ct *ComplexType, el *xmltree.Node, scopes map[x
 		return invalidf("cvc-type.2", "type is abstract and cannot be used directly")
 	}
 	if err := s.validateAttributes(ct, el); err != nil {
-		return err
+		if cont, ret := s.soft(err, el); !cont {
+			return ret
+		}
 	}
 	kids := childElements(el)
 	switch ct.kind {
@@ -679,7 +708,7 @@ func (s *Schema) validateComplex(ct *ComplexType, el *xmltree.Node, scopes map[x
 				return invalidf("cvc-complex-type.2.1", "open empty content admits no character data")
 			}
 			if err := s.validateChildren(ct, el, kids, scopes); err != nil {
-				return err
+				return s.afterModelError(err, ct, el, kids, scopes)
 			}
 			break
 		}
@@ -720,11 +749,11 @@ func (s *Schema) validateComplex(ct *ComplexType, el *xmltree.Node, scopes map[x
 			return invalidf("cvc-complex-type.2.1", "empty content admits no character data at all")
 		}
 		if err := s.validateChildren(ct, el, kids, scopes); err != nil {
-			return err
+			return s.afterModelError(err, ct, el, kids, scopes)
 		}
 	case contentMixed:
 		if err := s.validateChildren(ct, el, kids, scopes); err != nil {
-			return err
+			return s.afterModelError(err, ct, el, kids, scopes)
 		}
 	}
 	return s.checkAsserts(ct, el)
@@ -933,7 +962,13 @@ func (s *Schema) validateChildren(ct *ComplexType, el *xmltree.Node, kids []*xml
 		e := invalidf("cvc-complex-type.2.4", "element %s: content does not match its content model (%s; allowed child elements: %s)",
 			nameOf(el), describeChildren(kids), s.describeAllowedNames(p))
 		e.Line, e.Col = int(el.Line), int(el.Col)
-		return e
+		if s.coll == nil {
+			return e
+		}
+		if cont, ret := s.soft(e, el); !cont {
+			return ret
+		}
+		return errModelMismatch
 	}
 	decls := map[xname]*ElementDecl{}
 	s.contentDecls(p, decls)
@@ -986,17 +1021,28 @@ func (s *Schema) validateChildren(ct *ComplexType, el *xmltree.Node, kids []*xml
 				}
 			}
 			elemUsed[nn]++
-			if err := s.validateElementAgainst(d, kid, scopes, fixedsByName[nn]...); err != nil {
+			snap := s.collected()
+			err := s.validateElementAgainst(d, kid, scopes, fixedsByName[nn]...)
+			if err != nil || s.collected() > snap {
 				// Attribution is by name, but the model may also offer a
 				// processContents="skip" wildcard absorbing this child at this
 				// position — under that parse the child is not assessed at all
 				// (QFE1700c2: <any skip/> before <ref e2/> takes the first e2).
-				// A child for which SOME parse validates is not an error.
+				// A child for which SOME parse validates is not an error; the
+				// errors it already recorded while collecting are withdrawn.
 				if s.skipWildcardParseExcuses(p, oc, kids, i, nn, skipWc) {
+					s.uncollect(snap)
 					s.markUnassessed(kid)
 					continue
 				}
-				return err
+				if err == errStopped {
+					return err
+				}
+				if err != nil {
+					if cont, ret := s.soft(err, kid); !cont {
+						return ret
+					}
+				}
 			}
 			continue
 		}
@@ -1031,7 +1077,9 @@ func (s *Schema) validateChildren(ct *ComplexType, el *xmltree.Node, kids []*xml
 				}
 			}
 			if err := s.validateElementAgainst(g, kid, scopes); err != nil {
-				return err
+				if cont, ret := s.soft(err, kid); !cont {
+					return ret
+				}
 			}
 			continue
 		}

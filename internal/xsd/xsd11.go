@@ -347,10 +347,15 @@ func (s *Schema) checkAsserts(ct *ComplexType, el *xmltree.Node) error {
 			// (§3.13.4.1): the rootless-tree '/' error (d4_3_15ii31/ii32),
 			// division by zero (assert012), an unavailable doc() (assert011
 			// expects BOTH instances invalid).
-			return assertionFailed(a, orig)
+			if cont, ret := s.failAssert(a, orig); !cont {
+				return ret
+			}
+			continue
 		}
 		if !xpath.ToBool(obj) {
-			return assertionFailed(a, orig)
+			if cont, ret := s.failAssert(a, orig); !cont {
+				return ret
+			}
 		}
 	}
 	return nil
