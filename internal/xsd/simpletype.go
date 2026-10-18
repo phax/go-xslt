@@ -294,8 +294,6 @@ func wsRank(w string) int {
 	}
 }
 
-var wsRun = regexp.MustCompile(`[ \t\r\n]+`)
-
 func applyWhiteSpace(mode, s string) string {
 	switch mode {
 	case "replace":
@@ -306,10 +304,75 @@ func applyWhiteSpace(mode, s string) string {
 			return r
 		}, s)
 	case "collapse":
-		return strings.TrimSpace(wsRun.ReplaceAllString(s, " "))
+		return collapseWhiteSpace(s)
 	default:
 		return s
 	}
+}
+
+func isXMLSpace(c byte) bool { return byteClass[c] == clSpace || byteClass[c] == clBreak }
+
+// byteClass sorts bytes for the hand-written scanners below.
+const (
+	clOther  = iota
+	clSpace  // ' '
+	clBreak  // '\t' '\r' '\n'
+	clB64    // [A-Za-z0-9+/]
+	clEquals // '='
+)
+
+var byteClass = func() (t [256]byte) {
+	t[' '] = clSpace
+	t['\t'], t['\r'], t['\n'] = clBreak, clBreak, clBreak
+	for c := 'A'; c <= 'Z'; c++ {
+		t[c], t[c+'a'-'A'] = clB64, clB64
+	}
+	for c := '0'; c <= '9'; c++ {
+		t[c] = clB64
+	}
+	t['+'], t['/'] = clB64, clB64
+	t['='] = clEquals
+	return
+}()
+
+// collapseWhiteSpace is the whiteSpace="collapse" normalization: every run of
+// XML whitespace (#x20 #x9 #xD #xA, nothing else) becomes one space, and a
+// leading or trailing run is dropped. One linear pass; a value that is
+// already collapsed (the usual case) is returned as is, without copying —
+// this runs over every simple value, including multi-megabyte base64 ones.
+func collapseWhiteSpace(s string) string {
+	i := 0
+	for ; i < len(s); i++ {
+		switch byteClass[s[i]] {
+		case clSpace:
+			if i == 0 || i == len(s)-1 || s[i+1] == ' ' {
+				goto slow
+			}
+		case clBreak:
+			goto slow
+		}
+	}
+	return s
+slow:
+	if i > 0 && s[i-1] == ' ' {
+		i-- // the run starts at that space: the kept prefix ends in a non-space
+	}
+	b := make([]byte, 0, len(s))
+	b = append(b, s[:i]...)
+	pending := false
+	for ; i < len(s); i++ {
+		c := s[i]
+		if isXMLSpace(c) {
+			pending = len(b) > 0
+			continue
+		}
+		if pending {
+			b = append(b, ' ')
+			pending = false
+		}
+		b = append(b, c)
+	}
+	return string(b)
 }
 
 // --- primitive lexical validation -------------------------------------------
@@ -321,12 +384,6 @@ func applyWhiteSpace(mode, s string) string {
 // NameChar adds \p{N}, combining marks \p{M}, and the extender codepoints.
 var (
 	reLanguage = regexp.MustCompile(`^[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*$`)
-	// hexBinary: an even number of hex digits, no internal whitespace.
-	reHexBinary = regexp.MustCompile(`^([0-9A-Fa-f]{2})*$`)
-	// base64Binary: the XSD Part 2 grammar, including the final-quantum rules
-	// (a group ending in "=" needs B16 in position 3, "==" needs B04 in
-	// position 2) and optional single spaces between characters.
-	reBase64 = regexp.MustCompile(`^((([A-Za-z0-9+/] ?){4})*(([A-Za-z0-9+/] ?){3}[A-Za-z0-9+/]|([A-Za-z0-9+/] ?){2}[AEIMQUYcgkosw048] ?=|[A-Za-z0-9+/] ?[AQgw] ?= ?=))?$`)
 	// The XML Name productions, built from the same range tables that back the
 	// XSD regex escapes \i and \c (internal/xpath/regex_class.go), so a value
 	// and a pattern can never disagree about what a name character is.
@@ -422,9 +479,9 @@ func checkPrimitiveLexical(prim xpath.AtomType, v string) error {
 	case xpath.XSnmtoken:
 		return matchLexical(reNmtoken, prim, v)
 	case xpath.XShexBinary:
-		return matchLexical(reHexBinary, prim, v)
+		return checkLexical(validHexBinary(v), prim, v)
 	case xpath.XSbase64Binary:
-		return matchLexical(reBase64, prim, v)
+		return checkLexical(validBase64Binary(v), prim, v)
 	case xpath.XSdouble, xpath.XSfloat:
 		// Overflow of the mantissa/exponent maps to ±INF and is a VALID double/
 		// float (IEEE), so validate the lexical shape directly rather than via
@@ -517,10 +574,82 @@ func validAnyURI10(s string) bool {
 }
 
 func matchLexical(re *regexp.Regexp, prim xpath.AtomType, v string) error {
-	if !re.MatchString(v) {
+	return checkLexical(re.MatchString(v), prim, v)
+}
+
+func checkLexical(ok bool, prim xpath.AtomType, v string) error {
+	if !ok {
 		return invalidf("cvc-datatype-valid", "%q is not a valid %s", v, atomName(prim))
 	}
 	return nil
+}
+
+// hexBinary and base64Binary are scanned by hand rather than by regexp: an
+// e-invoice embeds a whole PDF as one base64Binary value, tens of megabytes
+// long, and the regexp machine over it dominated validation. Both scanners
+// accept exactly what these regexps did (lexical_large_test.go keeps them as
+// the oracle):
+//
+//	hexBinary     ^([0-9A-Fa-f]{2})*$
+//	base64Binary  ^((([A-Za-z0-9+/] ?){4})*(([A-Za-z0-9+/] ?){3}[A-Za-z0-9+/]|
+//	              ([A-Za-z0-9+/] ?){2}[AEIMQUYcgkosw048] ?=|[A-Za-z0-9+/] ?[AQgw] ?= ?=))?$
+//
+// i.e. the XSD Part 2 grammar: an even number of hex digits with no
+// whitespace; base64 characters in groups of four with optional single spaces
+// between characters, where only the final group may be padded — "=" needs a
+// B16 character before it, "==" a B04 character before that.
+
+func validHexBinary(v string) bool {
+	if len(v)%2 != 0 {
+		return false
+	}
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+func validBase64Binary(v string) bool {
+	n := 0        // base64 characters and '=' seen, spaces excluded
+	pad := 0      // '=' seen so far; nothing but '=' may follow the first
+	var last byte // the last base64 character, the one before any padding
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch byteClass[c] {
+		case clB64:
+			if pad > 0 {
+				return false
+			}
+			last = c
+		case clSpace:
+			// A single space between characters; none leading, trailing or
+			// doubled.
+			if i == 0 || i == len(v)-1 || v[i-1] == ' ' {
+				return false
+			}
+			continue
+		case clEquals:
+			pad++
+		default:
+			return false
+		}
+		n++
+	}
+	if n%4 != 0 {
+		return false
+	}
+	switch pad {
+	case 0:
+		return true
+	case 1:
+		return strings.IndexByte("AEIMQUYcgkosw048", last) >= 0
+	case 2:
+		return strings.IndexByte("AQgw", last) >= 0
+	}
+	return false
 }
 
 func atomName(t xpath.AtomType) string { return t.String() }

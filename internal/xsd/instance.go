@@ -174,8 +174,12 @@ func (s *Schema) noteIDValues(st *SimpleType, value string, bind, src *xmltree.N
 	}
 	switch st.variety {
 	case vAtomic:
+		prim := st.resolvePrim()
+		if prim != xpath.XSid && prim != xpath.XSidref && prim != xpath.XSentity {
+			return nil // (and spare collapsing a value that may be megabytes long)
+		}
 		v := applyWhiteSpace("collapse", value)
-		switch st.resolvePrim() {
+		switch prim {
 		case xpath.XSid:
 			if bind == nil {
 				return nil // root-content ID: nothing to bind to (idBindingParent)
