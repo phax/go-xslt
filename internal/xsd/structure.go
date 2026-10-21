@@ -1411,6 +1411,17 @@ func (c *compiler) checkOpenContentDerivation(ct *ComplexType) error {
 			return nil
 		}
 		if bEff == nil || bEff.wc == nil {
+			// Derivation Valid (Restriction, Complex) clause 2.1: a restriction
+			// of xs:anyType is valid as it stands — there is no content-type
+			// check, so no open-content check either (XSD 1.1 §3.4.6.3).
+			if base.name == (xname{xsNS, "anyType"}) {
+				return nil
+			}
+			// Otherwise the foreign children the open content lets through must
+			// already be admitted by the base's own content model.
+			if c.baseAdmitsOpenWildcard(base, own) {
+				return nil
+			}
 			return invalidf("derivation-ok-restriction",
 				"a restriction cannot introduce open content over a closed base (%s)", base.name)
 		}
@@ -1437,6 +1448,41 @@ func (c *compiler) checkOpenContentDerivation(ct *ComplexType) error {
 		// The wildcards themselves UNION (open047) — no subset requirement.
 	}
 	return nil
+}
+
+// baseAdmitsOpenWildcard reports whether a base without open content of its own
+// already admits every child the derived type's open content lets through, so
+// that the restriction cannot widen the language (Content Type Restricts,
+// §3.4.6.4 clause 1). It is deliberately narrow — a base whose content model
+// ends in (suffix) or consists only of (interleave) unbounded wildcards that
+// cover the open-content wildcard — and answers "no" for anything else.
+func (c *compiler) baseAdmitsOpenWildcard(base *ComplexType, own *openContent) bool {
+	p := c.sch.effectiveParticle(base)
+	if p == nil || own == nil || own.wc == nil {
+		return false
+	}
+	covers := func(q *particle) bool {
+		w, ok := q.term.(*wildcard)
+		return ok && q.max == unbounded && nsSubset(own.wc, w) && wcNameSubsetOK(own.wc, w) &&
+			wcProcessRank(own.wc.process) >= wcProcessRank(w.process)
+	}
+	// the particles the base's content model consists of at its top level
+	items := []*particle{p}
+	if g, ok := p.term.(*modelGroup); ok && p.max == 1 && g.compositor != cAll {
+		items = g.particles
+	}
+	if len(items) == 0 {
+		return false
+	}
+	if own.mode == "suffix" {
+		return covers(items[len(items)-1])
+	}
+	for _, q := range items {
+		if !covers(q) {
+			return false
+		}
+	}
+	return true
 }
 
 // wcUnionExpressible10 reports whether the union of two attribute wildcards has
