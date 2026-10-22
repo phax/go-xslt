@@ -6,6 +6,10 @@ on:
   push:
     tags:
       - 'v*'
+  # A manual run does everything except publishing the release: it builds,
+  # signs and notarizes, and leaves the files as workflow artifacts. Use it to
+  # try the macOS signing without cutting a tag.
+  workflow_dispatch:
 
 # The wails3 CLI version is pinned to match desktop/go.mod's
 # github.com/wailsapp/wails/v3 require line, so the CLI's task/bindings
@@ -33,6 +37,13 @@ jobs:
     name: Build macOS + Windows
     needs: test
     runs-on: macos-latest
+    # Apple's notary service can take an hour or more for a new developer
+    # account; the waits below are bounded well inside this.
+    timeout-minutes: 240
+    env:
+      # Without the signing secrets (a fork, say) the macOS bundles stay
+      # ad-hoc signed, as before.
+      SIGN_MACOS: ${{ secrets.MACOS_CERT_P12_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -59,9 +70,100 @@ jobs:
           make build-mac
           make build-win
 
-      # make build-mac produces real (ad-hoc-signed) .app bundles, not bare
-      # binaries — a directory isn't a valid single-file release asset, so
-      # zip each one before upload. -y preserves the bundle's symlinks.
+      # --- macOS: Developer ID signing, notarization, stapling -------------
+      # The certificate lives in a throwaway keychain that is deleted at the
+      # end. Apple's "Developer ID G2" intermediate certificate has to be in
+      # it too, or the identity does not count as valid; it is pinned by its
+      # SHA-256 fingerprint.
+      - name: Import the Developer ID certificate
+        if: env.SIGN_MACOS == 'true'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          FP="$(openssl x509 -inform der -in "$RUNNER_TEMP/DeveloperIDG2CA.cer" -noout -fingerprint -sha256 | cut -d= -f2)"
+          test "$FP" = "F1:6C:D3:C5:4C:7F:83:CE:A4:BF:1A:3E:6A:08:19:C8:AA:A8:E4:A1:52:8F:D1:44:71:5F:35:06:43:D2:DF:3A" \
+            || { echo "unexpected Developer ID G2 certificate: $FP"; exit 1; }
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/ {print $2; exit}')"
+          test -n "$IDENTITY" || { echo "no valid Developer ID Application identity in the keychain"; exit 1; }
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          echo "IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Sign the macOS .app bundles
+        if: env.SIGN_MACOS == 'true'
+        working-directory: desktop/build/bin
+        run: |
+          set -euo pipefail
+          for app in go-xslt-darwin-arm64.app go-xslt-darwin-amd64.app; do
+            codesign --force --deep --options runtime --timestamp --keychain "$KEYCHAIN" --sign "$IDENTITY" "$app"
+            codesign --verify --deep --strict --verbose=2 "$app"
+          done
+
+      # Both bundles are submitted first and waited for afterwards, so the two
+      # Apple queues run side by side. Anything but "Accepted" fails the job
+      # (with Apple's log), and so the release is never published.
+      - name: Notarize the macOS .app bundles
+        if: env.SIGN_MACOS == 'true'
+        working-directory: desktop/build/bin
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          xcrun notarytool store-credentials ci --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --keychain "$KEYCHAIN" > /dev/null
+          NOTARY=(xcrun notarytool --keychain-profile ci --keychain "$KEYCHAIN")
+          for arch in arm64 amd64; do
+            ditto -c -k --keepParent "go-xslt-darwin-$arch.app" "notarize-$arch.zip"
+            "${NOTARY[@]}" submit "notarize-$arch.zip" --output-format json > "submit-$arch.json"
+            echo "submitted $arch: $(jq -r .id "submit-$arch.json")"
+          done
+          failed=0
+          for arch in arm64 amd64; do
+            id="$(jq -r .id "submit-$arch.json")"
+            "${NOTARY[@]}" wait "$id" --timeout 3h > /dev/null || true
+            status="$("${NOTARY[@]}" info "$id" --output-format json | jq -r .status)"
+            echo "$arch: $status"
+            if [ "$status" != "Accepted" ]; then
+              "${NOTARY[@]}" log "$id" || true
+              failed=1
+            fi
+          done
+          exit $failed
+
+      - name: Staple the notarization tickets
+        if: env.SIGN_MACOS == 'true'
+        working-directory: desktop/build/bin
+        run: |
+          set -euo pipefail
+          for app in go-xslt-darwin-arm64.app go-xslt-darwin-amd64.app; do
+            xcrun stapler staple "$app"
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+          done
+          rm -f notarize-*.zip submit-*.json
+
+      - name: Remove the signing keychain
+        if: always() && env.SIGN_MACOS == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+
+      # A directory isn't a valid single-file release asset, so zip each
+      # .app (signed and notarized above, ad-hoc signed without the secrets)
+      # before upload. -y preserves the bundle's symlinks.
       - name: Zip the macOS .app bundles
         working-directory: desktop/build/bin
         run: |
@@ -123,6 +225,8 @@ jobs:
   release:
     name: Publish GitHub release
     needs: [build-macos-windows, build-linux]
+    # A manual run (workflow_dispatch) only leaves artifacts behind.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
