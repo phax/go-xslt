@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import type { DockviewApi } from "dockview-react";
 import { FileKind, runValidate, XSDVersion, type SavedRun, type ValidateResult } from "../lib/api";
 import { RUN_SHORTCUT } from "../lib/platform";
 import { buffers, useBuffer } from "../state/buffers";
@@ -7,10 +7,19 @@ import { useProjectActions } from "../state/projectActions";
 import { useRunner } from "../state/runner";
 import { useAppState } from "../state/store";
 import type { RunTab } from "../state/types";
+import { DockLayout, setWidths, type DockPane } from "./DockLayout";
 import { Editor } from "./Editor";
 import { DiagnosticsList } from "./ResultParts";
 import { FilePickerField } from "./FilePickerField";
 import { SchemaListEditor } from "./SchemaListEditor";
+
+/** The default arrangement: schema | instance | result, side by side. */
+function arrangeValidate(api: DockviewApi) {
+  api.addPanel({ id: "schema", component: "pane", title: "Schema" });
+  api.addPanel({ id: "instance", component: "pane", title: "Instance XML", position: { referencePanel: "schema", direction: "right" } });
+  api.addPanel({ id: "validation", component: "pane", title: "Validation", position: { referencePanel: "instance", direction: "right" } });
+  setWidths(api, ["schema", "instance", "validation"], [32, 34, 34]);
+}
 
 /** A saved "validate" run, against XSD 1.0 or 1.1. Both the schema and the
  * instance default to INLINE text typed straight into the run — no project
@@ -84,32 +93,11 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
 
   const diags = result?.diagnostics ?? [];
 
-  return (
-    <>
-      <div className="params-bar">
-        <label className="auto">
-          Version{" "}
-          <select value={version} onChange={(e) => void actions.upsertRun(tab.projectId, { ...run, xsdVersion: e.target.value })}>
-            <option value={XSDVersion.XSD10}>1.0</option>
-            <option value={XSDVersion.XSD11}>1.1</option>
-          </select>
-        </label>
-        <span className="spacer" />
-        <button className="primary" onClick={() => void doRun()} disabled={running || !hasSchema}>
-          {running ? "Validating…" : `Validate ${RUN_SHORTCUT}`}
-        </button>
-        <label className="auto">
-          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> Auto
-        </label>
-        {result && !running && (
-          <span className={result.valid ? "valid-badge ok" : "valid-badge bad"}>
-            {result.valid ? "✓ valid" : "✗ invalid"} · {result.durationMs} ms
-          </span>
-        )}
-      </div>
-
-      <PanelGroup direction="horizontal" className="panels">
-        <Panel defaultSize={32} minSize={18}>
+  const panes: DockPane[] = [
+    {
+      id: "schema",
+      title: "Schema",
+      content: (
           <div className="pane">
             <div className="pane-header">
               <span className="pane-title">Schema</span>
@@ -149,9 +137,12 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
               </div>
             )}
           </div>
-        </Panel>
-        <PanelResizeHandle className="resize-handle" />
-        <Panel defaultSize={34} minSize={18}>
+      ),
+    },
+    {
+      id: "instance",
+      title: "Instance XML",
+      content: (
           <div className="pane">
             <div className="pane-header">
               <span className="pane-title">Instance XML</span>
@@ -187,9 +178,12 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
               )}
             </div>
           </div>
-        </Panel>
-        <PanelResizeHandle className="resize-handle" />
-        <Panel defaultSize={34} minSize={18}>
+      ),
+    },
+    {
+      id: "validation",
+      title: "Validation",
+      content: (
           <div className="pane output-pane">
             <div className="pane-header">
               <span className="pane-title">Validation</span>
@@ -205,8 +199,35 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
             </div>
             <DiagnosticsList diagnostics={diags} />
           </div>
-        </Panel>
-      </PanelGroup>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <div className="params-bar">
+        <label className="auto">
+          Version{" "}
+          <select value={version} onChange={(e) => void actions.upsertRun(tab.projectId, { ...run, xsdVersion: e.target.value })}>
+            <option value={XSDVersion.XSD10}>1.0</option>
+            <option value={XSDVersion.XSD11}>1.1</option>
+          </select>
+        </label>
+        <span className="spacer" />
+        <button className="primary" onClick={() => void doRun()} disabled={running || !hasSchema}>
+          {running ? "Validating…" : `Validate ${RUN_SHORTCUT}`}
+        </button>
+        <label className="auto">
+          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> Auto
+        </label>
+        {result && !running && (
+          <span className={result.valid ? "valid-badge ok" : "valid-badge bad"}>
+            {result.valid ? "✓ valid" : "✗ invalid"} · {result.durationMs} ms
+          </span>
+        )}
+      </div>
+
+      <DockLayout storageKey="validate" panes={panes} arrange={arrangeValidate} />
     </>
   );
 }

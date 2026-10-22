@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import type { DockviewApi } from "dockview-react";
 import { FileKind, runTransform, type Diagnostic, type SavedRun, type TransformResult } from "../lib/api";
 import { RUN_SHORTCUT } from "../lib/platform";
 import { buffers, useBuffer } from "../state/buffers";
@@ -7,9 +7,18 @@ import { useProjectActions } from "../state/projectActions";
 import { useRunner } from "../state/runner";
 import { useAppState } from "../state/store";
 import type { RunTab } from "../state/types";
+import { DockLayout, setWidths, type DockPane } from "./DockLayout";
 import { Editor } from "./Editor";
 import { FilePickerField } from "./FilePickerField";
 import { OutputPane } from "./OutputPane";
+
+/** The default arrangement: stylesheet | source | output, side by side. */
+function arrangeTransform(api: DockviewApi) {
+  api.addPanel({ id: "stylesheet", component: "pane", title: "Stylesheet" });
+  api.addPanel({ id: "source", component: "pane", title: "Source XML", position: { referencePanel: "stylesheet", direction: "right" } });
+  api.addPanel({ id: "output", component: "pane", title: "Output", position: { referencePanel: "source", direction: "right" } });
+  setWidths(api, ["stylesheet", "source", "output"], [36, 28, 36]);
+}
 
 /** A saved "transform" run: entry stylesheet + source XML + stylesheet
  * params, editable inline (both files are ordinary project buffers, so
@@ -93,6 +102,52 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
 
   const styDiags: Diagnostic[] = (result?.diagnostics ?? []).filter((d) => d.phase === "parse" || d.phase === "compile");
 
+  const panes: DockPane[] = [
+    {
+      id: "stylesheet",
+      title: "Stylesheet",
+      content: (
+        <div className="pane">
+          <div className="pane-header">
+            <span className="pane-title">Stylesheet</span>
+            <span className="meta">{stylesheetPath || "none picked"}</span>
+          </div>
+          <div className="editor-wrap">
+            {stylesheetPath ? (
+              <Editor
+                value={stylesheetBuf.text}
+                onChange={(v) => buffers.setText(tab.projectId, stylesheetPath, v)}
+                diagnostics={styDiags}
+              />
+            ) : (
+              <div className="placeholder">Pick a stylesheet above.</div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "source",
+      title: "Source XML",
+      content: (
+        <div className="pane">
+          <div className="pane-header">
+            <span className="pane-title">Source XML</span>
+            <span className="meta">{sourcePath || "none picked"}</span>
+          </div>
+          <div className="editor-wrap">
+            {sourcePath ? (
+              <Editor value={sourceBuf.text} onChange={(v) => buffers.setText(tab.projectId, sourcePath, v)} />
+            ) : (
+              <div className="placeholder">Pick a source XML above (optional if the stylesheet uses an initial template).</div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    { id: "output", title: "Output", content: <OutputPane result={result} running={running} /> },
+  ];
+
   return (
     <>
       <div className="params-bar">
@@ -163,47 +218,7 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
         </div>
       </div>
 
-      <PanelGroup direction="horizontal" className="panels">
-        <Panel defaultSize={36} minSize={15}>
-          <div className="pane">
-            <div className="pane-header">
-              <span className="pane-title">Stylesheet</span>
-              <span className="meta">{stylesheetPath || "none picked"}</span>
-            </div>
-            <div className="editor-wrap">
-              {stylesheetPath ? (
-                <Editor
-                  value={stylesheetBuf.text}
-                  onChange={(v) => buffers.setText(tab.projectId, stylesheetPath, v)}
-                  diagnostics={styDiags}
-                />
-              ) : (
-                <div className="placeholder">Pick a stylesheet above.</div>
-              )}
-            </div>
-          </div>
-        </Panel>
-        <PanelResizeHandle className="resize-handle" />
-        <Panel defaultSize={28} minSize={15}>
-          <div className="pane">
-            <div className="pane-header">
-              <span className="pane-title">Source XML</span>
-              <span className="meta">{sourcePath || "none picked"}</span>
-            </div>
-            <div className="editor-wrap">
-              {sourcePath ? (
-                <Editor value={sourceBuf.text} onChange={(v) => buffers.setText(tab.projectId, sourcePath, v)} />
-              ) : (
-                <div className="placeholder">Pick a source XML above (optional if the stylesheet uses an initial template).</div>
-              )}
-            </div>
-          </div>
-        </Panel>
-        <PanelResizeHandle className="resize-handle" />
-        <Panel defaultSize={36} minSize={15}>
-          <OutputPane result={result} running={running} />
-        </Panel>
-      </PanelGroup>
+      <DockLayout storageKey="transform" panes={panes} arrange={arrangeTransform} />
     </>
   );
 }

@@ -327,3 +327,58 @@
   background: var(--bg-3);
   border-color: var(--border);
 }
+
+/* ---- dockable panes (run views): drag a tab to dock a pane anywhere ---- */
+.dock-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dock-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 8px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.dock-reset {
+  font-size: var(--text-xs);
+  color: var(--fg-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 1px 6px;
+}
+.dock-reset:hover {
+  color: var(--fg);
+}
+.dock-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.dock-body .dockview-theme-dark {
+  position: absolute;
+  inset: 0;
+  --dv-tabs-and-actions-container-height: 30px;
+  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-group-view-background-color: var(--bg);
+  --dv-tabs-and-actions-container-background-color: var(--bg-2);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--bg);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--bg-3);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--bg-3);
+  --dv-tab-divider-color: var(--border);
+  --dv-separator-border: var(--border);
+  --dv-sash-color: var(--border);
+  --dv-active-sash-color: var(--accent);
+}
+/* The tab already names the pane; panes can't be closed, only rearranged. */
+.dock-root .pane-title {
+  display: none;
+}
+.dock-root .dv-default-tab-action {
+  display: none !important;
+}

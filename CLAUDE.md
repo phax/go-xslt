@@ -148,7 +148,13 @@ dragging in the GUI's Wails/CGo dependencies:
   keeps buffers/results/tabs/manifest in sync). `components/{Sidebar,
   ProjectSwitcher,FileTree,RunList,TabStrip,AppShell}.tsx` (the shell) and
   `components/{Transform,Validate,Xpath}RunView.tsx` + `FileEditorView.tsx`
-  (what a tab shows), sharing `ResultParts.tsx`, `FilePickerField.tsx`/
+  (what a tab shows), whose panes are **dockable** (`DockLayout.tsx`, on `dockview-react`: drag a
+  pane's tab to dock it left/right/above/below another or stack it as a tab, like
+  VS Code; the arrangement is kept in localStorage under `go-xslt.dock.<view>`,
+  "Reset layout" restores the default `arrange*` function; a stored layout is
+  only used if it holds exactly the current pane ids; the panes are plain React
+  elements handed to the dock through a context, so they keep closing over the
+  view's state), sharing `ResultParts.tsx`, `FilePickerField.tsx`/
   `SchemaListEditor.tsx`, and the `Modal`/`ContextMenuHost`/`Toaster` overlay
   trio (`window.prompt`/`confirm` are no-ops in the Wails WKWebView, so every
   rename/delete goes through these). `lib/api.ts` re-exports the **generated**

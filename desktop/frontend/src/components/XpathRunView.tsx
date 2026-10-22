@@ -1,5 +1,5 @@
+import type { DockviewApi } from "dockview-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { FileKind, runXPath, type SavedRun, type XPathResult } from "../lib/api";
 import { RUN_SHORTCUT } from "../lib/platform";
 import { buffers, useBuffer } from "../state/buffers";
@@ -7,9 +7,21 @@ import { useProjectActions } from "../state/projectActions";
 import { useRunner } from "../state/runner";
 import { useAppState } from "../state/store";
 import type { RunTab } from "../state/types";
+import { DockLayout, setWidths, type DockPane } from "./DockLayout";
 import { Editor } from "./Editor";
 import { DiagnosticsList } from "./ResultParts";
 import { FilePickerField } from "./FilePickerField";
+
+/** The default arrangement: expression above the context document on the left,
+ * the result on the right. */
+function arrangeXpath(api: DockviewApi) {
+  api.addPanel({ id: "expression", component: "pane", title: "XPath expression" });
+  api.addPanel({ id: "result", component: "pane", title: "Result", position: { referencePanel: "expression", direction: "right" } });
+  api.addPanel({ id: "context", component: "pane", title: "Context document", position: { referencePanel: "expression", direction: "below" } });
+  setWidths(api, ["expression", "result"], [48, 52]);
+  const expression = api.getPanel("expression");
+  if (expression && api.height) expression.group.api.setSize({ height: Math.round(api.height * 0.45) });
+}
 
 /** A saved "xpath" run: a standalone XPath 3.1 expression, evaluated against
  * a context document that defaults to INLINE text typed straight into the
@@ -66,90 +78,77 @@ export function XpathRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
   const diags = result?.diagnostics ?? [];
   const items = result?.items ?? [];
 
-  return (
-    <>
-      <div className="params-bar xpath-bar">
-        <span className="params-label">XPath 3.1</span>
-        <button className="param-add" onClick={() => void doRun()} disabled={running}>
-          {running ? "…" : `Eval ${RUN_SHORTCUT}`}
-        </button>
-        <label className="auto">
-          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> Auto
-        </label>
-        <span className="spacer" />
-        {result && !running && (
-          <span className="meta">
-            {result.count} item{result.count === 1 ? "" : "s"} · {result.durationMs} ms
-          </span>
-        )}
-      </div>
-
-      <PanelGroup direction="horizontal" className="panels">
-        <Panel defaultSize={48} minSize={20}>
-          <PanelGroup direction="vertical">
-            <Panel defaultSize={45} minSize={15}>
-              <div className="pane">
-                <div className="pane-header">
-                  <span className="pane-title">XPath expression</span>
-                  <span className="meta">{RUN_SHORTCUT} to evaluate</span>
-                </div>
-                <textarea
-                  className="xpath-editor"
-                  value={expression}
-                  onChange={(e) => void actions.upsertRun(tab.projectId, { ...run, expression: e.target.value }, { debounceMs: 400 })}
-                  placeholder={"XPath 3.1 expression, e.g.\n//book[@price > 30]/title\nor\nstring-join((1 to 5) ! string(), ',')"}
-                  spellCheck={false}
-                  onKeyDown={(e) => {
-                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                      e.preventDefault();
-                      void doRun();
-                    }
-                  }}
+  const panes: DockPane[] = [
+    {
+      id: "expression",
+      title: "XPath expression",
+      content: (
+          <div className="pane">
+            <div className="pane-header">
+              <span className="pane-title">XPath expression</span>
+              <span className="meta">{RUN_SHORTCUT} to evaluate</span>
+            </div>
+            <textarea
+              className="xpath-editor"
+              value={expression}
+              onChange={(e) => void actions.upsertRun(tab.projectId, { ...run, expression: e.target.value }, { debounceMs: 400 })}
+              placeholder={"XPath 3.1 expression, e.g.\n//book[@price > 30]/title\nor\nstring-join((1 to 5) ! string(), ',')"}
+              spellCheck={false}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  void doRun();
+                }
+              }}
+            />
+          </div>
+      ),
+    },
+    {
+      id: "context",
+      title: "Context document",
+      content: (
+          <div className="pane">
+            <div className="pane-header">
+              <span className="pane-title">Context document</span>
+              <span className="meta">{contextFileMode ? contextPath : "inline"}</span>
+              <span className="spacer" />
+              {contextFileMode ? (
+                <button
+                  className="link-btn"
+                  onClick={() => void actions.upsertRun(tab.projectId, { ...run, contextDoc: "" })}
+                  title="Switch back to typing the context document directly"
+                >
+                  Use inline text
+                </button>
+              ) : (
+                <FilePickerField
+                  project={project}
+                  value=""
+                  kinds={[FileKind.KindXML]}
+                  placeholder="Use a project file instead"
+                  className="link-btn"
+                  onChange={(p) => void actions.upsertRun(tab.projectId, { ...run, contextDoc: p })}
                 />
-              </div>
-            </Panel>
-            <PanelResizeHandle className="resize-handle vertical" />
-            <Panel defaultSize={55} minSize={15}>
-              <div className="pane">
-                <div className="pane-header">
-                  <span className="pane-title">Context document</span>
-                  <span className="meta">{contextFileMode ? contextPath : "inline"}</span>
-                  <span className="spacer" />
-                  {contextFileMode ? (
-                    <button
-                      className="link-btn"
-                      onClick={() => void actions.upsertRun(tab.projectId, { ...run, contextDoc: "" })}
-                      title="Switch back to typing the context document directly"
-                    >
-                      Use inline text
-                    </button>
-                  ) : (
-                    <FilePickerField
-                      project={project}
-                      value=""
-                      kinds={[FileKind.KindXML]}
-                      placeholder="Use a project file instead"
-                      className="link-btn"
-                      onChange={(p) => void actions.upsertRun(tab.projectId, { ...run, contextDoc: p })}
-                    />
-                  )}
-                </div>
-                <div className="editor-wrap">
-                  {contextFileMode ? (
-                    <Editor value={contextBuf.text} onChange={(v) => buffers.setText(tab.projectId, contextPath, v)} />
-                  ) : (
-                    <Editor
-                      value={contextInline}
-                      onChange={(v) => void actions.upsertRun(tab.projectId, { ...run, contextInline: v }, { debounceMs: 400 })}
-                    />
-                  )}
-                </div>
-              </div>
-            </Panel>
-          </PanelGroup>
-        </Panel>
-        <PanelResizeHandle className="resize-handle" />
-        <Panel defaultSize={52} minSize={20}>
+              )}
+            </div>
+            <div className="editor-wrap">
+              {contextFileMode ? (
+                <Editor value={contextBuf.text} onChange={(v) => buffers.setText(tab.projectId, contextPath, v)} />
+              ) : (
+                <Editor
+                  value={contextInline}
+                  onChange={(v) => void actions.upsertRun(tab.projectId, { ...run, contextInline: v }, { debounceMs: 400 })}
+                />
+              )}
+            </div>
+          </div>
+      ),
+    },
+    {
+      id: "result",
+      title: "Result",
+      content: (
           <div className="pane output-pane">
             <div className="pane-header">
               <span className="pane-title">Result</span>
@@ -182,8 +181,29 @@ export function XpathRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
             </div>
             <DiagnosticsList diagnostics={diags} />
           </div>
-        </Panel>
-      </PanelGroup>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <div className="params-bar xpath-bar">
+        <span className="params-label">XPath 3.1</span>
+        <button className="param-add" onClick={() => void doRun()} disabled={running}>
+          {running ? "…" : `Eval ${RUN_SHORTCUT}`}
+        </button>
+        <label className="auto">
+          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> Auto
+        </label>
+        <span className="spacer" />
+        {result && !running && (
+          <span className="meta">
+            {result.count} item{result.count === 1 ? "" : "s"} · {result.durationMs} ms
+          </span>
+        )}
+      </div>
+
+      <DockLayout storageKey="xpath" panes={panes} arrange={arrangeXpath} />
     </>
   );
 }
