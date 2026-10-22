@@ -57,6 +57,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: desktop/go.mod
+          # setup-go's own cache is keyed by go.sum alone, so both matrix jobs
+          # share one entry and only one architecture's objects end up in it
+          # (the other, the cross-compiled one, rebuilt everything every time).
+          cache: false
+
+      - name: Cache the Go build and module caches (per architecture)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('desktop/go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-${{ matrix.arch }}-
 
       - uses: actions/setup-node@v4
         with:
