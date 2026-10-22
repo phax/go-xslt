@@ -1,31 +1,17 @@
 import { useEffect, useState } from "react";
 import { Browser } from "@wailsio/runtime";
-import { appVersion, checkForUpdate, type UpdateInfo } from "../lib/api";
+import { checkForUpdate, type UpdateInfo } from "../lib/api";
 import { setCheckUpdates, useCheckUpdates } from "../state/prefs";
 
-const LAST_KEY = "go-xslt.lastUpdateCheck";
-// GitHub allows 60 unauthenticated API requests per hour and address; once a
-// day is plenty to notice a release.
-const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
+// Checked at every start and then every six hours while the app runs: a new
+// release matters most in its first hours, so the answer is never cached
+// across starts. That is far below GitHub's 60 unauthenticated requests per
+// hour and address.
+const RECHECK_MS = 6 * 60 * 60 * 1000;
 
-type Cached = { at: number; info: UpdateInfo };
-
-function readCached(): Cached | null {
-  try {
-    const raw = window.localStorage.getItem(LAST_KEY);
-    return raw ? (JSON.parse(raw) as Cached) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCached(c: Cached) {
-  try {
-    window.localStorage.setItem(LAST_KEY, JSON.stringify(c));
-  } catch {
-    /* the next start simply checks again */
-  }
-}
+// The key earlier versions cached the answer under; removed so it cannot go
+// stale in the browser storage.
+const LEGACY_KEY = "go-xslt.lastUpdateCheck";
 
 /** Toolbar: the update-check switch, and a link to the new release when
  * GitHub has one newer than this build. */
@@ -34,33 +20,26 @@ export function UpdateNotice() {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
 
   useEffect(() => {
+    try {
+      window.localStorage.removeItem(LEGACY_KEY);
+    } catch {
+      /* nothing stored, or storage unavailable */
+    }
     if (!enabled) {
       setInfo(null);
       return;
     }
     let live = true;
-    const cached = readCached();
-    // The cached answer is only good for the build that asked.
-    if (cached && Date.now() - cached.at < CHECK_EVERY_MS) {
-      void appVersion().then((v) => {
-        if (!live) return;
-        if (v === cached.info.current) {
-          setInfo(cached.info);
-        } else {
-          void run();
-        }
-      });
-    } else {
-      void run();
-    }
-    async function run() {
+    const run = async () => {
       const fresh = await checkForUpdate();
-      if (!live || !fresh) return;
-      if (!fresh.error) writeCached({ at: Date.now(), info: fresh });
-      setInfo(fresh);
-    }
+      // A failed check (offline, rate limit) keeps the last good answer.
+      if (live && fresh && !fresh.error) setInfo(fresh);
+    };
+    void run();
+    const timer = window.setInterval(() => void run(), RECHECK_MS);
     return () => {
       live = false;
+      window.clearInterval(timer);
     };
   }, [enabled]);
 
@@ -80,7 +59,7 @@ export function UpdateNotice() {
         aria-pressed={enabled}
         title={
           enabled
-            ? "Checks GitHub once a day for a newer release — click to turn off"
+            ? "Checks GitHub for a newer release at start and every six hours — click to turn off"
             : "No update check — click to check GitHub for a newer release"
         }
         onClick={() => setCheckUpdates(!enabled)}

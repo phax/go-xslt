@@ -312,7 +312,7 @@ remote `DOCTYPE` cannot pull in local files. Not yet covered by `AllowNetwork`:
 
 **Desktop tester.** Each run may read the files of its own project folder.
 Network access stays off for runs. The app itself makes one request: the
-optional, daily check on GitHub for a newer release (switch **Update check**
+optional check on GitHub for a newer release, at start and every six hours (switch **Update check**
 in the toolbar).
 
 **Upgrading:** before this option existed, absolute paths and paths outside
@@ -355,7 +355,7 @@ typed result table for sequences/maps/arrays) — plus workspaces (a folder +
 `goxslt.workspace.json` manifest holding the stylesheet, source XML, and
 parameters, with a remembered recent list). A transform run has switches for
 the optional features (schema-aware, XSLT 1.0 mode, strict streaming), and the
-app checks GitHub once a day for a newer release (switchable in the toolbar).
+app checks GitHub for a newer release at start and every six hours (switchable in the toolbar).
 Release builds carry their version (`make` writes `desktop/version_stamp.go`
 before each build).
 

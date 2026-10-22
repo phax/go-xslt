@@ -76,7 +76,7 @@ Each run may read the files of its own project folder. Network access is off.
 
 ## Update check
 
-At start the app asks GitHub, at most once a day, whether a release newer
+At start, and every six hours while it runs, the app asks GitHub whether a release newer
 than the installed one exists. If so, an **Update** button in the toolbar
 opens the release page. The request goes to `api.github.com` and sends
 nothing but the app version in its user agent. The **Update check** switch in

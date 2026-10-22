@@ -123,8 +123,9 @@ dragging in the GUI's Wails/CGo dependencies:
   tree scan, file CRUD, manifest save, reveal-in-Finder). Both import the
   engine via the public `engine/` path.
 - `desktop/updateservice.go` + `frontend/src/components/UpdateNotice.tsx` —
-  the app's only network request: GitHub's latest-release API, at most once a
-  day, switchable (pref `go-xslt.checkUpdates`). The build's version comes from
+  the app's only network request: GitHub's latest-release API, at every start
+  and every six hours, never cached across starts (a day-long cache hid a new
+  release in its first hours), switchable (pref `go-xslt.checkUpdates`). The build's version comes from
   `desktop/version.go` (`appVersion`, "dev" by default), set by the gitignored
   `version_stamp.go` the Makefile writes before every build (`stamp-version`).
   A transform run's optional-feature switches are saved in the run
