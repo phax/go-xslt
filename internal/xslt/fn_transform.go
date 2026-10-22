@@ -57,6 +57,7 @@ func init() {
 			resolver: eng.resolver,
 			packages: eng.sheet.packages,
 			files:    eng.sheet.files,
+			feat:     &eng.sheet.feat,
 		}
 		if fr, ok := eng.resolver.(*fileResolver); ok {
 			host.files = fr.files
@@ -103,6 +104,8 @@ type xfHost struct {
 	// files checks the local files the nested transformation reads; it is
 	// the caller's guard, so fn:transform cannot widen what a run may read.
 	files *fsaccess.Guard
+	// feat are the caller's optional capabilities; nil means the defaults.
+	feat *Features
 }
 
 // xfOptsArg validates the single map(*) argument shape shared by both call
@@ -244,7 +247,7 @@ func xfRun(opts *xpath.Map, host xfHost) (xpath.Object, error) {
 			statics[xfQNameKey(k)] = xfLiteralOf(m.Get(k))
 		}
 	}
-	ss, err := compileModule(src, filepath.Dir(selfPath), selfPath, statics, host.packages, nil, host.files)
+	ss, err := compileModule(src, filepath.Dir(selfPath), selfPath, statics, host.packages, nil, CompileOptions{Files: host.files, Features: host.feat})
 	if err != nil {
 		return nil, err
 	}

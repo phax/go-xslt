@@ -26,8 +26,9 @@ func run(req Request) Result {
 		}}}
 	}
 
-	files := FileGuard(req.Security, req.BaseDir)
-	ss, err := xslt.CompileFromFS(req.Stylesheet, req.BaseDir, files)
+	opts := compileOptions(req.Security, req.Features, req.BaseDir)
+	files := opts.Files
+	ss, err := xslt.CompileWith(req.Stylesheet, req.BaseDir, opts)
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "compile")}}
 	}

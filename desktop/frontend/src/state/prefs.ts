@@ -39,3 +39,41 @@ export function useWrapLines(): boolean {
     () => wrapLines,
   );
 }
+
+// ---- update check ----
+
+const UPDATES_KEY = "go-xslt.checkUpdates";
+
+function readUpdates(): boolean {
+  try {
+    return window.localStorage.getItem(UPDATES_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+// On by default: the app asks GitHub at start whether a newer release exists.
+// It is the app's only network request, and this switch turns it off.
+let checkUpdates = readUpdates();
+const updateListeners = new Set<() => void>();
+
+export function setCheckUpdates(on: boolean) {
+  checkUpdates = on;
+  try {
+    window.localStorage.setItem(UPDATES_KEY, on ? "1" : "0");
+  } catch {
+    /* not persisted; the choice still holds for this session */
+  }
+  updateListeners.forEach((l) => l());
+}
+
+/** Whether the app checks GitHub for a newer release at start. */
+export function useCheckUpdates(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      updateListeners.add(cb);
+      return () => updateListeners.delete(cb);
+    },
+    () => checkUpdates,
+  );
+}

@@ -126,7 +126,7 @@ func inForwardsCompatScope(el *xmltree.Node) bool {
 // this processor implements above 1.0, not merely the literal value "1.0" —
 // the "backwards" test-set's own -002/-004/-005/-037 pin 1.9, 0.5, -29 and
 // 1.99999 all triggering it identically to "1.0". Only meaningful when
-// backwardsCompatRun() claims the capability; callers gate on that (and on
+// the stylesheet claims the capability (Features.BackwardsCompatible); callers gate on that (and on
 // Stylesheet.hasBackwardsCompat, to skip this walk entirely for a module
 // that could never trigger it) themselves.
 func inBackwardsCompatScope(el *xmltree.Node) bool {

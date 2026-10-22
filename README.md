@@ -110,7 +110,16 @@ patterns that actually need it.)
 [`docs/accepted-failures/`](docs/accepted-failures/README.md) (one file per
 suite). The harnesses enforce it: an undocumented failure fails the test.
 
-**Reproducing these numbers**: `go test ./test/conformance/...` — the suites
+**Reproducing these numbers with one command**: `make conformance` (or
+`scripts/conformance.sh`) clones the three suites at the pinned commits
+above, runs the four published measurements and prints a table of this run
+against the published numbers; logs and fail-name lists land in the
+gitignored `conformance-results/`. `--only xslt,xslt-full,qt3,xsd` runs a
+subset, `--latest` uses each suite's current `HEAD` instead of the pinned
+commit (numbers may then differ by a case or two). It needs `git`, `go` and
+network access for the first run.
+
+**Running the harness by hand**: `go test ./test/conformance/...` — the suites
 above are third-party, gitignored, and not vendored, so a fresh clone of
 *this* repo builds and tests green without them; the conformance tests
 simply skip when a suite clone is absent. See
@@ -161,8 +170,32 @@ func main() {
 `Request` also supports `Params`, `InitialTemplate`, `BaseDir` (for
 `xsl:import`/`document()`/`unparsed-text()`/`xsl:result-document`) and
 `Security` (which files and network resources a run may read, see
-[Security](#security)); `Result` carries `Output`, `Diagnostics`, `Messages`,
-and `SecondaryOutputs`.
+[Security](#security)) and `Features` (see below); `Result` carries `Output`,
+`Diagnostics`, `Messages`, and `SecondaryOutputs`.
+
+### Optional features
+
+XSLT 3.0 makes schema-awareness and XSLT 1.0 backwards-compatible processing
+optional, and leaves it to the host whether an unprovable streamable
+construct is an error. All three are off by default and set per stylesheet:
+
+```go
+res := engine.Transform(engine.Request{
+	Stylesheet: src,
+	Source:     xml,
+	Features: engine.Features{
+		SchemaAware:         true, // xsl:import-schema, validation, typed nodes
+		BackwardsCompatible: true, // XSLT 1.0 rules where [xsl:]version < 2.0
+		StrictStreaming:     true, // unprovable streamable constructs: XTSE3430
+	},
+})
+```
+
+Without `SchemaAware`, `xsl:import-schema` is a compile error; without
+`BackwardsCompatible`, a `version="1.0"` stylesheet runs under XSLT 3.0 rules
+(`'x' + 1` is a type error, not `NaN`). With `engine.Compile` the features
+belong to the compiled stylesheet. Differently configured stylesheets can
+run at the same time.
 
 ### Compile once, run many times
 
@@ -275,7 +308,9 @@ remote `DOCTYPE` cannot pull in local files. Not yet covered by `AllowNetwork`:
 `xsl:import`, `xsl:import-schema` and `xs:import` locations always stay local.
 
 **Desktop tester.** Each run may read the files of its own project folder.
-Network access stays off.
+Network access stays off for runs. The app itself makes one request: the
+optional, daily check on GitHub for a newer release (switch **Update check**
+in the toolbar).
 
 **Upgrading:** before this option existed, absolute paths and paths outside
 `BaseDir` were read without restriction. A program that relies on that sets
@@ -315,7 +350,11 @@ output panes), an **XSD** validator (schema + instance panes, pass/fail with
 located diagnostics), and an **XPath** evaluator (expression input with a
 typed result table for sequences/maps/arrays) — plus workspaces (a folder +
 `goxslt.workspace.json` manifest holding the stylesheet, source XML, and
-parameters, with a remembered recent list).
+parameters, with a remembered recent list). A transform run has switches for
+the optional features (schema-aware, XSLT 1.0 mode, strict streaming), and the
+app checks GitHub once a day for a newer release (switchable in the toolbar).
+Release builds carry their version (`make` writes `desktop/version_stamp.go`
+before each build).
 
 ## Architecture
 
@@ -356,9 +395,10 @@ By default, the engine runs as a highly conformant XSLT 3.0 **basic
 processor** — 99.9% of the W3C suite, see
 [Conformance benchmarks](#conformance-benchmarks). Three of the spec's
 optional, heavyweight conformance features are also implemented (each is a
-substantial capability in its own right, not a stub), but stay **off by
-default**, one claim switch each, so a caller opts in explicitly to exactly
-what it needs:
+substantial capability in its own right, not a stub). Streaming is always
+available; schema-awareness, backwards compatibility and strict streaming
+are **off by default** and turned on per stylesheet with `engine.Features`
+(see [Optional features](#optional-features)):
 
 - **Core**: `template` (match + named), modes (incl. `xsl:mode`/`on-no-match`),
   priority-based matching, built-in template rules, `apply-templates`,
@@ -396,9 +436,9 @@ what it needs:
 - **True, bounded-memory streaming** (`xsl:source-document`, streamable
   `xsl:mode`/`xsl:function`/attribute-sets, `xsl:fork`'s streaming content
   shape): a real incremental XML reader plus a compile-time posture/sweep
-  classifier (XSLT 3.0 §19/Appendix J) that only ever approves a construct
-  it can *prove* safe, raising a clear `XTSE3430`-class diagnostic instead
-  of ever silently mis-executing. The memory bound is measured, not
+  classifier (XSLT 3.0 §19/Appendix J) that only ever streams a construct
+  it can *prove* safe; any other runs buffered, or, with
+  `Features.StrictStreaming`, is rejected with `XTSE3430`. The memory bound is measured, not
   asserted: ~2 MB peak heap across a 2–82 MB input document vs. ~630 MB
   buffered (313×) — see `engine.TransformTo` for the output-side equivalent.
   99.6% of the suite's streaming-specific cases pass.
@@ -416,11 +456,9 @@ what it needs:
   per-element-scoped 1.0 comparison/arithmetic/conversion leniency, not a
   flat rejection.
 
-A real embedding caller turns on exactly the feature(s) it needs
-(`internal/xslt/*_property.go`'s `SetSchemaAware`/`SetBackwardsCompatible`/
-streaming's own strict-enforcement flag) rather than an all-or-nothing
-switch; the conformance harness's `XSLT30_FULL=1` claims all three together
-for measurement purposes (see [Conformance benchmarks](#conformance-benchmarks)).
+A caller turns on exactly the features it needs with `engine.Features`;
+the conformance harness's `XSLT30_FULL=1` claims all three together for
+measurement purposes (see [Conformance benchmarks](#conformance-benchmarks)).
 
 ## XSD 1.0 / 1.1 validation
 

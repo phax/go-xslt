@@ -253,6 +253,8 @@ type Template struct {
 type Stylesheet struct {
 	// files is the compile's file guard (see CompileFromFS), nil for none.
 	files *fsaccess.Guard
+	// feat are the optional capabilities the stylesheet was compiled with.
+	feat Features
 	// packages is the host-supplied library-package registry this stylesheet
 	// was compiled with; fn:transform's package-based invocation resolves
 	// against the same set (transform-005/006).
@@ -297,15 +299,15 @@ type Stylesheet struct {
 	// root's own @version, which is how the whole ~2000-case XSLT 1.0 default
 	// suite is written) — so eval's per-node inBackwardsCompatScope walk is
 	// skipped entirely for a stylesheet that could never trigger it. Genuine
-	// 1.0-compatible RELAXATIONS still only apply when backwardsCompatRun()
-	// also claims the capability; this flag alone changes no behaviour.
+	// 1.0-compatible RELAXATIONS still only apply when the stylesheet was
+	// compiled with Features.BackwardsCompatible; this flag alone changes no behaviour.
 	hasBackwardsCompat bool
 	// principalVersionIsOne records whether the PRINCIPAL stylesheet
 	// module's own outermost element declares @version="1.0" EXACTLY (not
 	// merely <2.0 — XSLT 3.0's default-output-method carve-out for backward-
 	// compatible processing, quoted verbatim in the "backwards" test-set's
 	// own -019/-019b comment, names the value 1.0 specifically). Consulted
-	// only under backwardsCompatRun() (transform.go's implicit-xhtml-result
+	// only under Features.BackwardsCompatible (transform.go's implicit-xhtml-result
 	// default-method override); false changes nothing.
 	principalVersionIsOne bool
 	charMapPrec           map[string]int // xsl:character-map: name -> import precedence it was declared at (XTSE1580)
@@ -646,7 +648,7 @@ func Compile(src string) (*Stylesheet, error) { return CompileFrom(src, "") }
 // to baseDir (a workspace directory). Imported modules get lower import
 // precedence than the importing module.
 func CompileFrom(src, baseDir string) (*Stylesheet, error) {
-	return compileModule(src, baseDir, "", nil, nil, nil, nil)
+	return compileModule(src, baseDir, "", nil, nil, nil, CompileOptions{})
 }
 
 // CompileFromFS is CompileFrom with every file the compile reads checked by
@@ -656,7 +658,30 @@ func CompileFrom(src, baseDir string) (*Stylesheet, error) {
 // outside the allowed directories is reported as not found. The guard is kept
 // on the Stylesheet, so the runtime of fn:transform uses it too.
 func CompileFromFS(src, baseDir string, files *fsaccess.Guard) (*Stylesheet, error) {
-	return compileModule(src, baseDir, "", nil, nil, nil, files)
+	return CompileWith(src, baseDir, CompileOptions{Files: files})
+}
+
+// CompileOptions are the per-compile settings of CompileWith.
+type CompileOptions struct {
+	// Files checks every file the compile and the later runs read (see
+	// CompileFromFS); nil checks nothing.
+	Files *fsaccess.Guard
+	// Features are the optional capabilities the stylesheet is compiled
+	// with; nil means DefaultFeatures().
+	Features *Features
+}
+
+// CompileWith is CompileFrom with per-compile options.
+func CompileWith(src, baseDir string, o CompileOptions) (*Stylesheet, error) {
+	return compileModule(src, baseDir, "", nil, nil, nil, o)
+}
+
+// features resolves o.Features against the process-wide defaults.
+func (o CompileOptions) features() Features {
+	if o.Features != nil {
+		return *o.Features
+	}
+	return DefaultFeatures()
 }
 
 // CompileAt compiles a stylesheet whose own retrieval location is known:
@@ -664,7 +689,7 @@ func CompileFromFS(src, baseDir string, files *fsaccess.Guard) (*Stylesheet, err
 // static base URI (fn:static-base-uri, and the base for relative hrefs) —
 // more precise than CompileFrom's directory-only base (use-when-0119).
 func CompileAt(src, selfPath string) (*Stylesheet, error) {
-	return compileModule(src, filepath.Dir(selfPath), selfPath, nil, nil, nil, nil)
+	return compileModule(src, filepath.Dir(selfPath), selfPath, nil, nil, nil, CompileOptions{})
 }
 
 // CompileAtWithStatic is CompileAt plus HOST-SUPPLIED STATIC PARAMETERS
@@ -681,7 +706,7 @@ func CompileAt(src, selfPath string) (*Stylesheet, error) {
 // stylesheets must include the supplied static parameters in its cache key;
 // the same source with different static parameters is a different Stylesheet.
 func CompileAtWithStatic(src, selfPath string, static map[string]string) (*Stylesheet, error) {
-	return compileModule(src, filepath.Dir(selfPath), selfPath, static, nil, nil, nil)
+	return compileModule(src, filepath.Dir(selfPath), selfPath, static, nil, nil, CompileOptions{})
 }
 
 // CompileAtWithPackages is CompileAtWithStatic plus the set of LIBRARY
@@ -691,7 +716,7 @@ func CompileAtWithStatic(src, selfPath string, static map[string]string) (*Style
 // from the host. A package whose PackageSource leaves Name/Version empty takes
 // them from its own xsl:package/@name and @package-version.
 func CompileAtWithPackages(src, selfPath string, static map[string]string, pkgs []PackageSource) (*Stylesheet, error) {
-	return compileModule(src, filepath.Dir(selfPath), selfPath, static, pkgs, nil, nil)
+	return compileModule(src, filepath.Dir(selfPath), selfPath, static, pkgs, nil, CompileOptions{})
 }
 
 // SchemaSource is a schema document the HOST makes available to
@@ -717,10 +742,12 @@ type SchemaSource struct {
 // @schema-location resolves to nothing, so a stylesheet whose hint works keeps
 // using it.
 func CompileAtWithSchemas(src, selfPath string, static map[string]string, pkgs []PackageSource, schemas []SchemaSource) (*Stylesheet, error) {
-	return compileModule(src, filepath.Dir(selfPath), selfPath, static, pkgs, schemas, nil)
+	return compileModule(src, filepath.Dir(selfPath), selfPath, static, pkgs, schemas, CompileOptions{})
 }
 
-func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, pkgs []PackageSource, hostSchemas []SchemaSource, files *fsaccess.Guard) (*Stylesheet, error) {
+func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, pkgs []PackageSource, hostSchemas []SchemaSource, o CompileOptions) (*Stylesheet, error) {
+	files := o.Files
+	feat := o.features()
 	doc, err := xmltree.ParseLenient11WithBaseFS(src, baseDir, files)
 	if err != nil {
 		if pe, ok := err.(*xmltree.ParseError); ok {
@@ -767,9 +794,11 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 		return nil, &CompileError{Msg: "stylesheet has no root element"}
 	}
 
-	c := &compiler{baseDir: baseDir, hostStatic: hostStatic, packages: pkgs, hostSchemas: hostSchemas, files: files}
+	registerFeatures(doc, feat)
+	c := &compiler{baseDir: baseDir, hostStatic: hostStatic, packages: pkgs, hostSchemas: hostSchemas, files: files, feat: feat}
 	ss := newStylesheet()
 	ss.files = files
+	ss.feat = feat
 	ss.packages = pkgs
 	if baseDir != "" {
 		// A module base (xmltree.Node.Base, set above and — per module — in
@@ -1407,7 +1436,7 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 			// "the error isn't explicit in the XSLT spec, but this is the
 			// closest it gets"). Only reachable in a schema-aware run, where
 			// a user type can be in scope at all.
-			if len(fd.params) == 1 && schemaAwareRun() {
+			if len(fd.params) == 1 && c.feat.SchemaAware {
 				if a := schemaAdapterFor(child); a != nil {
 					if t, ok := a.sch.TypeByName(fd.name.Space, fd.name.Local); ok && !t.Complex {
 						return errAt(child, "err:XTSE0770: xsl:function %s#1 has the same name and arity as the constructor function of the imported type %s",
@@ -1476,7 +1505,9 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 
 type compiler struct {
 	// files checks every file the compile reads; nil checks nothing.
-	files   *fsaccess.Guard
+	files *fsaccess.Guard
+	// feat are the optional capabilities this compile claims.
+	feat    Features
 	baseDir string
 	// hostStatic holds host-supplied static-parameter values (see
 	// CompileAtWithStatic): parameter name as written -> XPath expression. A
@@ -2765,7 +2796,7 @@ func (c *compiler) compileElement(el *xmltree.Node) (instruction, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := el.AttrLocal("type"); ok && !schemaAwareRun() {
+		if _, ok := el.AttrLocal("type"); ok && !c.feat.SchemaAware {
 			// XTSE1660: @type requires schema-aware processing, which a basic
 			// processor never provides (type-0303).
 			return nil, errAt(el, "err:XTSE1660: xsl:element/@type requires a schema-aware processor")

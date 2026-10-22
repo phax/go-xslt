@@ -2,7 +2,7 @@
 
 The desktop tester is an app for writing and trying out stylesheets, schemas
 and XPath expressions. It runs on the same engine as the library and works
-offline.
+offline; its only network request is the optional update check.
 
 ![The desktop tester: stylesheet, source and live output, docked side by side](/screenshot-transform.png)
 
@@ -36,6 +36,17 @@ highlights XSLT and XML and marks the engine's diagnostics in the gutter.
 Messages from `xsl:message` and the documents from `xsl:result-document`
 appear in their own panes.
 
+Three switches next to the file pickers turn on the optional XSLT 3.0
+features for the run; they are saved with it:
+
+| Switch | Effect |
+|---|---|
+| Schema-aware | `xsl:import-schema`, validation and typed nodes. Off: `xsl:import-schema` is an error. |
+| XSLT 1.0 mode | XSLT 1.0 rules where `version` is below 2.0. Off: a `version="1.0"` stylesheet runs under XSLT 3.0 rules. |
+| Strict streaming | A construct declared streamable that cannot be proven streamable is `XTSE3430`. Off: it runs with the whole document in memory. |
+
+See [Optional features](/guide/xslt#optional-features).
+
 ## Validate
 
 Validate an instance document against one or more schemas, in XSD 1.0 or 1.1.
@@ -62,6 +73,14 @@ layout** restores the default.
 ## File access
 
 Each run may read the files of its own project folder. Network access is off.
+
+## Update check
+
+At start the app asks GitHub, at most once a day, whether a release newer
+than the installed one exists. If so, an **Update** button in the toolbar
+opens the release page. The request goes to `api.github.com` and sends
+nothing but the app version in its user agent. The **Update check** switch in
+the toolbar turns it off.
 
 ## Building from source
 

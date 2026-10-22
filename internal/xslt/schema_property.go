@@ -15,22 +15,17 @@ import "sync/atomic"
 // the default setting. What is NOT built: XPath 3.0 static typing (§26.1,
 // out of scope permanently — see the schema-awareness roadmap entry).
 //
-// The switch exists so the schema-aware PATH could be built and measured one
-// piece at a time behind a single gate instead of a scatter of ad-hoc
-// conditions — every construct a basic processor must reject asks here. It
-// is deliberately a claim and not a capability probe: the only caller today
-// is the XSLT30 conformance harness under XSLT30_FULL=1 (which claims this
-// alongside streaming — see xsltFullHarness in test/conformance/
-// xslt30_test.go), since turning it on for a real caller is a product
-// decision (still opt-in, not the default), not something either round made
-// unilaterally.
+// The claim belongs to the compiled stylesheet (Features.SchemaAware, set per
+// compile through CompileWith and exposed as engine.Features). This
+// process-wide switch is only the DEFAULT for a compile that is given no
+// Features — what the XSLT30 conformance harness sets under XSLT30_FULL=1
+// (xsltFullHarness in test/conformance/xslt30_test.go). Every construct a
+// basic processor must reject asks the stylesheet's Features, never this
+// variable directly.
 var schemaAware atomic.Bool
 
-// SetSchemaAware sets whether this processor presents itself as schema-aware.
+// SetSchemaAware sets the process-wide default of Features.SchemaAware.
 func SetSchemaAware(v bool) { schemaAware.Store(v) }
-
-// schemaAwareRun reports the current claim.
-func schemaAwareRun() bool { return schemaAware.Load() }
 
 // validationValueOK reports whether a [xsl:]validation / [xsl:]default-validation
 // value is one this run can honour. XSLT 3.0 §3.15 requires a NON-schema-aware
@@ -39,12 +34,12 @@ func schemaAwareRun() bool { return schemaAware.Load() }
 // that is not at all — so only "strict" genuinely demands typed data, which a
 // schema-aware run can supply. Anything outside the four-value vocabulary is
 // XTSE1660 either way.
-func validationValueOK(v string) bool {
+func validationValueOK(v string, f Features) bool {
 	switch v {
 	case "strip", "preserve", "lax":
 		return true
 	case "strict":
-		return schemaAwareRun()
+		return f.SchemaAware
 	}
 	return false
 }

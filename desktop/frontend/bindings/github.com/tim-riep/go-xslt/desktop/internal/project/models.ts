@@ -103,6 +103,13 @@ export interface Run {
     "initialTemplate"?: string;
 
     /**
+     * Optional XSLT 3.0 features the stylesheet is run with (engine.Features).
+     */
+    "schemaAware"?: boolean;
+    "backwardsCompatible"?: boolean;
+    "strictStreaming"?: boolean;
+
+    /**
      * validate. Schemas is an ordered multi-file schema set for xs:import/
      * xs:include/xs:redefine across real project files; when it's empty, the
      * UI instead offers a single inline schema (SchemaInline) typed directly

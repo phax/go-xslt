@@ -411,7 +411,7 @@ func nodeIsTyped(n *xmltree.Node) bool {
 // ambiguity is confined to strict-vs-lax over an undeclared name — where
 // strict's static error wins whichever order they are visited in.
 func applyTypedModeRewrites(ss *Stylesheet) error {
-	if !schemaAwareRun() {
+	if !ss.feat.SchemaAware {
 		return nil
 	}
 	for _, t := range ss.templates {

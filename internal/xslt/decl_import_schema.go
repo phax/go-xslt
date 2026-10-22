@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"weak"
 
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 	"github.com/tim-riep/go-xslt/internal/xpath"
@@ -44,7 +45,7 @@ import (
 // no xsl:import-schema anywhere means no entry was ever written, so the
 // ancestor walk and the map read are both skipped outright.
 var (
-	schemaRegistry    sync.Map // map[*xmltree.Node]*importedSchema — module document node -> compiled schema
+	schemaRegistry    sync.Map // weak.Pointer[xmltree.Node] -> *importedSchema: module document node -> compiled schema; entries go with their tree (weakStore)
 	anySchemaImported atomic.Bool
 )
 
@@ -55,7 +56,7 @@ type importedSchema struct {
 
 func init() {
 	declRegistry["import-schema"] = func(c *compiler, ss *Stylesheet, el *xmltree.Node) error {
-		if !schemaAwareRun() {
+		if !c.feat.SchemaAware {
 			// Unchanged basic-processor behaviour, word for word: the 31
 			// conformance cases written for a processor WITHOUT schema
 			// awareness assert exactly this rejection.
@@ -77,7 +78,7 @@ func init() {
 // A no-op unless the run claims schema-awareness, which is what keeps the
 // whole feature inert at the default setting.
 func (c *compiler) compileImportedSchemas(ss *Stylesheet, mods []modChildren) error {
-	if !schemaAwareRun() {
+	if !c.feat.SchemaAware {
 		return nil
 	}
 	type isDecl struct {
@@ -219,7 +220,7 @@ func (c *compiler) compileImportedSchemas(ss *Stylesheet, mods []modChildren) er
 				continue
 			}
 			seen[r] = true
-			schemaRegistry.Store(r, is)
+			weakStore(&schemaRegistry, r, is)
 		}
 	}
 	anySchemaImported.Store(true)
@@ -438,7 +439,11 @@ func schemaForElement(el *xmltree.Node) *importedSchema {
 	if el == nil || !anySchemaImported.Load() {
 		return nil
 	}
-	v, ok := schemaRegistry.Load(rootOfNode(el))
+	root := rootOfNode(el)
+	if root == nil {
+		return nil
+	}
+	v, ok := schemaRegistry.Load(weak.Make(root))
 	if !ok {
 		return nil
 	}
@@ -678,7 +683,7 @@ const xmlNamespaceSchema = `<xs:schema xmlns:xs="` + xsdNS + `" targetNamespace=
 // stylesheet element to resolve a prefix against — which is exactly the form
 // those assertions are written in.
 func (ss *Stylesheet) SchemaComponentsForHost() (xpath.SchemaNameLookup, xpath.SchemaTypeResolver) {
-	if ss == nil || ss.schema == nil || ss.schema.sch == nil || !schemaAwareRun() {
+	if ss == nil || ss.schema == nil || ss.schema.sch == nil || !ss.feat.SchemaAware {
 		return nil, nil
 	}
 	a := &schemaAdapter{sch: ss.schema.sch}

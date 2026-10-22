@@ -67,6 +67,13 @@
 }
 
 /* ---- params bar ---- */
+.feature-switches {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-left: var(--sp-2);
+  border-left: 1px solid var(--border);
+}
 .params-bar {
   display: flex;
   align-items: center;

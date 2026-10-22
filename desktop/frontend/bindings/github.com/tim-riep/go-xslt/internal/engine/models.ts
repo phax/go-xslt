@@ -47,6 +47,39 @@ export interface Diagnostic {
 }
 
 /**
+ * Features are the optional XSLT 3.0 capabilities (XSLT 3.0 §26) a
+ * stylesheet is compiled with. Each is off by default and applies only to the
+ * stylesheet of the request, so differently configured stylesheets can run at
+ * the same time. Streamed execution (xsl:source-document streamable="yes",
+ * streamable modes) is always available and needs no switch.
+ */
+export interface Features {
+    /**
+     * SchemaAware makes the processor schema-aware: xsl:import-schema,
+     * validation through [xsl:]validation and [xsl:]type, typed nodes, and
+     * system-property('xsl:is-schema-aware') = "yes". Without it,
+     * xsl:import-schema is a compile error.
+     */
+    "schemaAware": boolean;
+
+    /**
+     * BackwardsCompatible enables XSLT 1.0 backwards-compatible processing
+     * (§3.9.1) wherever [xsl:]version is below 2.0: the first-item rule of
+     * xsl:value-of, XPath 1.0 conversions in arithmetic and comparisons, and
+     * so on. Without it, a version="1.0" stylesheet runs under XSLT 3.0
+     * rules.
+     */
+    "backwardsCompatible": boolean;
+
+    /**
+     * StrictStreaming makes every construct declared streamable that cannot
+     * be proven guaranteed-streamable (§19) a compile error, XTSE3430.
+     * Without it, such a construct runs with the whole document in memory.
+     */
+    "strictStreaming": boolean;
+}
+
+/**
  * Request is a single transformation request.
  */
 export interface Request {
@@ -83,6 +116,12 @@ export interface Request {
      * the zero value allows files under BaseDir only, and no network.
      */
     "security": Security;
+
+    /**
+     * Features turns on optional XSLT 3.0 capabilities for this stylesheet;
+     * the zero value is a basic XSLT 3.0 processor.
+     */
+    "features": Features;
 }
 
 /**

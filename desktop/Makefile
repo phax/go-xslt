@@ -24,6 +24,13 @@ GO_FILES := $(shell find . -name '*.go' -not -path './frontend/*')
 VERSION        ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 BUNDLE_VERSION := $(or $(shell printf '%s' '$(VERSION)' | grep -oE '^[0-9]+(\.[0-9]+)*'),0.0.0)
 
+# stamp-version: write the version into the binary (version_stamp.go, gitignored;
+# see version.go). Every build target depends on it, so a release build reports
+# its own version to the in-app update check.
+.PHONY: stamp-version
+stamp-version:
+	printf 'package main\n\nfunc init() { appVersion = "%s" }\n' '$(VERSION)' > version_stamp.go
+
 # stamp-mac,<bundle>: write the version into a built .app and re-sign it ad hoc
 # (changing Info.plist invalidates the signature; CI signs with Developer ID after).
 define stamp-mac
@@ -42,6 +49,7 @@ all: build-all
 
 ## dev: run the app with live frontend reload (needs go-task: `go install ...`/brew)
 dev:
+	rm -f version_stamp.go
 	$(WAILS) dev
 
 ## bindings: regenerate TypeScript bindings from Go services (-ts for real
@@ -55,7 +63,7 @@ frontend:
 	cd frontend && npm install && npm run build
 
 ## build: native build for the host OS (embeds frontend/dist)
-build: frontend
+build: frontend stamp-version
 	mkdir -p $(BIN)
 	go build -o $(BIN)/$(APP) .
 
@@ -70,7 +78,7 @@ build: frontend
 ## configurable — it always writes to plain `bin/` (wails3's own default,
 ## same mismatch build-win-* below already works around), not $(BIN) — so
 ## the resulting bin/go-xslt.app is moved into $(BIN) and renamed after.
-build-mac-arm64:
+build-mac-arm64: stamp-version
 	mkdir -p $(BIN)
 	$(TASKPATH) $(WAILS) task darwin:package ARCH=arm64
 	rm -rf $(BIN)/$(APP)-darwin-arm64.app
@@ -80,7 +88,7 @@ build-mac-arm64:
 
 ## build-mac-amd64: macOS build for Intel. Same pipeline, cross-compiles
 ## cleanly from an Apple Silicon Mac too.
-build-mac-amd64:
+build-mac-amd64: stamp-version
 	mkdir -p $(BIN)
 	$(TASKPATH) $(WAILS) task darwin:package ARCH=amd64
 	rm -rf $(BIN)/$(APP)-darwin-amd64.app
@@ -92,13 +100,13 @@ build-mac-amd64:
 build-mac: build-mac-arm64 build-mac-amd64
 
 ## build-win-amd64: Windows x64 (pure Go, no CGo, CGO_ENABLED=0 -H=windowsgui)
-build-win-amd64:
+build-win-amd64: stamp-version
 	mkdir -p $(BIN)
 	$(TASKPATH) $(WAILS) task windows:build ARCH=amd64
 	mv bin/$(APP).exe $(BIN)/$(APP)-windows-amd64.exe
 
 ## build-win-arm64: Windows ARM64 (pure Go, no CGo, CGO_ENABLED=0 -H=windowsgui)
-build-win-arm64:
+build-win-arm64: stamp-version
 	mkdir -p $(BIN)
 	$(TASKPATH) $(WAILS) task windows:build ARCH=arm64
 	mv bin/$(APP).exe $(BIN)/$(APP)-windows-arm64.exe
@@ -115,7 +123,7 @@ setup-docker:
 ## real CGo (webkitgtk) — there's no pure-Go GUI backend for it — and there's
 ## no macOS-hosted C toolchain that can link against Linux's GTK/WebKitGTK, so
 ## this always goes through Docker (run `make setup-docker` once first).
-build-linux:
+build-linux: stamp-version
 	mkdir -p $(BIN)
 	$(TASKPATH) $(WAILS) task linux:build ARCH=amd64 OUTPUT=$(BIN)/$(APP)-linux-amd64
 

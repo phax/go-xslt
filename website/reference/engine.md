@@ -42,13 +42,14 @@ type Request struct {
 	InitialTemplate string            // named template to start with
 	BaseDir         string            // resolves relative URIs; empty = no file reads
 	Security        Security
+	Features        Features          // optional XSLT 3.0 features; zero = all off
 }
 ```
 
 ## TransformRequest
 
-One run of a compiled `Stylesheet`. The stylesheet and its `BaseDir` were
-fixed by `Compile`.
+One run of a compiled `Stylesheet`. The stylesheet, its `BaseDir` and its
+`Features` were fixed by `Compile`.
 
 ```go
 type TransformRequest struct {
@@ -139,6 +140,20 @@ type Security struct {
 
 The zero value allows files under `BaseDir` and no network. See
 [Security](/guide/security).
+
+## Features
+
+```go
+type Features struct {
+	SchemaAware         bool // xsl:import-schema, validation, typed nodes
+	BackwardsCompatible bool // XSLT 1.0 rules where [xsl:]version < 2.0
+	StrictStreaming     bool // unprovable streamable constructs are XTSE3430
+}
+```
+
+All three are off by default and apply only to the stylesheet of the
+request; stylesheets compiled with different `Features` can run at the same
+time. See [Optional features](/guide/xslt#optional-features).
 
 ## Diagnostic
 

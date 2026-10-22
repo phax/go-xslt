@@ -29,10 +29,22 @@ modes, streamable functions and attribute sets, and the streaming form of
 `xsl:fork`.
 
 Before running, the compiler checks each streamable construct against the
-streamability rules of XSLT 3.0 (section 19 and appendix J). If it cannot
-prove that a construct is streamable, it reports an `XTSE3430` error instead
-of running it with unbounded memory. Some constructs are rejected that a more
-elaborate analysis could accept; none is accepted that would not stream.
+streamability rules of XSLT 3.0 (section 19 and appendix J). A construct it
+can prove streamable is executed one record at a time. One it cannot prove
+runs with the whole document in memory, unless you ask for the strict
+behaviour of the specification:
+
+```go
+res := engine.Transform(engine.Request{
+	Stylesheet: src,
+	Features:   engine.Features{StrictStreaming: true},
+})
+```
+
+With `StrictStreaming`, such a construct is a compile error, `XTSE3430`, so a
+stylesheet that is meant to run in bounded memory cannot silently fall back.
+The analysis is cautious: some constructs are rejected that a more elaborate
+analysis could accept; none is accepted that would not stream.
 
 ## Streaming the output
 

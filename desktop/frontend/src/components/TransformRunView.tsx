@@ -54,10 +54,15 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
         params,
         initialTemplate: run.initialTemplate ?? "",
         baseDir: tab.projectId,
-        // The desktop tester keeps the engine's default: no network access.
+        // No network access; files only from the project folder.
         security: { allowNetwork: false },
+        features: {
+          schemaAware: !!run.schemaAware,
+          backwardsCompatible: !!run.backwardsCompatible,
+          strictStreaming: !!run.strictStreaming,
+        },
       }),
-    [stylesheetBuf.text, sourceBuf.text, params, run.initialTemplate, tab.projectId],
+    [stylesheetBuf.text, sourceBuf.text, params, run.initialTemplate, tab.projectId, run.schemaAware, run.backwardsCompatible, run.strictStreaming],
   );
 
   const { run: doRun, status, result } = useRunner<TransformResult>(tab.id, tab.projectId, execute);
@@ -72,7 +77,17 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
     // Re-run whenever the resolved content, params, or entry-template choice
     // change; `doRun`'s own identity already reflects all of these.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stylesheetBuf.text, sourceBuf.text, JSON.stringify(params), run.initialTemplate, autoRun, stylesheetPath]);
+  }, [
+    stylesheetBuf.text,
+    sourceBuf.text,
+    JSON.stringify(params),
+    run.initialTemplate,
+    autoRun,
+    stylesheetPath,
+    run.schemaAware,
+    run.backwardsCompatible,
+    run.strictStreaming,
+  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -167,6 +182,10 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
           placeholder="Choose source XML…"
           onChange={(p) => void actions.upsertRun(tab.projectId, { ...run, source: p })}
         />
+        <FeatureSwitches
+          run={run}
+          onChange={(next) => void actions.upsertRun(tab.projectId, { ...run, ...next })}
+        />
         <span className="spacer" />
         <button className="primary" onClick={() => void doRun()} disabled={running || !stylesheetPath}>
           {running ? "Running…" : `Run ${RUN_SHORTCUT}`}
@@ -222,5 +241,40 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
 
       <DockLayout storageKey="transform" panes={panes} arrange={arrangeTransform} />
     </>
+  );
+}
+
+type FeatureKey = "schemaAware" | "backwardsCompatible" | "strictStreaming";
+
+const FEATURES: { key: FeatureKey; label: string; title: string }[] = [
+  {
+    key: "schemaAware",
+    label: "Schema-aware",
+    title: "xsl:import-schema, validation and typed nodes. Off: xsl:import-schema is an error.",
+  },
+  {
+    key: "backwardsCompatible",
+    label: "XSLT 1.0 mode",
+    title: "XSLT 1.0 rules where version is below 2.0. Off: a version=\"1.0\" stylesheet runs under XSLT 3.0 rules.",
+  },
+  {
+    key: "strictStreaming",
+    label: "Strict streaming",
+    title: "A streamable construct that cannot be proven streamable is XTSE3430. Off: it runs with the whole document in memory.",
+  },
+];
+
+/** The optional XSLT 3.0 features this run's stylesheet is compiled with
+ * (engine.Features), saved with the run. */
+function FeatureSwitches({ run, onChange }: { run: SavedRun; onChange: (next: Partial<SavedRun>) => void }) {
+  return (
+    <span className="feature-switches">
+      {FEATURES.map((f) => (
+        <label key={f.key} className="auto" title={f.title}>
+          <input type="checkbox" checked={!!run[f.key]} onChange={(e) => onChange({ [f.key]: e.target.checked })} />{" "}
+          {f.label}
+        </label>
+      ))}
+    </span>
   );
 }

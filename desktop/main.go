@@ -21,6 +21,7 @@ func main() {
 			application.NewService(&XsltService{}),
 			application.NewService(&ProjectService{}),
 			application.NewService(&LicenseService{}),
+			application.NewService(&UpdateService{}),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

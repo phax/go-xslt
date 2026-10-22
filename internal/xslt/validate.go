@@ -295,18 +295,18 @@ func validateTree(el *xmltree.Node, topLevel bool) error {
 		}
 	}
 	if el.Name.Space != NS && el.Kind == xmltree.KindElement {
-		if _, ok := el.Attr(NS, "type"); ok && !schemaAwareRun() {
+		if _, ok := el.Attr(NS, "type"); ok && !featuresAt(el).SchemaAware {
 			return errAt(el, "err:XTSE1660: xsl:type requires a schema-aware processor")
 		}
 		// XTSE1660 fires for a value this run cannot honour — see
 		// validationValueOK (schema_property.go) for which those are. The xsl:-
 		// prefixed spelling on a literal result element is the same attribute
 		// as validateXSLTElement's unprefixed one and must agree with it.
-		if v, ok := el.Attr(NS, "validation"); ok && !validationValueOK(v) {
+		if v, ok := el.Attr(NS, "validation"); ok && !validationValueOK(v, featuresAt(el)) {
 			return errAt(el, "err:XTSE1660: xsl:validation=%q requires a schema-aware processor", v)
 		}
 		if v, ok := el.Attr(NS, "default-validation"); ok {
-			if !validationValueOK(v) {
+			if !validationValueOK(v, featuresAt(el)) {
 				return errAt(el, "err:XTSE1660: xsl:default-validation=%q requires a schema-aware processor", v)
 			}
 			if err := checkDefaultValidationValue(el, v); err != nil {
@@ -326,7 +326,7 @@ func validateTree(el *xmltree.Node, topLevel bool) error {
 			// so there is nothing to reject. Note this is xsl:version on an
 			// LRE only — never xsl:stylesheet/@version, which is how every
 			// 1.0 stylesheet in the suite declares itself.
-			if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil && f < 2.0 && !backwardsCompatRun() {
+			if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil && f < 2.0 && !featuresAt(el).BackwardsCompatible {
 				return errAt(el, "err:XTDE0160: xsl:version=%q requests backwards compatible behaviour, which this processor does not support", v)
 			}
 		}
@@ -584,7 +584,7 @@ func validateXSLTElement(el *xmltree.Node) error {
 		return errAt(el, "err:XTSE0110: version=%q is not a valid number", v)
 	}
 	if v, ok := el.AttrLocal("default-validation"); ok {
-		if !validationValueOK(v) {
+		if !validationValueOK(v, featuresAt(el)) {
 			return errAt(el, "err:XTSE1660: default-validation=%q requires a schema-aware processor", v)
 		}
 		if err := checkDefaultValidationValue(el, v); err != nil {
@@ -608,7 +608,7 @@ func validateXSLTElement(el *xmltree.Node) error {
 	// Note this deliberately checks ONLY "strict", not the whole vocabulary the
 	// literal-result-element path above rejects: an out-of-vocabulary value on
 	// an XSLT element is caught by that element's own attribute-value checks.
-	if v, ok := el.AttrLocal("validation"); ok && strings.TrimSpace(v) == "strict" && !schemaAwareRun() {
+	if v, ok := el.AttrLocal("validation"); ok && strings.TrimSpace(v) == "strict" && !featuresAt(el).SchemaAware {
 		return errAt(el, "err:XTSE1660: validation=%q requires a schema-aware processor", v)
 	}
 	if v, ok := el.AttrLocal("default-collation"); ok {

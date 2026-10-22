@@ -25,16 +25,12 @@ import "sync/atomic"
 // case in this repo's own conformance floor already depends on and which
 // stays completely unchanged at the default setting.
 //
-// The only caller today is the XSLT30 conformance harness under
-// XSLT30_FULL=1 (xsltFullHarness in test/conformance/xslt30_test.go),
-// alongside streaming and schema-awareness — turning this on for a real
-// embedding caller is a product decision, not something this round made
-// unilaterally.
+// The claim belongs to the compiled stylesheet (Features.BackwardsCompatible,
+// exposed as engine.Features); this process-wide switch is only the default
+// for a compile given no Features — what the XSLT30 conformance harness sets
+// under XSLT30_FULL=1.
 var bcCompatClaim atomic.Bool
 
-// SetBackwardsCompatible sets whether this processor presents itself as
-// implementing XSLT 1.0 backwards-compatible processing.
+// SetBackwardsCompatible sets the process-wide default of
+// Features.BackwardsCompatible.
 func SetBackwardsCompatible(v bool) { bcCompatClaim.Store(v) }
-
-// backwardsCompatRun reports the current claim.
-func backwardsCompatRun() bool { return bcCompatClaim.Load() }

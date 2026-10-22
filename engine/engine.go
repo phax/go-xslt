@@ -13,8 +13,11 @@ import (
 type (
 	Request          = engine.Request
 	TransformRequest = engine.TransformRequest
-	// Security controls network access of a run; the zero value allows none.
+	// Security limits the files and network resources a run may read.
 	Security = engine.Security
+	// Features turns on optional XSLT 3.0 capabilities (schema awareness,
+	// XSLT 1.0 backwards compatibility, strict streaming) per stylesheet.
+	Features = engine.Features
 	// Stylesheet is a stylesheet compiled once by Compile and run many times.
 	Stylesheet      = engine.Stylesheet
 	Result          = engine.Result

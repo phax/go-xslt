@@ -493,7 +493,7 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 		}
 		uri, local := funcAvailableName(el, name)
 		if uri == NS {
-			return xsltSystemProperty(local), true, nil
+			return xsltSystemProperty(local, eng.sheet.feat), true, nil
 		}
 		return "", true, nil
 
@@ -527,7 +527,7 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 		// in the same run (catalog-006 asserts the two agree: an XSLT element
 		// may be unavailable only when that property says "no").
 		if local == "import-schema" && uri == NS {
-			return schemaAwareRun(), true, nil
+			return featuresAt(el).SchemaAware, true, nil
 		}
 		return uri == NS && (known || elementAvailableExtra[local]), true, nil
 
@@ -1493,6 +1493,7 @@ func elementWithID(n *xmltree.Node, id string) *xmltree.Node {
 // xs:dateTimeStamp is XSD 1.1-only and this processor reports XSD 1.1
 // (type-available-0151a).
 func typeAvailable(el *xmltree.Node, uri, local string) bool {
+	f := featuresAt(el)
 	if uri != "http://www.w3.org/2001/XMLSchema" {
 		if is := schemaForElement(el); is != nil {
 			_, ok := is.sch.TypeByName(uri, local)
@@ -1522,7 +1523,7 @@ func typeAvailable(el *xmltree.Node, uri, local string) bool {
 	// explicitly NOT satisfied, one of the 31 canary cases — wants false,
 	// XSLT 2.0 §3.13 giving a basic processor only a short list of types
 	// where §3.15 gives a schema-aware one all of XSD Part 2.
-	if schemaAwareRun() {
+	if f.SchemaAware {
 		switch local {
 		case "NMTOKENS", "IDREFS", "ENTITIES":
 			return true
@@ -1538,7 +1539,7 @@ func typeAvailable(el *xmltree.Node, uri, local string) bool {
 // SetStreamingClaim); everything else in the XSLT 3.0 / XPath 3.1 feature set
 // (HOF, dynamic evaluation via xsl:evaluate, serialization, the namespace::
 // axis) is implemented. An unknown name is the zero-length string.
-func xsltSystemProperty(local string) string {
+func xsltSystemProperty(local string, f Features) string {
 	switch local {
 	case "version":
 		return "3.0"
@@ -1552,7 +1553,7 @@ func xsltSystemProperty(local string) string {
 		// What the HOST says it is presenting — see SetSchemaAware
 		// (schema_property.go). Default "no", which is also what the engine
 		// can back up today.
-		if schemaAwareRun() {
+		if f.SchemaAware {
 			return "yes"
 		}
 		return "no"
@@ -1563,7 +1564,7 @@ func xsltSystemProperty(local string) string {
 		// What the HOST says it is presenting — see SetBackwardsCompatible
 		// (backcompat_property.go). Default "no" (system-property-019a);
 		// "yes" once a run claims it (system-property-019).
-		if backwardsCompatRun() {
+		if f.BackwardsCompatible {
 			return "yes"
 		}
 		return "no"
@@ -1571,7 +1572,7 @@ func xsltSystemProperty(local string) string {
 		// "yes" unless the HOST says it is presenting a non-streaming
 		// processor — see SetStreamingClaim (stream_property.go) for why this
 		// is not tied to strmEnforce.
-		if strmClaim.Load() {
+		if f.StreamingClaim {
 			return "yes"
 		}
 		return "no"

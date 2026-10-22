@@ -1,6 +1,9 @@
 package xpath
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // xsdBlockRanges maps XSD/Unicode block names (the part after "Is" in
 // \p{IsBlockName}) to their codepoint range, used to translate XSD regex block
@@ -82,7 +85,7 @@ var xsdBlockRanges = map[string][2]rune{
 	"CJKUnifiedIdeographs":                 {0x4E00, 0x9FFF},
 	"YiSyllables":                          {0xA000, 0xA48F},
 	"YiRadicals":                           {0xA490, 0xA4CF},
-	"HangulSyllables":                      {0xAC00, 0xD7A3},
+	"HangulSyllables":                      {0xAC00, 0xD7AF},
 	"HighSurrogates":                       {-1, -1},
 	"HighPrivateUseSurrogates":             {-1, -1},
 	"LowSurrogates":                        {-1, -1},
@@ -123,36 +126,55 @@ func XSDBlockKnown(name string) bool {
 	return ok
 }
 
-func xsdBlockClassBody(name string) (string, bool) {
+// xsdBlockMoreRanges holds the further ranges of a block name that covers
+// more than one range. XSD 1.1 §G.4.2.3 lists the Unicode 3.1 name
+// PrivateUse, which it encourages processors to keep supporting, with three
+// ranges: the BMP private use area and the two supplementary ones
+// (regex-classes-111).
+var xsdBlockMoreRanges = map[string][][2]rune{
+	"PrivateUse": {{0xF0000, 0xFFFFD}, {0x100000, 0x10FFFD}},
+}
+
+// blockRanges returns every range of the named block; ok is false for an
+// unknown block, and the slice is empty for a surrogate block.
+func blockRanges(name string) ([][2]rune, bool) {
 	r, ok := xsdBlockRanges[name]
+	if !ok {
+		return nil, false
+	}
+	if r[0] < 0 {
+		return nil, true
+	}
+	return append([][2]rune{r}, xsdBlockMoreRanges[name]...), true
+}
+
+func xsdBlockClassBody(name string) (string, bool) {
+	rr, ok := blockRanges(name)
 	if !ok {
 		return "", false
 	}
-	if r[0] < 0 { // surrogate block — no valid scalar values
+	if len(rr) == 0 { // surrogate block — no valid scalar values
 		return "", true
 	}
-	return fmt.Sprintf(`\x{%x}-\x{%x}`, r[0], r[1]), true
+	var b strings.Builder
+	for _, r := range rr {
+		fmt.Fprintf(&b, `\x{%x}-\x{%x}`, r[0], r[1])
+	}
+	return b.String(), true
 }
 
 // xsdBlockComplementBody renders the codepoints OUTSIDE a Unicode block as a
 // character-class body. \P{IsBlock} inside an enclosing class cannot use RE2's
 // \P negation, so the complement is emitted as explicit ranges instead.
 func xsdBlockComplementBody(name string) (string, bool) {
-	r, ok := xsdBlockRanges[name]
+	rr, ok := blockRanges(name)
 	if !ok {
 		return "", false
 	}
-	if r[0] < 0 { // surrogate block — every scalar value is outside it
+	if len(rr) == 0 { // surrogate block — every scalar value is outside it
 		return emitRanges([][2]rune{{0, 0x10ffff}}), true
 	}
-	var rr [][2]rune
-	if r[0] > 0 {
-		rr = append(rr, [2]rune{0, r[0] - 1})
-	}
-	if r[1] < 0x10ffff {
-		rr = append(rr, [2]rune{r[1] + 1, 0x10ffff})
-	}
-	return emitRanges(rr), true
+	return emitRanges(complementRanges(rr)), true
 }
 
 // blockClass renders a translated block range as RE2 syntax, honouring negation

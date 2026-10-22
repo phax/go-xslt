@@ -130,3 +130,34 @@ export interface SchemaModelRequest {
      */
     "version": string;
 }
+
+/**
+ * UpdateInfo is the outcome of CheckForUpdate.
+ */
+export interface UpdateInfo {
+    /**
+     * Current is this build's version ("dev" for a development build).
+     */
+    "current": string;
+
+    /**
+     * Latest is the newest release's version, without a leading "v".
+     */
+    "latest": string;
+
+    /**
+     * URL is the newest release's page.
+     */
+    "url": string;
+
+    /**
+     * Newer reports that Latest is newer than Current. Always false for a
+     * development build, which has no version to compare.
+     */
+    "newer": boolean;
+
+    /**
+     * Error says why the check failed; empty on success.
+     */
+    "error"?: string;
+}

@@ -89,6 +89,31 @@ depends on the network). Results are summarised in
 cases. See the project root `CLAUDE.md` for the current permanent residual and
 why each item is out of scope.
 
+## Reproducing the published numbers (one command)
+
+```
+make conformance            # or: scripts/conformance.sh
+```
+
+The script clones the three suites into this directory (`xslt30-test`,
+`qt3tests`, `xsdtests`) at the commits the root README's "Conformance
+benchmarks" table was measured against, builds the test binary once, runs
+`TestXSLT30` (default and `XSLT30_FULL=1`), `TestQT3` and `TestXSD` (1.0 and
+1.1) with no per-case timeouts, and prints passed / ran next to the published
+numbers, marked match or mismatch. Full logs and the fail-name lists go to
+`conformance-results/` (gitignored). Options:
+
+- `--only xslt,xslt-full,qt3,xsd` — run a subset
+- `--latest` — use each suite's current `HEAD` instead of the pinned commit
+  (numbers may then differ by a case or two)
+- `--update` — move an existing clone to the pinned commit (an existing clone
+  at another commit is otherwise left alone, and reported)
+- `--out DIR` — results directory
+
+With `make`, pass options as `make conformance ARGS="--only qt3"`. The exit
+status is non-zero when a harness test fails, which includes a failing case
+that is not documented in `docs/accepted-failures/`.
+
 ## Why differential/suite testing matters
 
 Hand-written tests only cover what we think to test — e.g. all explicit XPath

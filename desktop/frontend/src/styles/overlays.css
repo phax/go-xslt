@@ -77,6 +77,21 @@
   background: var(--accent-hover);
 }
 
+/* ---- update notice (toolbar) ---- */
+.update-notice {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.update-notice:hover {
+  background: var(--accent-hover);
+}
+
 /* ---- licenses ---- */
 .licenses-button {
   font-size: var(--text-xs);

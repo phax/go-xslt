@@ -4,7 +4,13 @@
 # dependency is golang.org/x/text. The desktop GUI is a separate nested module
 # under ./desktop — see desktop/Makefile for `dev` / `build` / `bindings`.
 
-.PHONY: test tidy vet
+.PHONY: test tidy vet conformance
+
+## conformance: download the W3C suites (pinned commits) and reproduce the
+## published conformance numbers; pass options via ARGS, e.g.
+## make conformance ARGS="--only qt3"
+conformance:
+	scripts/conformance.sh $(ARGS)
 
 ## test: engine unit tests + conformance harnesses (which skip if suites absent)
 test:

@@ -21,6 +21,9 @@ bin
 # never third-party licensed material in the tracked tree. See any README
 # under local/ for what's actually there, if present.
 /local/
+
+# Output of scripts/conformance.sh
+/conformance-results/
 # A differential-gate test file that depends on material under local/ (if
 # any) stays local-only too, though it must stay in this package's
 # directory to compile.
@@ -35,3 +38,6 @@ bin
 
 # Generated from build/appicon.icon by `wails3 generate icons` (needs Xcode's actool; the CI macOS runners have it)
 desktop/build/darwin/Assets.car
+
+# Written by the desktop Makefile before each build (see desktop/version.go)
+desktop/version_stamp.go

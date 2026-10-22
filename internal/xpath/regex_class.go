@@ -191,11 +191,11 @@ func parseClassRanges(s string) ([][2]rune, bool) {
 				name := string(rs[i+3 : e])
 				var set [][2]rune
 				if strings.HasPrefix(name, "Is") {
-					r, ok := xsdBlockRanges[name[2:]]
-					if !ok || r[0] < 0 {
+					rr, ok := blockRanges(name[2:])
+					if !ok || len(rr) == 0 {
 						return nil, false
 					}
-					set = [][2]rune{r}
+					set = rr
 				} else {
 					var ok bool
 					if set, ok = categoryRanges(name); !ok {

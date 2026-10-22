@@ -52,7 +52,7 @@ func Compile(req Request) (sheet *Stylesheet, diags []Diagnostic) {
 	if req.Stylesheet == "" {
 		return nil, []Diagnostic{{Severity: SeverityError, Code: "XTSE0010", Phase: "parse", Message: "empty stylesheet"}}
 	}
-	ss, err := xslt.CompileFromFS(req.Stylesheet, req.BaseDir, FileGuard(req.Security, req.BaseDir))
+	ss, err := xslt.CompileWith(req.Stylesheet, req.BaseDir, compileOptions(req.Security, req.Features, req.BaseDir))
 	if err != nil {
 		return nil, []Diagnostic{diagFromErr(err, "compile")}
 	}

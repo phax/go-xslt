@@ -284,6 +284,7 @@ func (c *compiler) loadPackageRoot(abs string) (*xmltree.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	registerFeatures(doc, c.feat)
 	doc.SetBase(fileURI(abs))
 	root := xmltree.RootElement(doc)
 	if root == nil {
@@ -416,6 +417,7 @@ func (c *compiler) loadFile(href, baseDir string, seen map[string]bool) (*xmltre
 	if err != nil {
 		return nil, "", "", err
 	}
+	registerFeatures(doc, c.feat)
 	// This module's own retrieval location (its exact file, known here unlike
 	// the primary module's) becomes its intrinsic base-uri: document()/doc()
 	// calls with a relative href in THIS module resolve against ITS OWN

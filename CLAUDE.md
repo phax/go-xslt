@@ -66,7 +66,7 @@ dragging in the GUI's Wails/CGo dependencies:
   `stream_fork.go` (the bounded-memory streaming dispatcher — reuses the
   ordinary buffered `exec*` evaluator unmodified once a streamed record is
   materialized), `transform_to.go` (output-side bounded-memory serialization),
-  `schema_property.go` (`SetSchemaAware`/`schemaAwareRun` claim switch, off by
+  `schema_property.go` (`Features.SchemaAware`, per stylesheet, off by
   default), `decl_import_schema.go` (`xsl:import-schema` → one per-stylesheet
   `*xsd.Schema`, the reference implementation of the injected-hook pattern
   above), `schema_validation.go` (runtime `[xsl:]validation`/`[xsl:]type`
@@ -78,7 +78,7 @@ dragging in the GUI's Wails/CGo dependencies:
   XSLT-engine-backed, reachable both in-stylesheet and as a standalone
   XPath function via `internal/xpath/fn_transform.go`'s injected
   `TransformFunc` hook), `backcompat_property.go`
-  (`SetBackwardsCompatible`/`backwardsCompatRun` claim switch, off by
+  (`Features.BackwardsCompatible`, per stylesheet, off by
   default, gating real XSLT 1.0-compatible processing per `[xsl:]version`
   scope — see `xpath.Context.BC10`).
 - `internal/xsd` — **from-scratch XSD 1.0/1.1 validator**, 99.99% conformant
@@ -122,6 +122,13 @@ dragging in the GUI's Wails/CGo dependencies:
   `RunXPath`, engine-only) and `ProjectService` (project registry/CRUD, file
   tree scan, file CRUD, manifest save, reveal-in-Finder). Both import the
   engine via the public `engine/` path.
+- `desktop/updateservice.go` + `frontend/src/components/UpdateNotice.tsx` —
+  the app's only network request: GitHub's latest-release API, at most once a
+  day, switchable (pref `go-xslt.checkUpdates`). The build's version comes from
+  `desktop/version.go` (`appVersion`, "dev" by default), set by the gitignored
+  `version_stamp.go` the Makefile writes before every build (`stamp-version`).
+  A transform run's optional-feature switches are saved in the run
+  (`project.Run.SchemaAware/BackwardsCompatible/StrictStreaming`).
 - `desktop/schemamodel.go` + `frontend/src/components/SchemaStructureView.tsx` —
   read-only **XSD structure view** (a Code | Structure toggle on `.xsd` file
   tabs): `XsltService.SchemaStructure` compiles the schema set through the
@@ -193,6 +200,19 @@ Desktop GUI (**run from `desktop/`**):
 
 ## Conventions / gotchas
 
+- **Optional features are per stylesheet** (`internal/xslt/features.go`,
+  `engine.Features{SchemaAware, BackwardsCompatible, StrictStreaming}` on
+  `Request`): `xslt.CompileWith(…, CompileOptions{Features})` stores them on
+  the `Stylesheet` (`ss.feat`) and the compiler (`c.feat`); code holding only
+  a stylesheet node uses `featuresAt(el)`, which looks the module's root up in
+  `featureRegistry`. Every module root is registered as it is parsed
+  (compileModule, loader, staticdecl). Both that registry and `schemaRegistry`
+  are keyed by weak pointers with a cleanup (`weakStore`), so discarded
+  stylesheets are collected (`TestRegistriesReleaseStylesheets`). The old
+  setters (`SetSchemaAware`/`SetBackwardsCompatible`/`SetEnforceStreamability`/
+  `SetStreamingClaim`) are now only the DEFAULTS for a compile given no
+  Features — that is how the harness claims them, so its numbers are
+  unchanged by construction. Never read a feature from a global again.
 - **Local file reads are confined, per request** (`internal/fsaccess`,
   `engine.Security{AllowedDirs, AllowAllFiles}`, also on `ValidateRequest`
   and `xsd.Request`): the public facades build a `*fsaccess.Guard` rooted at
@@ -335,7 +355,7 @@ Desktop GUI (**run from `desktop/`**):
   - Genuine XSLT 1.0/pre-2.0 **backwards-compatible processing** (an
     `[xsl:]version` below 2.0 anywhere in scope — XSLT 3.0 §3.9.1) is real,
     not a flat XTDE0160 rejection: a claim switch
-    (`SetBackwardsCompatible`/`backwardsCompatRun`, `backcompat_property.go`,
+    (`Features.BackwardsCompatible`, `backcompat_property.go`,
     off by default, on under `XSLT30_FULL=1`) gates per-element-scoped 1.0
     comparison/arithmetic/conversion leniency (`xpath.Context.BC10`,
     threaded through every sub-context construction — a real, general bug
@@ -449,7 +469,7 @@ Desktop GUI (**run from `desktop/`**):
     constraint; every derivation/name-resolution question routes through the
     injected-hook seam (`xpath.SchemaTypeResolver`/`SchemaNameLookup`/…,
     implemented by `internal/xslt/decl_import_schema.go`'s `schemaAdapter`).
-  - **The claim switch** (`SetSchemaAware`/`schemaAwareRun`, default false)
+  - **The claim** (`Features.SchemaAware`, default false)
     exists because 31 currently-passing conformance cases explicitly require
     a **non**-schema-aware processor (`TestXSLT30SchemaUnawareCases` pins
     all 31 as a canary, checked in both claim states after any change here).

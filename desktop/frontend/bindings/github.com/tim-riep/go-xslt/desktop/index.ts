@@ -3,10 +3,12 @@
 
 import * as LicenseService from "./licenseservice.js";
 import * as ProjectService from "./projectservice.js";
+import * as UpdateService from "./updateservice.js";
 import * as XsltService from "./xsltservice.js";
 export {
     LicenseService,
     ProjectService,
+    UpdateService,
     XsltService
 };
 
@@ -16,5 +18,6 @@ export type {
     SMNode,
     SMType,
     SchemaModel,
-    SchemaModelRequest
+    SchemaModelRequest,
+    UpdateInfo
 } from "./models.js";

@@ -48,6 +48,10 @@ type Run struct {
 	Source          string            `json:"source,omitempty"`
 	Params          map[string]string `json:"params,omitempty"`
 	InitialTemplate string            `json:"initialTemplate,omitempty"`
+	// Optional XSLT 3.0 features the stylesheet is run with (engine.Features).
+	SchemaAware         bool `json:"schemaAware,omitempty"`
+	BackwardsCompatible bool `json:"backwardsCompatible,omitempty"`
+	StrictStreaming     bool `json:"strictStreaming,omitempty"`
 
 	// validate. Schemas is an ordered multi-file schema set for xs:import/
 	// xs:include/xs:redefine across real project files; when it's empty, the

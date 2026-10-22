@@ -279,6 +279,7 @@ func (c *compiler) loadStaticModule(el *xmltree.Node, baseDir string, seen map[s
 	if err != nil {
 		return nil, "", "", false
 	}
+	registerFeatures(doc, c.feat)
 	doc.SetBase(fileURI(abs))
 	sub := xmltree.RootElement(doc)
 	if sub == nil || sub.Name.Space != NS {

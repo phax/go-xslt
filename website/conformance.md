@@ -45,7 +45,20 @@ change between the two versions.
 
 ## Running the suites yourself
 
-The suites are not part of the repository. Clone them into
+The quickest way is one command from a checkout of the repository. It clones
+the three suites at the commits the numbers above were measured against, runs
+the four measurements and prints a table of your results next to the
+published ones:
+
+```bash
+make conformance        # or: scripts/conformance.sh
+```
+
+Logs and the list of failing cases are written to `conformance-results/`.
+`--only xslt,xslt-full,qt3,xsd` runs a subset and `--latest` uses the current
+`HEAD` of each suite instead (results may then differ by a case or two).
+
+To do it by hand: the suites are not part of the repository. Clone them into
 `test/conformance/`; without them, the conformance tests skip.
 
 ```bash

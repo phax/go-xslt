@@ -9,9 +9,10 @@
 //   - project.Run  -> SavedRun, project.Manifest -> ProjectManifest,
 //     project.Ref  -> ProjectRef: the bare Go names are too generic once
 //     they sit next to everything else in this module.
-import { XsltService, ProjectService, LicenseService } from "../../bindings/github.com/tim-riep/go-xslt/desktop";
+import { XsltService, ProjectService, LicenseService, UpdateService } from "../../bindings/github.com/tim-riep/go-xslt/desktop";
 import {
   type License,
+  type UpdateInfo,
   type SchemaModel,
   type SchemaModelRequest,
   type SMNode,
@@ -155,4 +156,17 @@ export function duplicatePath(dir: string, rel: string) {
 
 export function listLicenses() {
   return LicenseService.List();
+}
+
+// ---- updates ----
+
+export type { UpdateInfo };
+
+export function appVersion() {
+  return UpdateService.AppVersion();
+}
+
+/** Asks GitHub for the latest release; failures come back in `error`. */
+export function checkForUpdate() {
+  return UpdateService.CheckForUpdate();
 }

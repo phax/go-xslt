@@ -52,31 +52,50 @@ are resolved, but they are not fully isolated at run time.
 
 ## Optional features
 
+XSLT 3.0 (section 26) makes several capabilities optional. Each is turned on
+per stylesheet with `Features` on the request; the zero value is a basic XSLT
+3.0 processor. Stylesheets compiled with different `Features` can run at the
+same time.
+
+```go
+res := engine.Transform(engine.Request{
+	Stylesheet: src,
+	Source:     xml,
+	Features: engine.Features{
+		SchemaAware:         true,
+		BackwardsCompatible: true,
+		StrictStreaming:     true,
+	},
+})
+```
+
+With `engine.Compile` the features belong to the compiled `Stylesheet` and
+apply to every run of it.
+
 ### Streaming
 
-Guaranteed streaming runs in bounded memory. It is always available; see
-[Streaming](/guide/streaming).
+Guaranteed streaming runs in bounded memory and is always available; see
+[Streaming](/guide/streaming). `StrictStreaming` decides what happens to a
+construct declared streamable that the analysis cannot prove streamable:
+with it, the compile fails with `XTSE3430`; without it, the construct runs
+with the whole document in memory.
 
-### Schema-awareness
+### Schema-awareness (`SchemaAware`)
 
 `xsl:import-schema`, `validation` and `type` attributes that really validate,
 typed input, and the sequence types `element(N, T)` and `schema-element(N)`.
 This follows the definition of a schema-aware processor in XSLT 3.0 section
 26.2: type errors are raised at run time. XPath's optional static typing
-feature is not implemented.
+feature is not implemented. Without the feature, `xsl:import-schema` is a
+compile error.
 
-### Backwards-compatible processing
+### Backwards-compatible processing (`BackwardsCompatible`)
 
-When an `[xsl:]version` below 2.0 is in scope, the XSLT 1.0 rules for
-comparisons, arithmetic and conversions apply to the instructions in that
-scope, as section 3.9.1 describes.
-
-::: info Turning the features on
-Schema-awareness and backwards-compatible processing are off by default.
-Their switches are currently internal and not yet part of the public `engine`
-API; the conformance tests turn them on. Without them, `xsl:import-schema` is
-rejected and a version below 2.0 is processed as 3.0.
-:::
+When an `[xsl:]version` below 2.0 is in scope, the XSLT 1.0 rules apply to the
+instructions in that scope, as section 3.9.1 describes: `xsl:value-of` takes
+the first item of a sequence, and comparisons, arithmetic and conversions
+follow XPath 1.0 (`'x' + 1` is `NaN`, not an error). Without the feature, a
+`version="1.0"` stylesheet runs under XSLT 3.0 rules.
 
 ## Not implemented
 
@@ -89,5 +108,5 @@ rejected and a version below 2.0 is processed as 3.0.
 
 `system-property('xsl:supports-streaming')`,
 `system-property('xsl:is-schema-aware')` and
-`system-property('xsl:supports-backwards-compatibility')` report what the
-processor currently claims.
+`system-property('xsl:supports-backwards-compatibility')` report the features
+the stylesheet was compiled with. `xsl:supports-streaming` is always `yes`.

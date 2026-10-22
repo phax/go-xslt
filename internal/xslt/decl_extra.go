@@ -350,7 +350,7 @@ func checkOneCallTemplate(ss *Stylesheet, el *xmltree.Node, name string) error {
 			// is a 3.0-era tightening, so backwards-compatible processing
 			// (the call-template instruction's own effective version < 2.0)
 			// reverts to the lenient behaviour (backwards-013).
-			if backwardsCompatRun() && inBackwardsCompatScope(el) {
+			if ss.feat.BackwardsCompatible && inBackwardsCompatScope(el) {
 				continue
 			}
 			return errAt(ch, "err:XTSE0680: xsl:call-template supplies non-tunnel parameter %q, but template %q has no matching non-tunnel xsl:param", pname, name)

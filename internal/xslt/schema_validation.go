@@ -9,7 +9,7 @@ package xslt
 // THREE PROPERTIES HOLD THIS TOGETHER, and each is load-bearing:
 //
 //   - INERT AT THE DEFAULT CLAIM. compileValidation returns a nil *valRequest
-//     unless schemaAwareRun() was true when the instruction was compiled, and
+//     unless the stylesheet was compiled schema-aware (Features.SchemaAware), and
 //     every runtime hook is a single `if req == nil { return nil }`. A
 //     non-schema-aware run therefore executes not one extra branch, which is
 //     what keeps the 7,790-case default baseline byte-identical rather than
@@ -205,7 +205,7 @@ func defaultValidationWalk(el *xmltree.Node) string {
 // instance, so a stylesheet carrying one is rejected whether or not the
 // instruction is ever reached.
 func compileValidation(el *xmltree.Node, kind valKind) (*valRequest, error) {
-	if !schemaAwareRun() || el == nil {
+	if el == nil || !featuresAt(el).SchemaAware {
 		return nil, nil
 	}
 	val, hasVal, typ, hasTyp := validationAttrsOf(el)
@@ -822,7 +822,7 @@ func (ss *Stylesheet) validateSourceDocument(doc *xmltree.Node, mode string, sch
 	default:
 		return nil
 	}
-	if doc == nil || !schemaAwareRun() {
+	if doc == nil || !ss.feat.SchemaAware {
 		return nil
 	}
 	root := xmltree.RootElement(doc)
@@ -1001,7 +1001,7 @@ func markUnassessed(n *xmltree.Node) {
 // replacing that long-standing diagnostic would change the default run for no
 // gain (validation-0110).
 func checkDefaultValidationValue(el *xmltree.Node, v string) error {
-	if !schemaAwareRun() {
+	if !featuresAt(el).SchemaAware {
 		return nil
 	}
 	switch strings.TrimSpace(v) {

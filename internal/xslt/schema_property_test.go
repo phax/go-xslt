@@ -89,22 +89,22 @@ func TestXTSE1660GatedOnTheClaim(t *testing.T) {
 // as strip for a basic processor, which is why they are never rejected).
 func TestValidationVocabulary(t *testing.T) {
 	for _, v := range []string{"strip", "preserve", "lax"} {
-		if !validationValueOK(v) {
+		if !validationValueOK(v, DefaultFeatures()) {
 			t.Errorf("validationValueOK(%q) = false, want true", v)
 		}
 	}
-	if validationValueOK("strict") {
+	if validationValueOK("strict", DefaultFeatures()) {
 		t.Error("validationValueOK(\"strict\") = true with the claim off")
 	}
-	if validationValueOK("nonsense") {
+	if validationValueOK("nonsense", DefaultFeatures()) {
 		t.Error("validationValueOK(\"nonsense\") = true")
 	}
 	SetSchemaAware(true)
 	defer SetSchemaAware(false)
-	if !validationValueOK("strict") {
+	if !validationValueOK("strict", DefaultFeatures()) {
 		t.Error("validationValueOK(\"strict\") = false with the claim on")
 	}
-	if validationValueOK("nonsense") {
+	if validationValueOK("nonsense", DefaultFeatures()) {
 		t.Error("validationValueOK(\"nonsense\") = true with the claim on")
 	}
 }

@@ -63,7 +63,7 @@ func (e *staticEnv) ResolveFunc(prefix, local string, args []xpath.Object, _ *xp
 			return nil, true, errAt(e.el, "err:XTDE1390: %q is not a valid QName", name)
 		}
 		uri, local := resolveAvailableName(e.el, name, "")
-		return staticSystemProperty(uri, local), true, nil
+		return staticSystemProperty(uri, local, featuresAt(e.el)), true, nil
 	case "function-available":
 		name := xpath.ToString(arg0(args))
 		if !isLexicalQName(name) {
@@ -114,7 +114,7 @@ func (e *staticEnv) ResolveFunc(prefix, local string, args []xpath.Object, _ *xp
 		uri, local := resolveAvailableName(e.el, name, "")
 		// A static expression is evaluated before any xsl:import-schema has been
 		// compiled, so only the built-in types can be in scope here.
-		return typeAvailable(nil, uri, local), true, nil
+		return typeAvailable(e.el, uri, local), true, nil
 	case "available-system-properties":
 		return availableSystemProperties(), true, nil
 	case "transform":
@@ -160,11 +160,11 @@ func (e *staticEnv) eval(expr string) (xpath.Object, error) {
 
 // staticSystemProperty answers fn:system-property in the static context, with
 // the same values the runtime implementation reports.
-func staticSystemProperty(uri, local string) string {
+func staticSystemProperty(uri, local string, f Features) string {
 	if uri != NS {
 		return ""
 	}
-	return xsltSystemProperty(local)
+	return xsltSystemProperty(local, f)
 }
 
 // settleStaticDecl records a static="yes" xsl:param's HOST-SUPPLIED value into

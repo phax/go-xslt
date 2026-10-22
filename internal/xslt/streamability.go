@@ -229,7 +229,7 @@ func (a *strmAnalyzer) strmInstr(in instruction, sc xpath.StreamContext) (xpath.
 	// roaming and free-ranging — a rule stated unconditionally, so a body it
 	// disqualifies is reported (streamable-141). Only where this run actually
 	// processes in that mode (the backwards-compatibility claim).
-	if shape.el != nil && backwardsCompatRun() && inBackwardsCompatScope(shape.el) {
+	if shape.el != nil && a.features().BackwardsCompatible && inBackwardsCompatScope(shape.el) {
 		sc.MarkDefinite()
 		return a.reject(shape.el, "%s is processed in XSLT 1.0 compatibility mode, which is roaming and free-ranging", shape.name())
 	}
@@ -651,7 +651,7 @@ func (a *strmAnalyzer) strmForEachGroup(sh strmShape, sc xpath.StreamContext) (x
 	// engine keeps streaming what it can genuinely stream. This is the same
 	// split strmEnforce/strmClaim already draws between "what must be
 	// rejected" and "what this engine actually does".
-	if strmEnforce.Load() {
+	if a.features().StrictStreaming {
 		for _, pat := range sh.pats {
 			if pat == nil {
 				continue
@@ -1426,8 +1426,9 @@ func strmSweepName(s xpath.Sweep) string {
 // needs before it will honour one.
 var strmEnforce atomic.Bool
 
-// SetEnforceStreamability turns the XTSE3430 static check on or off, and
-// returns the previous setting. Off (the default) means a stylesheet that
+// SetEnforceStreamability sets the process-wide default of
+// Features.StrictStreaming (the XTSE3430 static check), and returns the
+// previous setting. Off (the default) means a stylesheet that
 // declares streamability this processor cannot prove still compiles and runs
 // buffered.
 func SetEnforceStreamability(on bool) bool { return strmEnforce.Swap(on) }
@@ -1437,8 +1438,16 @@ func SetEnforceStreamability(on bool) bool { return strmEnforce.Swap(on) }
 // streamable modes (§19.8.10 + §19.8.3), its declared-streamable stylesheet
 // functions (§19.8.5), and the body of every xsl:source-document that asks for
 // streaming (§19.8.4.35). The name is the seam compile.go calls.
+// features returns the Features of the stylesheet under analysis.
+func (a *strmAnalyzer) features() Features {
+	if a.ss != nil {
+		return a.ss.feat
+	}
+	return featuresAt(a.el)
+}
+
 func strmCheckStreamableModes(ss *Stylesheet) error {
-	if !strmEnforce.Load() {
+	if !ss.feat.StrictStreaming {
 		return nil
 	}
 	names := map[string]bool{}

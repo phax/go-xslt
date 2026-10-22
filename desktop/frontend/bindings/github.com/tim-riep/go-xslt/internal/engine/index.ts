@@ -7,6 +7,7 @@ export {
 
 export type {
     Diagnostic,
+    Features,
     Request,
     Result,
     SecondaryOutput,

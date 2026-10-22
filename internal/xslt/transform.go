@@ -153,7 +153,7 @@ func (ss *Stylesheet) finishRun(eng *engine, root *xmltree.Node) (*RunResult, er
 		// principal result) whose principal stylesheet module's own
 		// outermost element declares version="1.0" defaults to the xml
 		// output method instead of xhtml.
-		if method == "xhtml" && eng.rdOutput == nil && backwardsCompatRun() && ss.principalVersionIsOne {
+		if method == "xhtml" && eng.rdOutput == nil && ss.feat.BackwardsCompatible && ss.principalVersionIsOne {
 			method = "xml"
 		}
 	}
@@ -917,7 +917,7 @@ func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string,
 	// When the initial mode is declared streamable the principal source is read
 	// as a stream, which gives global variables NO context item: one whose
 	// initializer navigates from it (count(//*)) is XPDY0002 (streamable-116).
-	if e.Template == "" && strmClaim.Load() {
+	if e.Template == "" && ss.feat.StreamingClaim {
 		im := e.Mode
 		if im == "" || im == "#default" {
 			im = ss.defaultMode
@@ -2043,7 +2043,7 @@ func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOver
 		schemaTypes = nil
 	}
 	var bc10 bool
-	if eng.sheet.hasBackwardsCompat && backwardsCompatRun() {
+	if eng.sheet.hasBackwardsCompat && eng.sheet.feat.BackwardsCompatible {
 		bc10 = inBackwardsCompatScope(el)
 	}
 	v, err := p.Eval(&xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: eng.resolveNamedFunction(env), ResolveLookupFunction: eng.resolveLookupFunction(env), Resolver: eng.resolver, DecimalFormats: eng.sheet.decimalFormatsFor(el), DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10})
@@ -3372,7 +3372,7 @@ func (eng *engine) execCallTemplate(n *callTemplate, r rt, out *xmltree.Node) er
 	// XSLT 1.0/2.0's lenient "an unwanted parameter is simply ignored"
 	// behaviour; see checkOneCallTemplate's identical, STATIC form of this
 	// same check for the reasoning.
-	bc10 := backwardsCompatRun() && inBackwardsCompatScope(n.el)
+	bc10 := eng.sheet.feat.BackwardsCompatible && inBackwardsCompatScope(n.el)
 	for _, p := range n.params {
 		if p.tunnel || bc10 {
 			continue
@@ -4100,7 +4100,7 @@ func (ss *Stylesheet) applyStripSpace(doc *xmltree.Node) {
 // parser itself, and applyStripSpace still runs afterward regardless of this
 // hook's answers, as a safety net.
 func (ss *Stylesheet) stripSpaceHook() xmltree.StripSpaceHook {
-	if len(ss.strip) == 0 || schemaAwareRun() {
+	if len(ss.strip) == 0 || ss.feat.SchemaAware {
 		return nil
 	}
 	return ss.spaceStripped
@@ -5545,7 +5545,7 @@ func (eng *engine) currentOutputURI() string {
 //     one there is. Reading the trigger as "< 2.0" would make version-018 and
 //     initial-template-081 contradict each other; this reading satisfies both.
 func checkBackwardsCompatVersion(el *xmltree.Node) error {
-	if el == nil || backwardsCompatRun() {
+	if el == nil || featuresAt(el).BackwardsCompatible {
 		// A run that claims genuine backwards-compatible processing
 		// (SetBackwardsCompatible) implements the relaxations instead of
 		// rejecting them — see inBackwardsCompatScope and evalWith's BC10
@@ -5568,7 +5568,7 @@ func checkBackwardsCompatVersion(el *xmltree.Node) error {
 // and an AVT's default, unseparated join; xsl:number/@value — see their own
 // call sites) that apply without going through an XPath evaluation at all.
 func (eng *engine) bc10At(el *xmltree.Node) bool {
-	return eng.sheet.hasBackwardsCompat && backwardsCompatRun() && inBackwardsCompatScope(el)
+	return eng.sheet.hasBackwardsCompat && eng.sheet.feat.BackwardsCompatible && inBackwardsCompatScope(el)
 }
 
 // noteEntryValue records an @as-typed template result as the transformation's
