@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
+	"github.com/tim-riep/go-xslt/internal/netfetch"
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 	"github.com/tim-riep/go-xslt/internal/xpath"
 )
@@ -213,7 +215,7 @@ func (ss *Stylesheet) finishRun(eng *engine, root *xmltree.Node) (*RunResult, er
 		return &RunResult{Method: method, Messages: eng.messages, Secondary: eng.secondary, Root: root, Value: eng.entryValue}, nil
 	}
 	out := xmltree.Serialize(root, so)
-	return &RunResult{Output: out, Method: method, Messages: eng.messages, Secondary: eng.secondary, Root: root, Value: eng.entryValue}, nil
+	return &RunResult{Output: out, Method: method, Messages: eng.messages, Secondary: eng.secondary, Root: root, Value: eng.entryValue, Indent: so.Indent}, nil
 }
 
 // serializeOptions maps a resolved xsl:output definition onto the serializer's
@@ -708,6 +710,24 @@ type Entry struct {
 	// 82d). Nil means "no override": the pre-existing default (ctxNode)
 	// applies, so every other caller of TransformEntry is unaffected.
 	GlobalContextItem xpath.Item
+	// Fetcher retrieves http and https URIs for document()/fn:doc/
+	// fn:unparsed-text/xsl:source-document under the host's network policy.
+	// Nil, the default, means no network access: such a URI is simply an
+	// unavailable resource (see internal/netfetch).
+	Fetcher *netfetch.Fetcher
+	// Files checks every local file the run reads (document()/fn:doc/
+	// fn:unparsed-text/collections/xsl:source-document and the DTDs they
+	// pull in). Nil uses the Stylesheet's own guard (see CompileFromFS),
+	// which is nil — no check — unless the compile was given one.
+	Files *fsaccess.Guard
+}
+
+// filesOr is the file guard a run with entry e uses.
+func (e Entry) filesOr(ss *Stylesheet) *fsaccess.Guard {
+	if e.Files != nil {
+		return e.Files
+	}
+	return ss.files
 }
 
 // TransformEntry runs the stylesheet from the given entry point.
@@ -763,7 +783,7 @@ func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string,
 	}()
 	var doc *xmltree.Node
 	if strings.TrimSpace(srcXML) != "" {
-		d, err := xmltree.ParseLenient11WithBaseStripSpace(srcXML, baseDir, ss.stripSpaceHook())
+		d, err := xmltree.ParseLenient11WithBaseStripSpaceFS(srcXML, baseDir, e.filesOr(ss), ss.stripSpaceHook())
 		if err != nil {
 			if pe, ok := err.(*xmltree.ParseError); ok {
 				return nil, nil, &CompileError{Line: pe.Line, Col: pe.Col, Msg: "source: " + pe.Msg}
@@ -790,6 +810,10 @@ func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string,
 		doc = d
 	}
 	res := newFileResolver(baseDir, ss)
+	res.net = e.Fetcher
+	if e.Files != nil {
+		res.files = e.Files
+	}
 	res.setCollections(e.Collections)
 	res.setDocValidation(e.DocValidation, e.SourceSchemas)
 	// paramSelects: e.ParamSelects was already being read by evalGlobal (see
@@ -1292,7 +1316,7 @@ func autoMethod(root *xmltree.Node) string {
 // redirects the result to a writer instead of a string — variadic so the
 // ordinary two call sites stay as they are.
 func (ss *Stylesheet) transformInto(srcXML string, params map[string]string, baseDir string, tgt ...*outTarget) (*engine, *xmltree.Node, error) {
-	doc, err := xmltree.ParseLenient11WithBaseStripSpace(srcXML, baseDir, ss.stripSpaceHook())
+	doc, err := xmltree.ParseLenient11WithBaseStripSpaceFS(srcXML, baseDir, ss.files, ss.stripSpaceHook())
 	if err != nil {
 		if pe, ok := err.(*xmltree.ParseError); ok {
 			return nil, nil, &CompileError{Line: pe.Line, Col: pe.Col, Msg: "source: " + pe.Msg}
@@ -1573,6 +1597,10 @@ type RunResult struct {
 	Secondary []SecondaryDoc
 	// Root is the principal result tree behind Output — see SecondaryDoc.Root.
 	Root *xmltree.Node
+	// Indent reports that the principal result was serialized with
+	// indent="yes" (a test driver may then ignore the indentation
+	// whitespace, which the serializer chooses).
+	Indent bool
 	// Value is the RAW sequence an initial-function entry point returned,
 	// before it was projected into the result tree. Output can only show that
 	// projection (a two-item sequence becomes one joined string), so a caller

@@ -239,7 +239,7 @@ func (n *rdResultDocument) rdEffectiveOutput(eng *engine, r rt) (Output, error) 
 			return cfg, err
 		}
 		if strings.TrimSpace(pd) != "" {
-			if err := loadParameterDocument(&cfg, n.el, eng.baseDir, pd); err != nil {
+			if err := loadParameterDocument(&cfg, n.el, eng.baseDir, pd, eng.sheet.files); err != nil {
 				return cfg, err
 			}
 		}

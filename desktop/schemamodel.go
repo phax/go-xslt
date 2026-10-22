@@ -10,10 +10,13 @@ import (
 
 // SchemaModelRequest asks for the resolved structure of a schema: Schemas[0]
 // is the entry document, relative xs:import/xs:include locations resolve
-// against BaseDir.
+// against BaseDir. Schema files are read only inside ProjectDir (BaseDir
+// itself when ProjectDir is empty): a schema cannot pull in files from
+// elsewhere on the disk.
 type SchemaModelRequest struct {
-	Schemas []string `json:"schemas"`
-	BaseDir string   `json:"baseDir"`
+	Schemas    []string `json:"schemas"`
+	BaseDir    string   `json:"baseDir"`
+	ProjectDir string   `json:"projectDir"`
 	// Version is "1.0" (default) or "1.1".
 	Version string `json:"version"`
 }
@@ -93,7 +96,11 @@ func (s *XsltService) SchemaStructure(req SchemaModelRequest) SchemaModel {
 	if req.Version == "1.1" {
 		v = xsd.V11
 	}
-	sch, diags := xsd.Compile(xsd.Request{Schemas: req.Schemas, BaseDir: req.BaseDir, Version: v})
+	var sec xsd.Security
+	if req.ProjectDir != "" {
+		sec.AllowedDirs = []string{req.ProjectDir}
+	}
+	sch, diags := xsd.Compile(xsd.Request{Schemas: req.Schemas, BaseDir: req.BaseDir, Version: v, Security: sec})
 	out := SchemaModel{Elements: []*SMNode{}, Attributes: []SMAttr{}, GlobalTypes: []string{},
 		Types: map[string]*SMType{}, Diagnostics: diags}
 	if out.Diagnostics == nil {

@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/tim-riep/go-xslt/internal/netfetch"
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 	"github.com/tim-riep/go-xslt/internal/xpath"
 	"github.com/tim-riep/go-xslt/internal/xslt"
@@ -497,6 +498,7 @@ func (c *ssCache) get(path string, static map[string]string, pkgs []xslt.Package
 // ---- running one case ----
 
 type xsltResult struct {
+	failNames        []string // every failing case, for checkAcceptedFailures
 	pass, fail, skip int
 	skipReasons      map[string]int
 	fails            []string
@@ -618,6 +620,7 @@ func runXSLTSet(setFile string, cache *ssCache, verbose bool) *xsltResult {
 			r.skipReasons[reason]++
 		default:
 			r.fail++
+			r.failNames = append(r.failNames, tc.Name)
 			if byVer {
 				r.failByVer[xsltSpecVersion(set.Deps, tc.Deps)]++
 			}
@@ -904,6 +907,12 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 	// as well as regression-prone. "skip" is neither strict nor lax and so
 	// passes through as no validation, exactly as the enumeration intends.
 	e := xslt.Entry{Params: map[string]string{}, SourceURI: srcURI}
+	// XSLT30_NETWORK=1 lets the cases that read live web pages
+	// (unparsed-text-2002/2003) go online. Off by default: a run must not
+	// depend on the network, and those pages change (see CLAUDE.md).
+	if os.Getenv("XSLT30_NETWORK") != "" {
+		e.Fetcher = netfetch.New(netfetch.Policy{AllowNetwork: true})
+	}
 	if srcStreaming && xsltFullHarness() {
 		e.SourceStreamed = true
 	}
@@ -1121,6 +1130,7 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 	}
 
 	var output string
+	var indented string // the output method, when the principal result was serialized with indent="yes"
 	var runErr error
 	var secondary []xslt.SecondaryDoc
 	var messages []string
@@ -1141,6 +1151,9 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 			runErr = terr
 		} else {
 			output = treeAssertionOutput(tc, rr)
+			if rr.Indent {
+				indented = rr.Method
+			}
 			secondary = rr.Secondary
 			messages = rr.Messages
 			entryValue = rr.Value
@@ -1160,7 +1173,7 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 	// The <result> element's own bindings sit between the test-set root's and
 	// each assert's, and are inherited by every assertion beneath it.
 	resultNS := withNSAttrs(fotsAssert{Attr: tc.Result.Attr}, setNSAttrs(set))
-	return checkXSLTAssert(tc.Result.Children[0], output, runErr, dir, "", secondary, resultNS, messages, entryValue, entryVar, assertSchema)
+	return checkXSLTAssert(tc.Result.Children[0], output, runErr, dir, "", secondary, resultNS, messages, entryValue, entryVar, assertSchema, indented)
 }
 
 // treeAssertionOutput returns the text the assertions should be checked
@@ -1286,7 +1299,7 @@ type assertSchemaHooks struct {
 	resolver xpath.SchemaTypeResolver
 }
 
-func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI string, secondary []xslt.SecondaryDoc, ns map[string]string, messages []string, entryValue xpath.Object, entryVar string, assertSchema assertSchemaHooks) (string, string) {
+func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI string, secondary []xslt.SecondaryDoc, ns map[string]string, messages []string, entryValue xpath.Object, entryVar string, assertSchema assertSchemaHooks, indented string) (string, string) {
 	ns = withNSAttrs(a, ns)
 	kind := a.XMLName.Local
 	switch kind {
@@ -1319,7 +1332,7 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 		for _, msg := range messages {
 			// The message is the thing asserted on: no raw principal-result
 			// value stands in for it (see the markup-free case of "assert").
-			if st, _ := checkXSLTAssert(a.Children[0], msg, nil, dir, baseURI, secondary, ns, messages, nil, entryVar, assertSchema); st == "pass" {
+			if st, _ := checkXSLTAssert(a.Children[0], msg, nil, dir, baseURI, secondary, ns, messages, nil, entryVar, assertSchema, ""); st == "pass" {
 				return "pass", ""
 			}
 		}
@@ -1337,7 +1350,7 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 		return "fail", "expected-serialization-error"
 	case "all-of":
 		for i, c := range a.Children {
-			if st, reason := checkXSLTAssert(c, output, runErr, dir, baseURI, secondary, ns, messages, entryValue, entryVar, assertSchema); st != "pass" {
+			if st, reason := checkXSLTAssert(c, output, runErr, dir, baseURI, secondary, ns, messages, entryValue, entryVar, assertSchema, indented); st != "pass" {
 				if os.Getenv("XSLT30_DIFF") != "" {
 					return "fail", fmt.Sprintf("all-of[%d] %s", i, reason)
 				}
@@ -1348,7 +1361,7 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 	case "any-of":
 		var reasons []string
 		for _, c := range a.Children {
-			st, rs := checkXSLTAssert(c, output, runErr, dir, baseURI, secondary, ns, messages, entryValue, entryVar, assertSchema)
+			st, rs := checkXSLTAssert(c, output, runErr, dir, baseURI, secondary, ns, messages, entryValue, entryVar, assertSchema, indented)
 			if st == "pass" {
 				return "pass", ""
 			}
@@ -1360,7 +1373,7 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 		return "fail", "any-of"
 	case "not":
 		if len(a.Children) > 0 {
-			if st, _ := checkXSLTAssert(a.Children[0], output, runErr, dir, baseURI, secondary, ns, messages, entryValue, entryVar, assertSchema); st == "pass" {
+			if st, _ := checkXSLTAssert(a.Children[0], output, runErr, dir, baseURI, secondary, ns, messages, entryValue, entryVar, assertSchema, indented); st == "pass" {
 				return "fail", "not"
 			}
 			return "pass", ""
@@ -1386,6 +1399,18 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 	case "assert-serialization":
 		exp := assertExpected(a, dir)
 		if serialEqual(exp, output, a.attr("normalize-space") == "true") {
+			return "pass", ""
+		}
+		// The catalog schema lets a driver "ignore differences in the
+		// serialization that are known to be irrelevant (that is, capable of
+		// being produced by a conformant implementation)". With indent="yes"
+		// Serialization 3.1 leaves some whitespace to the serializer, and
+		// only that is ignored, per method: xml (§5.1.4) may add whitespace
+		// between tags; xhtml/html (§6.1.4, §7.4.3) may also add or remove it
+		// next to existing whitespace, so runs are compared collapsed
+		// (validation-0201: Saxon indents by three spaces and lengthens a
+		// whitespace run, this engine indents by two).
+		if indented != "" && serialEqual(stripIndentation(exp, indented), stripIndentation(output, indented), false) {
 			return "pass", ""
 		}
 		if os.Getenv("XSLT30_DIFF") != "" {
@@ -1461,7 +1486,7 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 		if sec.Root != nil && sec.Root.Kind == xmltree.KindDocument && assertTreeNeedsPSVI(a.Children[0]) {
 			secRaw = xpath.NodeSet{sec.Root}
 		}
-		return checkXSLTAssert(a.Children[0], sec.Content, nil, dir, secBase, secondary, ns, messages, secRaw, "", assertSchema)
+		return checkXSLTAssert(a.Children[0], sec.Content, nil, dir, secBase, secondary, ns, messages, secRaw, "", assertSchema, "")
 	case "assert-eq":
 		// The result, atomized, equals the given XPath value. For an XSLT
 		// test the result is the serialized output, so its string value is
@@ -1809,6 +1834,22 @@ func wrapFragment(s string) string {
 	return "<_x_>" + stripDecl(s) + "</_x_>"
 }
 
+// reIndentation matches a whitespace-only run between two tags.
+var reIndentation = regexp.MustCompile(`>[ \t\r\n]+<`)
+
+// reWhitespaceRun matches a run of XML whitespace.
+var reWhitespaceRun = regexp.MustCompile(`[ \t\r\n]+`)
+
+// stripIndentation removes the whitespace indent="yes" leaves to the
+// serializer of the given method: whitespace-only runs between tags, and for
+// xhtml/html also the length of every other whitespace run.
+func stripIndentation(s, method string) string {
+	if method == "xhtml" || method == "html" {
+		s = reWhitespaceRun.ReplaceAllString(s, " ")
+	}
+	return reIndentation.ReplaceAllString(s, "><")
+}
+
 func serialEqual(expected, actual string, normWS bool) bool {
 	e, a := expected, actual
 	if normWS {
@@ -1907,6 +1948,13 @@ func TestXSLT30(t *testing.T) {
 	if only != "" || os.Getenv("XSLT30_FAILS") != "" {
 		fmt.Print(b.String())
 	}
+	var failNames []string
+	for _, r := range results {
+		if r != nil {
+			failNames = append(failNames, r.failNames...)
+		}
+	}
+	checkAcceptedFailures(t, "xslt30.md", failNames)
 
 	ran := pass + fail
 	rate := 0.0

@@ -40,6 +40,8 @@ pre-skipped. Test-sets run in parallel (per-worker doc cache).
 (non-parallel) test-set execution. `QT3_FAILDUMP=1` (with
 `grep -o 'FAIL .*'`, unanchored — the log line always carries a
 `file:line:` prefix) dumps every fail name for a by-name regression diff.
+`QT3_NETWORK=1` lets a URI the environment does not map to a local file be
+fetched for real (off by default, so a run never depends on the network).
 Results are summarised in `tools/qt3_results.txt` and `tools/qt3_byset.csv`.
 
 **Current: ~99.6% pass** of the applicable cases. Deliberately-unsupported
@@ -78,7 +80,9 @@ appends the actual error message to an `errored` failure reason;
 actually failed instead of just "all-of"/"any-of"; `XSLT30_PANICDUMP=1`
 prints a stack trace for a case that panics; `XSLT30_STRICTCODE=1`
 additionally requires an expected-error assertion's catalog `@code` to
-match, not just that some error was raised. Results are summarised in
+match, not just that some error was raised. `XSLT30_NETWORK=1` lets the
+cases that read live web pages go online (off by default, so a run never
+depends on the network). Results are summarised in
 `tools/xslt30_results.txt` and `tools/xslt30_byset.csv`.
 
 **Current: ~98.8% pass (default), ~98.9% (`XSLT30_FULL=1`)** of the applicable
@@ -91,3 +95,10 @@ Hand-written tests only cover what we think to test — e.g. all explicit XPath
 axes (`ancestor::`, `parent::`) were once broken while 117 unit tests passed,
 because none used them. Running the official suites exercises code paths we would
 never enumerate by hand.
+
+## Failing cases must be documented
+
+Each harness compares its failing cases with
+`docs/accepted-failures/<suite>.md` and fails with "undocumented failures"
+when one is not named there. Fix the case, or add it to that file with its
+reason (see `docs/accepted-failures/README.md`).

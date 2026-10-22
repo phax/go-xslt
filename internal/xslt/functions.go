@@ -2,6 +2,7 @@ package xslt
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -348,6 +349,9 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 				if home := rootOfNode(env.el); home != nil && (resolved == "" || resolved == home.Base()) {
 					// Read as a SOURCE document: stripped per xsl:strip-space
 					// (eng.homeDoc — where-populated-100).
+					if err := checkXMLFragment(frag); err != nil {
+						return nil, true, err
+					}
 					out = appendDocResult(out, eng.homeDoc(home), frag)
 					continue
 				}
@@ -358,6 +362,9 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 			d, ok := eng.resolver.ResolveDoc(resolved)
 			if !ok {
 				return nil, true, errAt(nil, "err:XTDE1460: document(%q) could not be retrieved", uri)
+			}
+			if err := checkXMLFragment(frag); err != nil {
+				return nil, true, err
 			}
 			out = appendDocResult(out, d, frag)
 		}
@@ -1418,6 +1425,24 @@ func nodeInSubtree(n, top *xmltree.Node) bool {
 // or — when the URI carried a fragment identifier — the element that fragment
 // identifies. An unresolvable fragment contributes nothing (it is not an
 // error: id-001's document('#non-existent', /)).
+// reSchemePointer matches an XPointer scheme-based pointer: one or more
+// SchemeName(SchemeData) parts, such as element(/1/2) or xpointer(id('a')).
+var reSchemePointer = regexp.MustCompile(`^(\s*[\pL_][\pL\pN_.:\-]*\(.*\)\s*)+$`)
+
+// checkXMLFragment implements the syntax half of XTDE1160 for the XML media
+// types this processor reads: a fragment identifier of an XML resource is an
+// XPointer (RFC 7303 §5), i.e. either a shorthand pointer — which must be an
+// NCName — or scheme-based. Anything else "does not conform to the rules for
+// fragment identifiers for that media type" (XSLT 3.0 §20.1): error-1160a's
+// #123456789 starts with a digit. A well-formed pointer that selects nothing
+// is not an error; the REC lets a fragment select "zero or more nodes".
+func checkXMLFragment(frag string) error {
+	if frag == "" || isNCName(frag) || reSchemePointer.MatchString(frag) {
+		return nil
+	}
+	return errAt(nil, "err:XTDE1160: the fragment identifier %q is not a valid XPointer for an XML resource", frag)
+}
+
 func appendDocResult(out xpath.NodeSet, d *xmltree.Node, frag string) xpath.NodeSet {
 	if frag == "" {
 		return append(out, d)

@@ -450,7 +450,9 @@ func (c *compiler) evalStaticAVT(el *xmltree.Node, value string) (result string,
 // with an empty URI reads the stylesheet module itself.
 func (c *compiler) staticResolver() xpath.ResourceResolver {
 	if c.staticRes == nil {
-		c.staticRes = newFileResolver(c.baseDir, nil)
+		r := newFileResolver(c.baseDir, nil)
+		r.files = c.files
+		c.staticRes = r
 	}
 	return c.staticRes
 }

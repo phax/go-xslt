@@ -1,7 +1,7 @@
 package xmltree
 
 import (
-	"os"
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,7 +22,7 @@ import (
 // UnparsedEntities returns the names of the unparsed (NDATA) entities declared
 // in the document's DOCTYPE internal subset — the xs:ENTITY value space.
 func UnparsedEntities(src string) map[string]bool {
-	decls := unparsedEntityDecls(src, "")
+	decls := unparsedEntityDecls(src, "", nil)
 	if len(decls) == 0 {
 		return nil
 	}
@@ -45,7 +45,7 @@ type UnparsedEntity struct {
 // non-empty — the external SYSTEM subset after it, so the internal declaration
 // of a name wins. Within one subset the FIRST declaration of a name is binding
 // (XML §4.2, unparsed-entity-50).
-func unparsedEntityDecls(src, baseDir string) map[string]UnparsedEntity {
+func unparsedEntityDecls(src, baseDir string, files *fsaccess.Guard) map[string]UnparsedEntity {
 	out := map[string]UnparsedEntity{}
 	if sub, ok := internalSubset(src); ok {
 		scanUnparsedEntityDecls(sub, out)
@@ -56,7 +56,7 @@ func unparsedEntityDecls(src, baseDir string) map[string]UnparsedEntity {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(baseDir, path)
 			}
-			if data, err := os.ReadFile(path); err == nil {
+			if data, err := files.ReadFile(path); err == nil {
 				scanUnparsedEntityDecls(string(data), out)
 			}
 		}
@@ -117,7 +117,7 @@ func scanUnparsedEntityDecls(sub string, out map[string]UnparsedEntity) {
 }
 
 func internalEntities(src string) map[string]string {
-	return documentEntities(src, "")
+	return documentEntities(src, "", nil)
 }
 
 // documentEntities extracts a document's general entity declarations: the
@@ -131,10 +131,10 @@ func internalEntities(src string) map[string]string {
 // support existed. Internal declarations take precedence over external ones
 // (scanEntityDecls never overrides an already-seen name), matching the XML
 // rule that the internal subset wins over the external one.
-func documentEntities(src, baseDir string) map[string]string {
+func documentEntities(src, baseDir string, files *fsaccess.Guard) map[string]string {
 	ents := map[string]string{}
 	if sub, ok := internalSubset(src); ok {
-		scanEntityDecls(expandParamEntities(sub, baseDir), ents)
+		scanEntityDecls(expandParamEntities(sub, baseDir, files), ents)
 	}
 	if baseDir != "" {
 		if sysID, ok := externalDTDSystemID(src); ok {
@@ -142,7 +142,7 @@ func documentEntities(src, baseDir string) map[string]string {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(baseDir, path)
 			}
-			if data, err := os.ReadFile(path); err == nil {
+			if data, err := files.ReadFile(path); err == nil {
 				scanEntityDecls(string(data), ents)
 			}
 		}
@@ -396,13 +396,13 @@ func isXMLSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\r' || c ==
 // resolved against the subset they were declared in. NDATA (unparsed)
 // entities are excluded — they are never expanded — as are parameter
 // entities and internal ones (handled by documentEntities).
-func externalGeneralEntityDecls(src, baseDir string) map[string]string {
+func externalGeneralEntityDecls(src, baseDir string, files *fsaccess.Guard) map[string]string {
 	if baseDir == "" {
 		return nil
 	}
 	out := map[string]string{}
 	if sub, ok := internalSubset(src); ok {
-		scanExternalEntityDecls(sub, baseDir, out)
+		scanExternalEntityDecls(sub, baseDir, files, out)
 	}
 	if sysID, ok := externalDTDSystemID(src); ok {
 		path := sysID
@@ -412,8 +412,8 @@ func externalGeneralEntityDecls(src, baseDir string) map[string]string {
 		if abs, err := filepath.Abs(path); err == nil {
 			path = abs
 		}
-		if data, err := os.ReadFile(path); err == nil {
-			scanExternalEntityDecls(string(data), filepath.Dir(path), out)
+		if data, err := files.ReadFile(path); err == nil {
+			scanExternalEntityDecls(string(data), filepath.Dir(path), files, out)
 		}
 	}
 	if len(out) == 0 {
@@ -422,7 +422,7 @@ func externalGeneralEntityDecls(src, baseDir string) map[string]string {
 	return out
 }
 
-func scanExternalEntityDecls(text, baseDir string, out map[string]string) {
+func scanExternalEntityDecls(text, baseDir string, files *fsaccess.Guard, out map[string]string) {
 	for i := 0; ; {
 		j := strings.Index(text[i:], "<!ENTITY")
 		if j < 0 {
@@ -484,11 +484,11 @@ func scanExternalEntityDecls(text, baseDir string, out map[string]string) {
 // case — has to be spliced into the source before tokenizing. Each
 // replacement's own text declaration is stripped, and expansion repeats so an
 // entity referencing another one resolves too.
-func expandExternalEntities(src, baseDir string) (string, []entitySpan) {
-	paths := externalGeneralEntityDecls(src, baseDir)
+func expandExternalEntities(src, baseDir string, files *fsaccess.Guard) (string, []entitySpan) {
+	paths := externalGeneralEntityDecls(src, baseDir, files)
 	reps := map[string]string{}
 	for name, path := range paths {
-		b, err := os.ReadFile(path)
+		b, err := files.ReadFile(path)
 		if err != nil {
 			continue
 		}
@@ -505,7 +505,7 @@ func expandExternalEntities(src, baseDir string) (string, []entitySpan) {
 	// (whose values ARE pre-expanded, as verbatim substitution needs).
 	if sub, ok := internalSubset(src); ok {
 		raw := map[string]string{}
-		scanEntityDecls(expandParamEntities(sub, baseDir), raw)
+		scanEntityDecls(expandParamEntities(sub, baseDir, files), raw)
 		for name, val := range raw {
 			if _, ok := reps[name]; ok {
 				continue
@@ -629,7 +629,7 @@ func stripTextDecl(s string) string {
 // external one the contents of the file it names (resolved against baseDir).
 // This is what makes declarations living in a separate .dtd reachable from the
 // internal subset (whitespace-011: "<!ENTITY % ext SYSTEM 'entity.ent'>%ext;").
-func expandParamEntities(sub, baseDir string) string {
+func expandParamEntities(sub, baseDir string, files *fsaccess.Guard) string {
 	if !strings.Contains(sub, "%") {
 		return sub
 	}
@@ -682,7 +682,7 @@ func expandParamEntities(sub, baseDir string) string {
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(baseDir, path)
 		}
-		if data, err := os.ReadFile(path); err == nil {
+		if data, err := files.ReadFile(path); err == nil {
 			vals[name] = stripTextDecl(string(data))
 		}
 	}

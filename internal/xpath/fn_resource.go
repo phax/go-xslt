@@ -102,6 +102,14 @@ func retrieveText(c *Context, uri string) (string, error) {
 	if c.Resolver == nil {
 		return "", fmt.Errorf("err:FOUT1170: cannot retrieve unparsed text %q", uri)
 	}
+	// F&O 3.1 fn:unparsed-text: "A dynamic error is raised [err:FOUT1170] if
+	// $href contains a fragment identifier" — text has no fragments to
+	// address, so the resource is not retrieved at all
+	// (fn-unparsed-text-013/014, which only passed offline because
+	// www.example.org could not be reached).
+	if strings.ContainsRune(uri, '#') {
+		return "", fmt.Errorf("err:FOUT1170: unparsed text URI %q contains a fragment identifier", uri)
+	}
 	s, ok := c.Resolver.ResolveText(uri)
 	if !ok {
 		return "", fmt.Errorf("err:FOUT1170: cannot retrieve unparsed text %q", uri)

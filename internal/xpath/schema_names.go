@@ -171,6 +171,25 @@ type SchemaListTypeCaster interface {
 		item AtomType, itemName *xmltree.SchemaTypeName, isList bool, err error)
 }
 
+// SchemaUnionMemberCaster is an OPTIONAL extension of Context.SchemaTypes,
+// type-asserted like the others.
+//
+// An atomic value's type annotation is always an atomic type, never a union
+// (XDM 3.1 §2.7.4): casting to a union yields an instance of the member type
+// that accepted the value (XPath 3.1 §3.14.2, XSD Part 2 §4.1.2). So a value
+// cast to union(xs:double, xs:decimal) is an xs:double, and it stays an
+// instance of any other union that has xs:double as a member (override-f-031).
+type SchemaUnionMemberCaster interface {
+	// UnionCastMember reports whether t names a union type and, if so, which
+	// member accepts lexical: builtin is true for a built-in member (whose
+	// primitive is then the value's whole type), member names a user-defined
+	// one. ok is false when t is no union, or the accepting member cannot be
+	// named (anonymous, or itself a list or union), which leaves the caller
+	// with its existing annotation.
+	UnionCastMember(t xmltree.SchemaTypeName, lexical string, at *xmltree.Node) (
+		member xmltree.SchemaTypeName, builtin, ok bool)
+}
+
 // SchemaDocumentValidator is a fourth OPTIONAL extension of
 // Context.SchemaTypes, type-asserted exactly like the resolvers above.
 //
@@ -321,6 +340,14 @@ func castToNamedSchemaType(it Item, name xmltree.SchemaTypeName, ctx *Context) (
 		return nil, err
 	}
 	n := name
+	if uc, ok := c.(SchemaUnionMemberCaster); ok {
+		if m, builtin, ok := uc.UnionCastMember(name, lex, prefixCarrier(lex, ctx)); ok {
+			if builtin {
+				return v, nil
+			}
+			n = m
+		}
+	}
 	return v.withSchemaType(&n), nil
 }
 

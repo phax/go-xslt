@@ -2,6 +2,7 @@ package xsd
 
 import (
 	"errors"
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,7 +16,14 @@ import (
 // A handful of not-yet-handled constructs yield ErrUnsupported; anything
 // genuinely malformed yields a normal invalid error.
 func Compile(docs []string, baseDir string, v Version) (*Schema, error) {
-	return compile(docs, baseDir, v, false)
+	return compile(docs, baseDir, v, false, nil)
+}
+
+// CompileFS is Compile with every schema document it reads (xs:include,
+// xs:import, xs:redefine, xs:override, and later the instance's
+// xsi:schemaLocation hints) checked by files; nil checks nothing.
+func CompileFS(docs []string, baseDir string, v Version, files *fsaccess.Guard) (*Schema, error) {
+	return compile(docs, baseDir, v, false, files)
 }
 
 // CompileWithDocs is Compile that also keeps what a tool reading the component
@@ -23,10 +31,15 @@ func Compile(docs []string, baseDir string, v Version) (*Schema, error) {
 // and types (see Documentation), and the source text of pattern facets. It
 // compiles the same components, so the verdicts are identical.
 func CompileWithDocs(docs []string, baseDir string, v Version) (*Schema, error) {
-	return compile(docs, baseDir, v, true)
+	return compile(docs, baseDir, v, true, nil)
 }
 
-func compile(docs []string, baseDir string, v Version, keepDocs bool) (*Schema, error) {
+// CompileWithDocsFS is CompileWithDocs with CompileFS's file check.
+func CompileWithDocsFS(docs []string, baseDir string, v Version, files *fsaccess.Guard) (*Schema, error) {
+	return compile(docs, baseDir, v, true, files)
+}
+
+func compile(docs []string, baseDir string, v Version, keepDocs bool, files *fsaccess.Guard) (*Schema, error) {
 	if len(docs) == 0 {
 		return nil, ErrUnsupported
 	}
@@ -42,6 +55,7 @@ func compile(docs []string, baseDir string, v Version, keepDocs bool) (*Schema, 
 	sch := &Schema{
 		version:      v,
 		baseDir:      baseDir,
+		files:        files,
 		sourceDocs:   append([]string{}, docs...),
 		elements:     map[xname]*ElementDecl{},
 		types:        map[xname]Type{},

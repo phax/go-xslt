@@ -32,6 +32,7 @@ import (
 	"testing"
 	"unicode/utf16"
 
+	"github.com/tim-riep/go-xslt/internal/netfetch"
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 	"github.com/tim-riep/go-xslt/internal/xpath"
 	"github.com/tim-riep/go-xslt/internal/xsd"
@@ -415,6 +416,12 @@ func (a *qt3SchemaAdapter) CastToSchemaTypeIn(t xmltree.SchemaTypeName, lexical 
 	return a.sch.CastToSchemaTypeIn(t, lexical, at)
 }
 
+// UnionCastMember implements xpath.SchemaUnionMemberCaster.
+func (a *qt3SchemaAdapter) UnionCastMember(t xmltree.SchemaTypeName, lexical string, at *xmltree.Node) (
+	xmltree.SchemaTypeName, bool, bool) {
+	return a.sch.UnionCastMember(t, lexical, at)
+}
+
 // CastToSchemaListType implements xpath.SchemaListTypeCaster.
 func (a *qt3SchemaAdapter) CastToSchemaListType(t xmltree.SchemaTypeName, lexical string, at *xmltree.Node) (
 	xpath.AtomType, *xmltree.SchemaTypeName, bool, error) {
@@ -688,6 +695,7 @@ func skipReason(deps []fotsDep) string {
 // setResult accumulates the outcome of one test-set.
 type setResult struct {
 	name             string
+	failNames        []string // every failing case, for checkAcceptedFailures
 	pass, fail, skip int
 	skipReasons      map[string]int
 	fails            []string // "name [reason] expr / want" for QT3_ONLY logging
@@ -778,6 +786,7 @@ func runSet(root, file string, globalEnv map[string]fotsEnv, verbose bool) *setR
 			r.skipReasons[reason]++
 		default:
 			r.fail++
+			r.failNames = append(r.failNames, tc.Name)
 			if verbose {
 				ex := tc.Test.Expr
 				if len(ex) > 90 {
@@ -883,6 +892,13 @@ func TestQT3(t *testing.T) {
 	}
 	t.Logf("QT3 results: %d cases | ran %d (pass %d, fail %d = %.1f%% pass) | skipped %d",
 		total, ran, pass, fail, rate, skip)
+	var failNames []string
+	for _, r := range results {
+		if r != nil {
+			failNames = append(failNames, r.failNames...)
+		}
+	}
+	checkAcceptedFailures(t, "qt3.md", failNames)
 
 	// Per-set CSV for tracking conformance progress across fixes.
 	if os.Getenv("QT3_ONLY") == "" {
@@ -948,10 +964,18 @@ type fotsResolver struct {
 	// collection URI ("" = the default collection) -> the absolute paths of
 	// its member documents.
 	collections map[string][]string
+	// net fetches http(s) URIs when QT3_NETWORK is set; nil otherwise.
+	net *netfetch.Fetcher
 }
 
 func newFotsResolver(env fotsEnv) *fotsResolver {
 	r := &fotsResolver{base: env.base, byURI: map[string]string{}, encoding: map[string]string{}, docs: map[string]*xmltree.Node{}}
+	// QT3_NETWORK=1 lets a URI the environment does not map to a local file
+	// be fetched for real (fn-unparsed-text-054a, feature remote_http). Off
+	// by default: a run must not depend on the network.
+	if os.Getenv("QT3_NETWORK") != "" {
+		r.net = netfetch.New(netfetch.Policy{AllowNetwork: true})
+	}
 	for _, res := range env.Resources {
 		if res.URI == "" || res.File == "" {
 			continue
@@ -1072,6 +1096,11 @@ func (r *fotsResolver) textPath(uri string) (string, bool) {
 func (r *fotsResolver) ResolveText(uri string) (string, bool) {
 	p, ok := r.textPath(uri)
 	if !ok {
+		if r.net != nil && netfetch.IsNetworkURI(uri) {
+			if resp, err := r.net.Fetch(uri); err == nil {
+				return xmltree.DecodeRetrievedTextAs(resp.Body, resp.Charset), true
+			}
+		}
 		return "", false
 	}
 	b, err := os.ReadFile(p)

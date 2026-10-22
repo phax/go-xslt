@@ -13,6 +13,8 @@ import (
 type (
 	Request          = engine.Request
 	TransformRequest = engine.TransformRequest
+	// Security controls network access of a run; the zero value allows none.
+	Security = engine.Security
 	// Stylesheet is a stylesheet compiled once by Compile and run many times.
 	Stylesheet      = engine.Stylesheet
 	Result          = engine.Result

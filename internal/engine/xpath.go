@@ -22,6 +22,9 @@ type XPathRequest struct {
 	// Empty disables disk resolution (those functions report the resource as
 	// unavailable rather than erroring).
 	BaseDir string `json:"baseDir"`
+	// Security limits which files and network resources the expression may
+	// read; the zero value allows files under BaseDir only, and no network.
+	Security Security `json:"security"`
 }
 
 // XPathItem is one item of the result sequence.
@@ -86,15 +89,22 @@ func runXPath(req XPathRequest) XPathResult {
 		// ParseLenient11WithBase (not the plain Parse EvalXPath used before)
 		// so a DOCTYPE's external SYSTEM subset resolves against BaseDir too,
 		// consistent with how the XSLT engine parses its own source document.
-		doc, perr := xmltree.ParseLenient11WithBase(req.Source, req.BaseDir)
+		doc, perr := xmltree.ParseLenient11WithBaseFS(req.Source, req.BaseDir, FileGuard(req.Security, req.BaseDir))
 		if perr != nil {
 			return XPathResult{Diagnostics: []Diagnostic{xpathDiag("parse", perr)}}
 		}
 		ctx.Node = doc
 	}
 	if strings.TrimSpace(req.BaseDir) != "" {
-		ctx.Resolver = newStandaloneResolver(req.BaseDir)
+		r := newStandaloneResolver(req.BaseDir)
+		r.net = req.Security.fetcher()
+		r.files = FileGuard(req.Security, req.BaseDir)
+		ctx.Resolver = r
 		ctx.BaseURI = baseDirURI(req.BaseDir)
+	} else if f := req.Security.fetcher(); f != nil {
+		// No directory, but the network is allowed: absolute http(s) URIs
+		// still resolve, and nothing is ever read from disk.
+		ctx.Resolver = &standaloneResolver{net: f, noDisk: true}
 	}
 	v, eerr := parsed.Eval(ctx)
 	if eerr != nil {

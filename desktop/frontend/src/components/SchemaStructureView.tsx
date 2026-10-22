@@ -22,7 +22,17 @@ const C = createContext<Ctx | null>(null);
 
 const XS = "http://www.w3.org/2001/XMLSchema";
 
-export function SchemaStructureView({ schemas, baseDir, version }: { schemas: string[]; baseDir: string; version: string }) {
+export function SchemaStructureView({
+  schemas,
+  baseDir,
+  projectDir,
+  version,
+}: {
+  schemas: string[];
+  baseDir: string;
+  projectDir: string;
+  version: string;
+}) {
   const [model, setModel] = useState<SchemaModel | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
@@ -32,12 +42,12 @@ export function SchemaStructureView({ schemas, baseDir, version }: { schemas: st
   const [toggles, setToggles] = useState<Record<string, boolean>>({});
   const [level, setLevel] = useState(0);
 
-  const key = JSON.stringify([schemas, baseDir, version]);
+  const key = JSON.stringify([schemas, baseDir, projectDir, version]);
   useEffect(() => {
     let live = true;
     setBusy(true);
     const t = window.setTimeout(() => {
-      schemaStructure({ schemas, baseDir, version })
+      schemaStructure({ schemas, baseDir, projectDir, version })
         .then((m) => {
           if (!live) return;
           setModel(m);

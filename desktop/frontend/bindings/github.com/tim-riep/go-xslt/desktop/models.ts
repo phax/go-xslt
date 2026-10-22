@@ -116,11 +116,14 @@ export interface SchemaModel {
 /**
  * SchemaModelRequest asks for the resolved structure of a schema: Schemas[0]
  * is the entry document, relative xs:import/xs:include locations resolve
- * against BaseDir.
+ * against BaseDir. Schema files are read only inside ProjectDir (BaseDir
+ * itself when ProjectDir is empty): a schema cannot pull in files from
+ * elsewhere on the disk.
  */
 export interface SchemaModelRequest {
     "schemas": string[] | null;
     "baseDir": string;
+    "projectDir": string;
 
     /**
      * Version is "1.0" (default) or "1.1".

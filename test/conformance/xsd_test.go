@@ -121,6 +121,7 @@ func xsdVersionOf(ver string) xsd.Version {
 // ---- per-set result accumulator ----
 
 type xsdResult struct {
+	failNames               []string // every failing case, for checkAcceptedFailures
 	pass, fail, skip, unsup int
 	queried                 int
 	skipReasons             map[string]int
@@ -146,6 +147,7 @@ func (r *xsdResult) score(label, expected string, unsupported, ok, verbose bool)
 		r.pass++
 	default:
 		r.fail++
+		r.failNames = append(r.failNames, label)
 		if verbose && len(r.fails) < 4000 {
 			r.fails = append(r.fails, fmt.Sprintf("FAIL exp=%s %s", expected, label))
 		}
@@ -380,6 +382,13 @@ func TestXSD(t *testing.T) {
 			rate = 100 * float64(pass) / float64(ran)
 		}
 		t.Logf("XSD %s: %.1f%% pass (%d/%d ran) — unsupported=%d skip=%d queried=%d", ver, rate, pass, ran, unsup, skip, queried)
+		var failNames []string
+		for _, r := range results {
+			if r != nil {
+				failNames = append(failNames, r.failNames...)
+			}
+		}
+		checkAcceptedFailures(t, "xsd.md", failNames)
 		reasons := make([]string, 0, len(skipReasons))
 		for k := range skipReasons {
 			reasons = append(reasons, k)

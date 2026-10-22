@@ -546,11 +546,11 @@ func checkOverrideSignature(d *xmltree.Node, target pkgComponent) error {
 	if nonDet(d) != nonDet(target.el) {
 		return errAt(d, "err:XTSE3070: overriding function %q declares new-each-time=%q but the overridden function declares %q", target.name, nonDet(d), nonDet(target.el))
 	}
-	params := func(n *xmltree.Node) []string {
-		var out []string
+	params := func(n *xmltree.Node) []*xmltree.Node {
+		var out []*xmltree.Node
 		for _, ch := range elementChildren(n) {
 			if ch.Name.Space == NS && ch.Name.Local == "param" {
-				out = append(out, norm(ch))
+				out = append(out, ch)
 			}
 		}
 		return out
@@ -560,9 +560,10 @@ func checkOverrideSignature(d *xmltree.Node, target pkgComponent) error {
 		return errAt(d, "err:XTSE3070: overriding function %q has a different arity", target.name)
 	}
 	for i := range pa {
-		if pa[i] != pb[i] && pa[i] != "" && pb[i] != "" {
+		a, b := norm(pa[i]), norm(pb[i])
+		if a != b && a != "" && b != "" && !typesSame(pa[i], a, pb[i], b) {
 			return errAt(d, "err:XTSE3070: overriding function %q declares parameter %d as %q but the overridden component declares %q",
-				target.name, i+1, pa[i], pb[i])
+				target.name, i+1, a, b)
 		}
 	}
 	return nil
@@ -744,6 +745,21 @@ func typesDiffer(ea *xmltree.Node, a string, eb *xmltree.Node, b string) bool {
 	ra, oka := resolveTypeSet(ea, a)
 	rb, okb := resolveTypeSet(eb, b)
 	return oka && okb && ra != rb
+}
+
+// typesSame is the strict counterpart of typesDiffer, for parameter types: two
+// differently written types count as the same only when both resolve to the
+// same member set. XSLT 3.0 §3.5.3.3 makes types identical when each is a
+// subtype of the other, so two plain unions with the same members are
+// identical whatever their names or member order (override-f-031); a pair that
+// cannot be resolved stays an error, as it was before unions were considered.
+func typesSame(ea *xmltree.Node, a string, eb *xmltree.Node, b string) bool {
+	if bothBuiltinTypes(a, b) {
+		return false
+	}
+	ra, oka := resolveTypeSet(ea, a)
+	rb, okb := resolveTypeSet(eb, b)
+	return oka && okb && ra == rb
 }
 
 // resolveTypeSet maps a sequence type to a canonical string in which a user

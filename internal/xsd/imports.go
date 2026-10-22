@@ -1,7 +1,6 @@
 package xsd
 
 import (
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -363,7 +362,7 @@ func (c *compiler) collect(el *xmltree.Node, baseDir, selfPath string, out *[]*s
 				continue
 			}
 			visited[path] = true
-			data, err := os.ReadFile(path)
+			data, err := c.sch.files.ReadFile(path)
 			if err != nil {
 				continue // unresolvable location — skip
 			}
@@ -428,7 +427,7 @@ func (c *compiler) collectOverride(ch *xmltree.Node, sd *schemaDoc, path, loc st
 		return nil
 	}
 	visited[key] = true
-	data, err := os.ReadFile(path)
+	data, err := c.sch.files.ReadFile(path)
 	if err != nil {
 		return nil // unresolvable location: components simply unavailable
 	}

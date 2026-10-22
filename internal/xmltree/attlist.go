@@ -2,7 +2,7 @@ package xmltree
 
 import (
 	"encoding/xml"
-	"os"
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -86,7 +86,7 @@ func localPart(s string) string {
 // stylesheet that never declares xsl:strip-space still gets clean output over
 // a DTD like "<!ELEMENT t04 (a*)>"). An unreadable/absent external file is
 // silently skipped, matching documentEntities' treatment of the same case.
-func elementOnlyDecls(src, baseDir string) map[string]bool {
+func elementOnlyDecls(src, baseDir string, files *fsaccess.Guard) map[string]bool {
 	out := map[string]bool{}
 	if sub, ok := internalSubset(src); ok {
 		scanElementOnlyDecls(sub, out)
@@ -97,7 +97,7 @@ func elementOnlyDecls(src, baseDir string) map[string]bool {
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(baseDir, path)
 			}
-			if data, err := os.ReadFile(path); err == nil {
+			if data, err := files.ReadFile(path); err == nil {
 				scanElementOnlyDecls(string(data), out)
 			}
 		}

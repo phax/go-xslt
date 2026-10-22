@@ -7,7 +7,55 @@ package engine
 
 import (
 	"time"
+
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
+	"github.com/tim-riep/go-xslt/internal/netfetch"
 )
+
+// Security says which local files and which network resources a run may read.
+// The zero value is the safe default: files under BaseDir only, no network.
+// A stylesheet, an expression, a schema and a source document are often
+// untrusted: unrestricted file access would let them read anything the
+// process can (keys, configuration) and copy it into the output, and network
+// access would let them reach internal services or send data away in a URL.
+// Only the caller widens these limits, never the input.
+type Security struct {
+	// AllowedDirs are further directories (with their subdirectories) whose
+	// files may be read, besides BaseDir.
+	AllowedDirs []string `json:"allowedDirs,omitempty"`
+	// AllowAllFiles lifts the file restriction entirely: any path the
+	// process can read, as before this option existed. Only for trusted
+	// input.
+	AllowAllFiles bool `json:"allowAllFiles,omitempty"`
+	// AllowNetwork lets document(), fn:doc, fn:doc-available,
+	// fn:unparsed-text(-lines/-available), fn:collection members and
+	// xsl:source-document retrieve http and https URIs. Off by default, in
+	// which case such a URI is an unavailable resource. A document retrieved
+	// over the network is parsed without reading any external DTD or entity
+	// files.
+	AllowNetwork bool `json:"allowNetwork"`
+	// AllowedHosts, when non-empty, limits network access to these host
+	// names; a leading "." also admits every subdomain (".example.com").
+	// Redirects are checked against the same list.
+	AllowedHosts []string `json:"allowedHosts,omitempty"`
+}
+
+// FileGuard is the file guard for a run of s rooted at baseDir: reads are
+// confined to baseDir and s.AllowedDirs (no BaseDir and no AllowedDirs: no
+// file reads at all), unless s.AllowAllFiles, which returns nil (no check).
+// It is a function rather than a method so it does not show up on the public
+// engine.Security / xsd.Security alias.
+func FileGuard(s Security, baseDir string) *fsaccess.Guard {
+	if s.AllowAllFiles {
+		return nil
+	}
+	return fsaccess.New(append([]string{baseDir}, s.AllowedDirs...)...)
+}
+
+// fetcher is the per-run retriever for s, nil when s allows no network access.
+func (s Security) fetcher() *netfetch.Fetcher {
+	return netfetch.New(netfetch.Policy{AllowNetwork: s.AllowNetwork, AllowedHosts: s.AllowedHosts})
+}
 
 // Request is a single transformation request.
 type Request struct {
@@ -24,6 +72,9 @@ type Request struct {
 	// xsl:import/xsl:include, document()/doc(), unparsed-text(), and to write
 	// xsl:result-document. Empty disables disk resolution.
 	BaseDir string `json:"baseDir"`
+	// Security limits which files and network resources the run may read;
+	// the zero value allows files under BaseDir only, and no network.
+	Security Security `json:"security"`
 }
 
 // SecondaryOutput is a result produced by xsl:result-document.

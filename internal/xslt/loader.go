@@ -2,7 +2,6 @@ package xslt
 
 import (
 	"github.com/tim-riep/go-xslt/internal/fileuri"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -277,11 +276,11 @@ func (c *compiler) gatherUsedPackage(el *xmltree.Node, seen map[string]bool, acc
 // xsl:package root with static parameters bound and use-when subtrees pruned
 // (the same preparation loadFile does for an imported module).
 func (c *compiler) loadPackageRoot(abs string) (*xmltree.Node, error) {
-	data, err := os.ReadFile(abs)
+	data, err := c.files.ReadFile(abs)
 	if err != nil {
 		return nil, err
 	}
-	doc, err := xmltree.ParseLenient11WithBase(string(data), filepath.Dir(abs))
+	doc, err := xmltree.ParseLenient11WithBaseFS(string(data), filepath.Dir(abs), c.files)
 	if err != nil {
 		return nil, err
 	}
@@ -409,11 +408,11 @@ func (c *compiler) loadFile(href, baseDir string, seen map[string]bool) (*xmltre
 		return nil, "", "", errAt(nil, "import/include cycle at %q", href)
 	}
 	seen[abs] = true
-	data, err := os.ReadFile(abs)
+	data, err := c.files.ReadFile(abs)
 	if err != nil {
 		return nil, "", "", err
 	}
-	doc, err := xmltree.ParseLenient11WithBase(string(data), filepath.Dir(abs))
+	doc, err := xmltree.ParseLenient11WithBaseFS(string(data), filepath.Dir(abs), c.files)
 	if err != nil {
 		return nil, "", "", err
 	}

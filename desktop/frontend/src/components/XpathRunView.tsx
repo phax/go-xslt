@@ -46,7 +46,14 @@ export function XpathRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
   const [autoRun, setAutoRun] = useState(true);
 
   const execute = useCallback(
-    () => runXPath({ expression, source: contextFileMode ? contextBuf.text : contextInline, baseDir: tab.projectId }),
+    () =>
+      runXPath({
+        expression,
+        source: contextFileMode ? contextBuf.text : contextInline,
+        baseDir: tab.projectId,
+        // The desktop tester keeps the engine's default: no network access.
+        security: { allowNetwork: false },
+      }),
     [expression, contextFileMode, contextBuf.text, contextInline, tab.projectId],
   );
 

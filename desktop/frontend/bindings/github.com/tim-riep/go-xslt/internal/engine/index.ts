@@ -10,6 +10,7 @@ export type {
     Request,
     Result,
     SecondaryOutput,
+    Security,
     ValidateRequest,
     ValidateResult,
     XPathItem,

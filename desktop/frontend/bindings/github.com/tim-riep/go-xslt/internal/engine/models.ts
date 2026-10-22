@@ -77,6 +77,12 @@ export interface Request {
      * xsl:result-document. Empty disables disk resolution.
      */
     "baseDir": string;
+
+    /**
+     * Security limits which files and network resources the run may read;
+     * the zero value allows files under BaseDir only, and no network.
+     */
+    "security": Security;
 }
 
 /**
@@ -119,6 +125,47 @@ export interface SecondaryOutput {
 }
 
 /**
+ * Security says which local files and which network resources a run may read.
+ * The zero value is the safe default: files under BaseDir only, no network.
+ * A stylesheet, an expression, a schema and a source document are often
+ * untrusted: unrestricted file access would let them read anything the
+ * process can (keys, configuration) and copy it into the output, and network
+ * access would let them reach internal services or send data away in a URL.
+ * Only the caller widens these limits, never the input.
+ */
+export interface Security {
+    /**
+     * AllowedDirs are further directories (with their subdirectories) whose
+     * files may be read, besides BaseDir.
+     */
+    "allowedDirs"?: string[] | null;
+
+    /**
+     * AllowAllFiles lifts the file restriction entirely: any path the
+     * process can read, as before this option existed. Only for trusted
+     * input.
+     */
+    "allowAllFiles"?: boolean;
+
+    /**
+     * AllowNetwork lets document(), fn:doc, fn:doc-available,
+     * fn:unparsed-text(-lines/-available), fn:collection members and
+     * xsl:source-document retrieve http and https URIs. Off by default, in
+     * which case such a URI is an unavailable resource. A document retrieved
+     * over the network is parsed without reading any external DTD or entity
+     * files.
+     */
+    "allowNetwork": boolean;
+
+    /**
+     * AllowedHosts, when non-empty, limits network access to these host
+     * names; a leading "." also admits every subdomain (".example.com").
+     * Redirects are checked against the same list.
+     */
+    "allowedHosts"?: string[] | null;
+}
+
+/**
  * ValidateRequest validates an XML instance document against one or more XSD
  * schema documents.
  */
@@ -158,6 +205,13 @@ export interface ValidateRequest {
      * the first.
      */
     "maxErrors": number;
+
+    /**
+     * Security limits which schema files (xs:import/xs:include/xs:redefine/
+     * xs:override, xsi:schemaLocation) may be read; the zero value allows
+     * files under BaseDir only. Network access does not apply here.
+     */
+    "security": Security;
 }
 
 /**
@@ -212,6 +266,12 @@ export interface XPathRequest {
      * unavailable rather than erroring).
      */
     "baseDir": string;
+
+    /**
+     * Security limits which files and network resources the expression may
+     * read; the zero value allows files under BaseDir only, and no network.
+     */
+    "security": Security;
 }
 
 /**

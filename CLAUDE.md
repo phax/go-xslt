@@ -193,6 +193,40 @@ Desktop GUI (**run from `desktop/`**):
 
 ## Conventions / gotchas
 
+- **Local file reads are confined, per request** (`internal/fsaccess`,
+  `engine.Security{AllowedDirs, AllowAllFiles}`, also on `ValidateRequest`
+  and `xsd.Request`): the public facades build a `*fsaccess.Guard` rooted at
+  BaseDir (`engine.FileGuard`; no BaseDir = no file reads) and thread it
+  through EVERY read — `xslt.CompileFromFS` → `compiler.files`/
+  `Stylesheet.files` (import/include, import-schema, use-when, parameter
+  documents, fn:transform), `Entry.Files` → `fileResolver.files`,
+  `xmltree.Parse…FS` (external DTD subsets/entities), `xsd.CompileFS` →
+  `Schema.files` (xs:include/import/redefine/override, xsi:schemaLocation).
+  Symlinks are resolved before the check. A NIL guard means no check — that
+  is what the internal packages get when called directly, so the conformance
+  harnesses and package tests are unaffected by construction. New file reads
+  must go through the guard (`files.ReadFile`, never bare `os.ReadFile`);
+  host-supplied paths (`PackageSource`, `SchemaSource`, `Entry.SourceSchemas`)
+  are trusted configuration and stay unguarded. Tests:
+  `engine/filesecurity_test.go`, each with an allowed control.
+- **Network access is opt-in, per request** (`internal/netfetch`,
+  `engine.Security{AllowNetwork, AllowedHosts}` on `Request`/
+  `TransformRequest`/`XPathRequest`). Off, an http(s) URI is an unavailable
+  resource and is never looked up on disk. On, the run's `Fetcher` caches
+  every answer (F&O stability), checks redirects against the host list, caps
+  size/time, refuses URL credentials, decodes text by the HTTP charset first
+  (F&O "external encoding information"), and parses a remote document with
+  an EMPTY base dir — every external DTD/entity read in `xmltree` is skipped
+  then, so a remote DOCTYPE cannot read local files (tested with a positive
+  control in `engine/network_test.go`). Not covered yet: `xsl:import`/
+  `xsl:include`/`xsl:import-schema`/`xs:import` locations and static
+  (use-when) evaluation stay local-only. The harnesses go online only with
+  `XSLT30_NETWORK=1` / `QT3_NETWORK=1`; the floors are measured offline.
+- `exsl:node-set` is deliberately NOT implemented: EXSLT is not a W3C spec,
+  its definition is informal (behaviour for node-sets/numbers/booleans is
+  unstated), and XSLT 3.0 does not require it — `docbook-001/002` (combined
+  mode) fail on it and stay failing.
+
 - **Tests are deterministic — no verdict may depend on wall-clock time or on how
   busy the machine is.** No per-case timeouts in the harnesses (a case that
   cannot finish is stopped by the engine's counted budgets — instruction steps,
@@ -217,6 +251,12 @@ Desktop GUI (**run from `desktop/`**):
   (`test/conformance/xslt30-test/specs/xslt-lcwd30.xml` is a stale March-2015
   Working Draft, not the June-2017 REC) for a precise semantic question —
   fetch the live W3C REC text instead. This has mattered repeatedly.
+- **Every failing conformance case is documented** in
+  `docs/accepted-failures/{xslt30,qt3,xsd}.md` (status Accepted/Open plus
+  the reason). `checkAcceptedFailures` (test/conformance/
+  accepted_failures_test.go) fails a harness run on any failing case not
+  named there in backticks — so a regression is loud, and a newly accepted
+  failure needs a written reason. Remove an entry when its case passes.
 - **Regression discipline for any change touching conformance**: diff fail
   lists by **name**, never by count — a count-only diff can hide a real
   regression a fix elsewhere silently introduces. `XSLT30_FAILS=1` /
@@ -249,7 +289,7 @@ Desktop GUI (**run from `desktop/`**):
   claims streaming + schema-awareness + backwards-compatibility together —
   see below):
   - **Default (basic processor): 99.9% (8,126/8,138)**. **Combined
-    (`XSLT30_FULL=1`): 99.7% (11,777/11,808)**.
+    (`XSLT30_FULL=1`): 99.7% (11,779/11,808)**.
   - `<test><package role="principal"></test>` catalog entries (347 cases)
     used to be hard-skipped unconditionally; the engine already accepted a
     top-level `xsl:package` as a module root and already fully implemented
@@ -326,8 +366,8 @@ Desktop GUI (**run from `desktop/`**):
   - **Residual, default mode** (12 fails; not winnable without
     disproportionate effort, or genuinely impossible — do not re-attempt
     without new evidence): network-dependent assertions (`unparsed-text-2002/
-    2003` — proven, not just suspected: the live page content changed since
-    the test was written); XInclude (`base-uri-052`, unimplemented);
+    2003` — they read live w3.org pages; with `XSLT30_NETWORK=1` both pass,
+    see the network entry under Conventions); XInclude (`base-uri-052`, unimplemented);
     per-package `xsl:strip-space` scoping (`collection-006`, `document-2401/
     2402` — needs a "current package" identity threaded through every
     `document()`/`collection()`/`fn:doc` call site down to the resolver, a
@@ -474,7 +514,8 @@ Desktop GUI (**run from `desktop/`**):
     (`fn-load-xquery-module-*`, no XQuery grammar exists at all); UCA
     `reorder=` codes (documented in `internal/xpath/UNSUPPORTED.md`);
     a live network fetch
-    (`fn-unparsed-text-054a`); `fn-transform-901/902/err-14` (each wants
+    (`fn-unparsed-text-054a`: timeanddate.com now answers every client with
+    403, so it fails even under `QT3_NETWORK=1`); `fn-transform-901/902/err-14` (each wants
     `fn:transform` to be *unavailable* — a genuine implementation
     necessarily contradicts them, the same shape as streaming-fallback
     above); ~20 cases that genuinely need XPath 3.0's full optional Static

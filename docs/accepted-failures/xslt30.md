@@ -1,0 +1,131 @@
+# XSLT 3.0 (`xslt30-test`): failing cases
+
+Default mode (basic processor): 8,126 of 8,138 pass, 12 fail. Combined mode
+(`XSLT30_FULL=1`, adding streaming, schema awareness and backwards
+compatibility): 11,779 of 11,808 pass, 29 fail: the 12 below plus 17
+combined-only cases. Measured offline.
+
+## Default mode (also failing in combined mode)
+
+### `unparsed-text-2002`, `unparsed-text-2003`
+**Status:** Accepted (offline only).
+Both read live pages from www.w3.org. The harness runs offline by default,
+so that a result never depends on the network. With `XSLT30_NETWORK=1` both
+pass.
+
+### `base-uri-052`
+**Status:** Accepted.
+Needs XInclude, which go-xslt does not implement. XInclude is a separate
+specification, and XSLT 3.0 does not require it.
+
+### `collection-006`, `document-2401`, `document-2402`
+**Status:** Accepted (decision).
+`xsl:strip-space` must apply per package to documents loaded through
+`fn:collection`, `document()` and `fn:doc`. That would mean carrying a
+"current package" identity through every one of those calls down to the
+resolver, a large change touching many call sites, for three tests. Declined.
+
+### `output-0130`, `output-0715`
+**Status:** Accepted (suite contradiction).
+The reference files expect an XHTML `<meta http-equiv>` element in a form
+that SaxonJS itself no longer produces. Checked against a live SaxonJS run.
+The fixtures are stale; there is no single behaviour that matches both these
+cases and the rest of the output test set.
+
+### `copy-3002`
+**Status:** Accepted (suite contradiction).
+The catalog entry itself says "the test should fail".
+
+### `copy-1220`, `copy-1221`
+**Status:** Accepted.
+Namespaces in scope through the environment are not carried onto a copied
+element in the way these two cases expect. The only fix found so far loses
+more cases than it gains, measured several times.
+
+### `override-as-005`
+**Status:** Accepted (decision).
+Two packages each declare a *private* attribute set with the same name.
+Attribute-set references are resolved without their package. Keeping the two
+apart means threading the package through every `use-attribute-sets` site
+and through the streamability analysis, for one test.
+
+## Combined mode only
+
+### `streamable-100`, `streamable-101`, `streamable-102`
+**Status:** Accepted (suite asks for more than the REC).
+Each stylesheet's own comment says it is "streamable in Saxon but not
+guaranteed-streamable according to W3C rules", and the catalog keywords say
+`_WRONG:not-streamable`. go-xslt raises XTSE3430, which is what the REC
+requires of a construct declared streamable that is not
+guaranteed-streamable.
+
+### `si-fork-901`, `si-fork-951`, `si-fork-954`
+**Status:** Accepted (measured trade-off).
+§19.8.4.20 makes an `xsl:fork` branch that returns streamed nodes roaming
+and free-ranging, so XTSE3430 would be correct. Reporting it fails the
+suite's own `si-fork-006` and eight cases sharing its stylesheet, which
+expect the same shape to run. Measured: +1 / −9. go-xslt classifies the
+construct as unstreamable and runs it buffered, with correct output. See
+`internal/xslt/streamability.go`, `strmFork`.
+
+### `si-fork-953`
+**Status:** Accepted.
+The case's own description asks "should this be an error?". The REC rule
+for a sorted group inside `xsl:fork` does not settle it.
+
+### `su-ascent-903`, `sx-square-array-201`
+**Status:** Accepted (earlier analysis, not re-verified in this round).
+Both expect XTSE3430 inside an `xsl:source-document`. go-xslt reports only
+the streamability rejections it can prove; widening `xsl:source-document`
+enforcement has been measured net-negative every time.
+`sx-square-array-201` additionally depends on global variables being
+evaluated lazily (Saxon) rather than eagerly. Both orders are allowed by the
+spec, and document order across trees is implementation-defined.
+
+### `sf-reverse-001`
+**Status:** Accepted (expected result contradicts XPath).
+The expression is `reverse(snapshot(/chapter)//section)/@id`, and the suite
+expects the ids in reverse order. But the final `/@id` is a path step, and
+XPath 3.1 §3.3.1 returns the result of `/` in document order with
+duplicates removed. go-xslt returns `1 1.1 1.2 1.2.1 1.2.2 1.3`, which is
+what the rule gives. The case itself points to W3C bug 24125.
+
+### `strip-space-009`
+**Status:** Accepted (not derivable from the REC).
+Expects whitespace text nodes to be kept under an element whose type has an
+XSD 1.1 assertion. XSLT 3.0 §4.4.2 keeps whitespace only for elements whose
+type is simple or has simple content; it has no rule for assertions. This is
+Saxon behaviour.
+
+### `validation-0201`
+**Status:** Accepted.
+The case compares the whole XHTML serialization with Saxon's (indent="yes").
+It found two real serializer bugs, both fixed: indentation was added inside
+mixed content and next to inline elements (§5.1.4, §6.1.4), and the xhtml
+method wrote `&nbsp;`, which is not well-formed XML without a DTD. The
+harness also ignores the whitespace that indent="yes" leaves to the
+serializer, which the catalog allows ("differences … capable of being
+produced by a conformant implementation"). One difference remains: Saxon
+adds a line break before `</p>` right after the text "…United States.".
+§6.1.4 allows added whitespace only before or after an element, or next to
+existing whitespace, and neither applies there. go-xslt keeps the data
+model unchanged at that point, so the case cannot pass without copying
+Saxon's behaviour.
+
+### `backwards-018`
+**Status:** Accepted.
+Needs the same XHTML `<meta>` heuristic as `output-0130` / `output-0715`
+above. It is not a backwards-compatibility gap.
+
+### `catalog-005`, `catalog-005b`
+**Status:** Accepted.
+They need schema components the stylesheet never imports (the schema for
+XSLT itself, XTTE1512). Saxon keeps a global schema cache; §3.16 makes only
+imported components available.
+
+### `docbook-001`, `docbook-002`
+**Status:** Accepted (decision).
+The DocBook XSL stylesheets call the EXSLT extension `exsl:node-set()`
+without checking that it exists. EXSLT is not a W3C specification, its
+definition is informal (what the function does with node-sets, numbers and
+booleans is not stated), and XSLT 3.0 does not require it. Not implemented.

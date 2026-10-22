@@ -75,6 +75,7 @@ export function FileEditorView({ tab }: { tab: FileTab }) {
             <SchemaStructureView
               schemas={[buf.text]}
               baseDir={tab.path.includes("/") ? `${project.dir}/${dirname(tab.path)}` : project.dir}
+              projectDir={project.dir}
               version={xsdVersion}
             />
           </Suspense>

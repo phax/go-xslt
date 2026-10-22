@@ -85,7 +85,7 @@ Measured 2026-10-11 on engine commit [`35ffebc`](https://github.com/tim-riep/go-
 | Suite | Source | Commit | Pass rate | Detail |
 |---|---|---|---|---|
 | **XSLT 3.0** — default (basic) processor | [w3c/xslt30-test](https://github.com/w3c/xslt30-test) | `fddf1cf9` (2026-06-10) | **99.9%** (8,126 / 8,138) | by min spec version: 1.0 **100.0%** (1,980/1,980), 2.0 **99.8%** (2,656/2,660), 3.0 **99.8%** (3,485/3,493) |
-| **XSLT 3.0** — combined (`XSLT30_FULL=1`: + streaming + schema-awareness + XSLT 1.0 backwards-compatible processing, see [below](#xslt-30-engine)) | same | same | **99.7%** (11,777 / 11,808) | |
+| **XSLT 3.0** — combined (`XSLT30_FULL=1`: + streaming + schema-awareness + XSLT 1.0 backwards-compatible processing, see [below](#xslt-30-engine)) | same | same | **99.7%** (11,779 / 11,808) | |
 | **XPath 3.1 / XQuery F&O** (QT3/FOTS) | [w3c/qt3tests](https://github.com/w3c/qt3tests) | `201a6e46` (2026-05-14) | **99.8%** (22,099 / 22,153) | |
 | **XSD 1.0** | [w3c/xsdtests](https://github.com/w3c/xsdtests) | `7bc3365c` (2026-04-01) | **99.99%** (39,346 / 39,351) | 5 residual are suite self-contradictions |
 | **XSD 1.1** | same | same | **99.99%** (41,499 / 41,503) | 4 residual are suite self-contradictions |
@@ -101,6 +101,10 @@ network-dependent assertion or two, and a short tail of environment-specific or 
 suite fixture artifacts. (Regex back-references are no longer a gap: a
 dedicated backtracking matcher handles them when RE2 can't, used only for
 patterns that actually need it.)
+
+**Every failing case is listed with its reason** in
+[`docs/accepted-failures/`](docs/accepted-failures/README.md) (one file per
+suite). The harnesses enforce it: an undocumented failure fails the test.
 
 **Reproducing these numbers**: `go test ./test/conformance/...` — the suites
 above are third-party, gitignored, and not vendored, so a fresh clone of
@@ -150,9 +154,11 @@ func main() {
 
 `engine.Transform` is panic-safe: compile/parse/runtime failures come back as
 `res.Diagnostics` (with W3C error codes, line/col, and phase), never as panics.
-`Request` also supports `Params`, `InitialTemplate`, and `BaseDir` (for
-`xsl:import`/`document()`/`unparsed-text()`/`xsl:result-document`); `Result`
-carries `Output`, `Diagnostics`, `Messages`, and `SecondaryOutputs`.
+`Request` also supports `Params`, `InitialTemplate`, `BaseDir` (for
+`xsl:import`/`document()`/`unparsed-text()`/`xsl:result-document`) and
+`Security` (which files and network resources a run may read, see
+[Security](#security)); `Result` carries `Output`, `Diagnostics`, `Messages`,
+and `SecondaryOutputs`.
 
 ### Compile once, run many times
 
@@ -209,6 +215,67 @@ everything behind it can evolve without breaking callers.
 ```bash
 go test ./...        # engine unit tests + conformance harnesses (skip if suites absent)
 ```
+
+## Security
+
+Stylesheets, XPath expressions, schemas and source documents can name other
+resources: `xsl:import`, `document()`, `fn:unparsed-text`, `xs:import`, a
+`DOCTYPE`'s external subset. When that input is not trusted, unrestricted
+access would let it read any file the process can read and copy it into the
+output, or make requests to internal services. go-xslt therefore limits all of
+it by default. Only the calling program can widen the limits, never the
+input. The settings are in `Security`, a field of `engine.Request`,
+`engine.TransformRequest`, `engine.XPathRequest`, `engine.ValidateRequest`
+and `xsd.Request`.
+
+| | Default | Opt-in |
+|---|---|---|
+| **Local files** | Only files under `BaseDir` (and its subdirectories). Without `BaseDir`, no file is read at all. | `AllowedDirs: []string{…}` adds directories; `AllowAllFiles: true` lifts the limit. |
+| **Network** (`http`, `https`) | Off. Such a URI is an unavailable resource. | `AllowNetwork: true`; `AllowedHosts` restricts it to host names (a leading `.` includes subdomains). |
+
+```go
+res := engine.Transform(engine.Request{
+	Stylesheet: src,
+	BaseDir:    "/srv/jobs/42",
+	Security: engine.Security{
+		AllowedDirs:  []string{"/srv/shared/schemas"},
+		AllowNetwork: true,
+		AllowedHosts: []string{"data.example.com"},
+	},
+})
+```
+
+**Local files.** The rule covers every read:
+- stylesheet modules (`xsl:import`, `xsl:include`)
+- `xsl:import-schema`, and the schema documents of `xs:include`,
+  `xs:import`, `xs:redefine`, `xs:override` and `xsi:schemaLocation`
+- `document()`, `fn:doc`, `fn:unparsed-text*`, collections and
+  `xsl:source-document`
+- static evaluation in `use-when`
+- the stylesheet a nested `fn:transform` loads
+- the external DTD subsets and entity files that any of these documents pull
+  in
+
+Symbolic links are resolved before the check, so a link inside `BaseDir` that
+points outside it is refused. A refused file looks to the stylesheet like a
+missing one: `doc-available()` returns false, and `fn:unparsed-text` raises
+FOUT1170. go-xslt never writes files; `xsl:result-document` output comes back
+in `Result.SecondaryOutputs`.
+
+**Network.** Redirects are checked against `AllowedHosts` too. Each response
+is limited to 64 MB and 30 seconds, and URLs with a user name or password are
+refused. Within one run every URI is fetched once and the answer reused, as
+F&O requires for `fn:doc` and `fn:unparsed-text`. A document fetched over the
+network is parsed without reading any external DTD or entity file, so a
+remote `DOCTYPE` cannot pull in local files. Not yet covered by `AllowNetwork`:
+`xsl:import`, `xsl:import-schema` and `xs:import` locations always stay local.
+
+**Desktop tester.** Each run may read the files of its own project folder.
+Network access stays off.
+
+**Upgrading:** before this option existed, absolute paths and paths outside
+`BaseDir` were read without restriction. A program that relies on that sets
+`AllowedDirs`, or `AllowAllFiles: true` for input it trusts.
 
 ## Desktop tester (GUI)
 

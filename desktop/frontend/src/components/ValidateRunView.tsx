@@ -62,7 +62,7 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
         )
       : [schemaInline];
     const instanceText = instanceFileMode ? instanceBuf.text : instanceInline;
-    return runValidate({ schemas: schemaTexts, instance: instanceText, version, baseDir: tab.projectId, language: "", maxErrors: 0 });
+    return runValidate({ schemas: schemaTexts, instance: instanceText, version, baseDir: tab.projectId, language: "", maxErrors: 0, security: { allowNetwork: false } });
   }, [schemaFileMode, schemas, schemaInline, instanceFileMode, instanceBuf.text, instanceInline, version, tab.projectId]);
 
   const { run: doRun, status, result } = useRunner<ValidateResult>(tab.id, tab.projectId, execute);

@@ -344,6 +344,32 @@ func (s *Schema) CastToSchemaTypeIn(name xmltree.SchemaTypeName, lexical string,
 	return prim, nil
 }
 
+// UnionCastMember implements xpath.SchemaUnionMemberCaster: for a union type,
+// the member that accepts lexical (the first in declaration order, the same
+// one CastToSchemaTypeIn takes the primitive from).
+func (s *Schema) UnionCastMember(name xmltree.SchemaTypeName, lexical string, at *xmltree.Node) (
+	member xmltree.SchemaTypeName, builtin, ok bool) {
+	t, found := s.typeByName(xname{name.Namespace, name.Local})
+	if !found {
+		return member, false, false
+	}
+	st, isSimple := t.(*SimpleType)
+	if !isSimple || st == nil || st.variety != vUnion {
+		return member, false, false
+	}
+	m := acceptingUnionMember(st, lexical, at)
+	if m == nil || m.variety != vAtomic {
+		return member, false, false
+	}
+	if !m.declared {
+		return member, true, true
+	}
+	if m.name.Local == "" {
+		return member, false, false
+	}
+	return xmltree.SchemaTypeName{Namespace: m.name.Space, Local: m.name.Local}, false, true
+}
+
 // --- validate-in-place ------------------------------------------------------
 
 // NodeValidateOptions controls an in-place validation run.

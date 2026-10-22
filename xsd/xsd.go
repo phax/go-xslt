@@ -44,7 +44,14 @@ type Request struct {
 	// xs:redefine / xs:override across files. Empty disables disk resolution.
 	BaseDir string
 	Version Version
+	// Security limits which schema files may be read; the zero value allows
+	// files under BaseDir only (see engine.Security).
+	Security Security
 }
+
+// Security is engine.Security: AllowedDirs widens, AllowAllFiles lifts the
+// file restriction.
+type Security = engine.Security
 
 // Diagnostic is an error from Compile, with the position in the schema document
 // where known (Line and Col are 1-based, 0 means unknown).
@@ -124,7 +131,7 @@ func Compile(req Request) (schema *Schema, diags []Diagnostic) {
 	if req.Version == V11 {
 		v = xsd.Version11
 	}
-	s, err := xsd.CompileWithDocs(req.Schemas, req.BaseDir, v)
+	s, err := xsd.CompileWithDocsFS(req.Schemas, req.BaseDir, v, engine.FileGuard(req.Security, req.BaseDir))
 	if err != nil {
 		d := Diagnostic{Severity: engine.SeverityError, Phase: "compile", Message: err.Error()}
 		var xe xsd.Error

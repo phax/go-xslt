@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"github.com/tim-riep/go-xslt/internal/fileuri"
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
 	"io"
 	"strconv"
 	"strings"
@@ -63,7 +64,7 @@ func downgradeXMLVersion(src string) string {
 // entry point — fn:parse-xml must NOT get the leniency, the QT3 suite expects
 // 1.0-processor errors there).
 func Parse(src string) (*Node, error) {
-	return parseRaw(src, "", nil)
+	return parseRaw(src, "", nil, nil)
 }
 
 // ParseWithBase parses like Parse, but also resolves a DOCTYPE's external
@@ -73,7 +74,7 @@ func Parse(src string) (*Node, error) {
 // local .dtd of character entities like &egrave;). baseDir == "" behaves
 // exactly like Parse (no external subset is ever fetched).
 func ParseWithBase(src, baseDir string) (*Node, error) {
-	return parseRaw(src, baseDir, nil)
+	return parseRaw(src, baseDir, nil, nil)
 }
 
 // ParseLenient11 parses like Parse but bridges declared XML 1.1 documents to
@@ -92,7 +93,13 @@ func ParseLenient11(src string) (*Node, error) {
 // XML 1.1 (the misc/xml-version test set). fn:parse-xml deliberately keeps the
 // strict 1.0 Parse.
 func ParseLenient11WithBase(src, baseDir string) (*Node, error) {
-	return parseLenient11WithBaseStrip(src, baseDir, nil)
+	return parseLenient11WithBaseStrip(src, baseDir, nil, nil)
+}
+
+// ParseLenient11WithBaseFS is ParseLenient11WithBase with every external
+// subset and external entity read checked by files (nil: no check).
+func ParseLenient11WithBaseFS(src, baseDir string, files *fsaccess.Guard) (*Node, error) {
+	return parseLenient11WithBaseStrip(src, baseDir, files, nil)
 }
 
 // ParseLenient11WithBaseStripSpace is ParseLenient11WithBase with a
@@ -109,18 +116,25 @@ func ParseLenient11WithBase(src, baseDir string) (*Node, error) {
 // this engine resolves one way today, a future schema-aware simple-content
 // exemption the hook can't see at parse time, ...).
 func ParseLenient11WithBaseStripSpace(src, baseDir string, strip StripSpaceHook) (*Node, error) {
-	return parseLenient11WithBaseStrip(src, baseDir, strip)
+	return parseLenient11WithBaseStrip(src, baseDir, nil, strip)
 }
 
-func parseLenient11WithBaseStrip(src, baseDir string, strip StripSpaceHook) (*Node, error) {
+// ParseLenient11WithBaseStripSpaceFS is ParseLenient11WithBaseStripSpace with
+// every external subset and external entity read checked by files (nil: no
+// check).
+func ParseLenient11WithBaseStripSpaceFS(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) (*Node, error) {
+	return parseLenient11WithBaseStrip(src, baseDir, files, strip)
+}
+
+func parseLenient11WithBaseStrip(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) (*Node, error) {
 	src = decodeBOM(src) // UTF-16 sources become UTF-8 before any tokenizing
 	if !declaresXML11(src) {
-		return parseRaw(src, baseDir, strip)
+		return parseRaw(src, baseDir, files, strip)
 	}
 	prepped, restore := substC0Refs(src)
 	tokens := map[string]rune{} // ASCII name-safe token -> original 5e name char
 	for attempt := 0; ; attempt++ {
-		doc, err := parseRaw(prepped, baseDir, strip)
+		doc, err := parseRaw(prepped, baseDir, files, strip)
 		if err == nil {
 			if len(restore) > 0 || len(tokens) > 0 {
 				restoreSentinels(doc, restore, tokens)
@@ -282,7 +296,7 @@ func restoreSentinels(n *Node, runes map[rune]rune, tokens map[string]rune) {
 	walk(n)
 }
 
-func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
+func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) (*Node, error) {
 	// A byte-order mark is an encoding signature, not document content: Go's
 	// decoder would otherwise hand back a U+FEFF character-data token ahead of
 	// the root element, which then rides through the transform into the result
@@ -291,19 +305,19 @@ func parseRaw(src, baseDir string, strip StripSpaceHook) (*Node, error) {
 	// External parsed general entities are spliced in textually before
 	// tokenizing (see expandExternalEntities) — encoding/xml can only supply
 	// an entity's replacement as character data, never as markup.
-	src, entSpans := expandExternalEntities(src, baseDir)
+	src, entSpans := expandExternalEntities(src, baseDir, files)
 	src = normalizeAttrWhitespace(src)
 	lines := newLinePos(src)
 	dec := xml.NewDecoder(strings.NewReader(downgradeXMLVersion(src)))
 	dec.Strict = true
 	dec.CharsetReader = charsetReader
-	dec.Entity = documentEntities(src, baseDir)
+	dec.Entity = documentEntities(src, baseDir, files)
 	idKinds := idAttrKinds(src)
 	attrDefaults := attlistDefaults(src)
-	elemOnly := elementOnlyDecls(src, baseDir)
+	elemOnly := elementOnlyDecls(src, baseDir, files)
 
 	doc := &Node{Kind: KindDocument}
-	if u := unparsedEntityDecls(src, baseDir); len(u) > 0 {
+	if u := unparsedEntityDecls(src, baseDir, files); len(u) > 0 {
 		doc.SetUnparsed(u)
 	}
 	stack := []*Node{doc}

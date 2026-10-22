@@ -51,12 +51,13 @@ func runTo(w io.Writer, req Request) Result {
 		}}}
 	}
 
-	ss, err := xslt.CompileFrom(req.Stylesheet, req.BaseDir)
+	files := FileGuard(req.Security, req.BaseDir)
+	ss, err := xslt.CompileFromFS(req.Stylesheet, req.BaseDir, files)
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "compile")}}
 	}
 
-	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params}
+	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params, Fetcher: req.Security.fetcher(), Files: files}
 	rr, terr := ss.TransformEntryTo(w, req.Source, entry, req.BaseDir, chunkableStylesheet(req.Stylesheet))
 	if terr != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(terr, "run")}}

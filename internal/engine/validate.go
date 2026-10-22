@@ -37,6 +37,10 @@ type ValidateRequest struct {
 	// Validation reports every error it finds (in document order), not only
 	// the first.
 	MaxErrors int `json:"maxErrors"`
+	// Security limits which schema files (xs:import/xs:include/xs:redefine/
+	// xs:override, xsi:schemaLocation) may be read; the zero value allows
+	// files under BaseDir only. Network access does not apply here.
+	Security Security `json:"security"`
 }
 
 // ValidateResult is the outcome of a validation. Valid is true iff the instance
@@ -73,7 +77,7 @@ func runValidate(req ValidateRequest) ValidateResult {
 	if req.Version == XSD11 {
 		v = xsd.Version11
 	}
-	sch, err := xsd.Compile(req.Schemas, req.BaseDir, v)
+	sch, err := xsd.CompileFS(req.Schemas, req.BaseDir, v, FileGuard(req.Security, req.BaseDir))
 	var r *xsd.Result
 	if err == nil {
 		r, err = sch.ValidateOpts(req.Instance, req.Language, req.MaxErrors)

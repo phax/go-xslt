@@ -1,6 +1,7 @@
 package xsd
 
 import (
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 
 	"fmt"
@@ -307,7 +308,8 @@ type attrUse struct {
 type Schema struct {
 	version    Version
 	baseDir    string
-	sourceDocs []string // the schema documents Compile was given (for hint merges)
+	files      *fsaccess.Guard // checks every schema document read from disk; nil: no check
+	sourceDocs []string        // the schema documents Compile was given (for hint merges)
 	elements   map[xname]*ElementDecl
 	types      map[xname]Type
 	attributes map[xname]*AttributeDecl

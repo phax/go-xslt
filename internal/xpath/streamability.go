@@ -1933,8 +1933,40 @@ var strmFuncSigs = map[string][]StreamUsage{
 	"fn:unparsed-entity-public-id": {UsageAbsorption, UsageInspection},
 	"fn:unparsed-entity-uri":       {UsageAbsorption, UsageInspection},
 	"fn:zero-or-one":               {UsageTransmission},
-	"map:entry":                    {UsageAbsorption, UsageNavigation},
-	"map:put":                      {UsageAbsorption, UsageAbsorption, UsageNavigation},
+	// The map and array functions, exactly as the §19.8.9 proformas give
+	// them: a map or array operand is function(*)-typed, so its usage is
+	// inspection (§19.4 type-determined usage), never absorption — two
+	// map:get(., …) calls on a striding context item are two motionless
+	// inspections, not two consuming reads (streamable-140). An arity-
+	// dependent entry lists the longest form (array:sort(I, A, I)).
+	"map:contains":        {UsageInspection, UsageAbsorption},
+	"map:entry":           {UsageAbsorption, UsageNavigation},
+	"map:find":            {UsageInspection, UsageAbsorption},
+	"map:for-each":        {UsageInspection, UsageInspection},
+	"map:get":             {UsageInspection, UsageAbsorption},
+	"map:keys":            {UsageInspection},
+	"map:merge":           {UsageInspection, UsageInspection},
+	"map:put":             {UsageInspection, UsageAbsorption, UsageNavigation},
+	"map:remove":          {UsageInspection, UsageAbsorption},
+	"map:size":            {UsageInspection},
+	"array:append":        {UsageInspection, UsageNavigation},
+	"array:filter":        {UsageInspection, UsageInspection},
+	"array:flatten":       {UsageAbsorption},
+	"array:fold-left":     {UsageInspection, UsageNavigation, UsageInspection},
+	"array:fold-right":    {UsageInspection, UsageNavigation, UsageInspection},
+	"array:for-each":      {UsageInspection, UsageInspection},
+	"array:for-each-pair": {UsageInspection, UsageInspection, UsageInspection},
+	"array:get":           {UsageInspection, UsageAbsorption},
+	"array:head":          {UsageInspection},
+	"array:insert-before": {UsageInspection, UsageAbsorption, UsageNavigation},
+	"array:join":          {UsageInspection},
+	"array:put":           {UsageInspection, UsageInspection, UsageNavigation},
+	"array:remove":        {UsageInspection, UsageAbsorption},
+	"array:reverse":       {UsageInspection},
+	"array:size":          {UsageInspection},
+	"array:sort":          {UsageInspection, UsageAbsorption, UsageInspection},
+	"array:subarray":      {UsageInspection, UsageAbsorption, UsageAbsorption},
+	"array:tail":          {UsageInspection},
 }
 
 // strmAbsorbingFuncs lists the §19.8.9 entries whose arguments are all
@@ -1992,9 +2024,7 @@ var strmAbsorbingFuncs = map[string]bool{
 	"fn:upper-case": true, "fn:uri-collection": true, "fn:xml-to-json": true,
 	"fn:year-from-date": true, "fn:year-from-dateTime": true,
 	"fn:years-from-duration": true,
-	"map:contains":           true, "map:for-each": true, "map:get": true,
-	"map:keys": true, "map:merge": true, "map:remove": true, "map:size": true,
-	"math:acos": true, "math:asin": true, "math:atan": true,
+	"math:acos":              true, "math:asin": true, "math:atan": true,
 	"math:atan2": true, "math:cos": true, "math:exp": true,
 	"math:exp10": true, "math:log": true, "math:log10": true, "math:pi": true,
 	"math:pow": true, "math:sin": true, "math:sqrt": true, "math:tan": true,

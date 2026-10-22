@@ -7,6 +7,7 @@ package xslt
 import (
 	"fmt"
 	"github.com/tim-riep/go-xslt/internal/fileuri"
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -250,6 +251,8 @@ type Template struct {
 
 // Stylesheet is a compiled stylesheet.
 type Stylesheet struct {
+	// files is the compile's file guard (see CompileFromFS), nil for none.
+	files *fsaccess.Guard
 	// packages is the host-supplied library-package registry this stylesheet
 	// was compiled with; fn:transform's package-based invocation resolves
 	// against the same set (transform-005/006).
@@ -643,7 +646,17 @@ func Compile(src string) (*Stylesheet, error) { return CompileFrom(src, "") }
 // to baseDir (a workspace directory). Imported modules get lower import
 // precedence than the importing module.
 func CompileFrom(src, baseDir string) (*Stylesheet, error) {
-	return compileModule(src, baseDir, "", nil, nil, nil)
+	return compileModule(src, baseDir, "", nil, nil, nil, nil)
+}
+
+// CompileFromFS is CompileFrom with every file the compile reads checked by
+// files (nil: no check): xsl:import/xsl:include modules, xsl:import-schema
+// schema-location documents, static fn:doc/unparsed-text in use-when, and the
+// external DTD subsets and entities of all of them. A module or schema
+// outside the allowed directories is reported as not found. The guard is kept
+// on the Stylesheet, so the runtime of fn:transform uses it too.
+func CompileFromFS(src, baseDir string, files *fsaccess.Guard) (*Stylesheet, error) {
+	return compileModule(src, baseDir, "", nil, nil, nil, files)
 }
 
 // CompileAt compiles a stylesheet whose own retrieval location is known:
@@ -651,7 +664,7 @@ func CompileFrom(src, baseDir string) (*Stylesheet, error) {
 // static base URI (fn:static-base-uri, and the base for relative hrefs) —
 // more precise than CompileFrom's directory-only base (use-when-0119).
 func CompileAt(src, selfPath string) (*Stylesheet, error) {
-	return compileModule(src, filepath.Dir(selfPath), selfPath, nil, nil, nil)
+	return compileModule(src, filepath.Dir(selfPath), selfPath, nil, nil, nil, nil)
 }
 
 // CompileAtWithStatic is CompileAt plus HOST-SUPPLIED STATIC PARAMETERS
@@ -668,7 +681,7 @@ func CompileAt(src, selfPath string) (*Stylesheet, error) {
 // stylesheets must include the supplied static parameters in its cache key;
 // the same source with different static parameters is a different Stylesheet.
 func CompileAtWithStatic(src, selfPath string, static map[string]string) (*Stylesheet, error) {
-	return compileModule(src, filepath.Dir(selfPath), selfPath, static, nil, nil)
+	return compileModule(src, filepath.Dir(selfPath), selfPath, static, nil, nil, nil)
 }
 
 // CompileAtWithPackages is CompileAtWithStatic plus the set of LIBRARY
@@ -678,7 +691,7 @@ func CompileAtWithStatic(src, selfPath string, static map[string]string) (*Style
 // from the host. A package whose PackageSource leaves Name/Version empty takes
 // them from its own xsl:package/@name and @package-version.
 func CompileAtWithPackages(src, selfPath string, static map[string]string, pkgs []PackageSource) (*Stylesheet, error) {
-	return compileModule(src, filepath.Dir(selfPath), selfPath, static, pkgs, nil)
+	return compileModule(src, filepath.Dir(selfPath), selfPath, static, pkgs, nil, nil)
 }
 
 // SchemaSource is a schema document the HOST makes available to
@@ -704,11 +717,11 @@ type SchemaSource struct {
 // @schema-location resolves to nothing, so a stylesheet whose hint works keeps
 // using it.
 func CompileAtWithSchemas(src, selfPath string, static map[string]string, pkgs []PackageSource, schemas []SchemaSource) (*Stylesheet, error) {
-	return compileModule(src, filepath.Dir(selfPath), selfPath, static, pkgs, schemas)
+	return compileModule(src, filepath.Dir(selfPath), selfPath, static, pkgs, schemas, nil)
 }
 
-func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, pkgs []PackageSource, hostSchemas []SchemaSource) (*Stylesheet, error) {
-	doc, err := xmltree.ParseLenient11WithBase(src, baseDir)
+func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, pkgs []PackageSource, hostSchemas []SchemaSource, files *fsaccess.Guard) (*Stylesheet, error) {
+	doc, err := xmltree.ParseLenient11WithBaseFS(src, baseDir, files)
 	if err != nil {
 		if pe, ok := err.(*xmltree.ParseError); ok {
 			return nil, &CompileError{Line: pe.Line, Col: pe.Col, Msg: pe.Msg}
@@ -754,8 +767,9 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 		return nil, &CompileError{Msg: "stylesheet has no root element"}
 	}
 
-	c := &compiler{baseDir: baseDir, hostStatic: hostStatic, packages: pkgs, hostSchemas: hostSchemas}
+	c := &compiler{baseDir: baseDir, hostStatic: hostStatic, packages: pkgs, hostSchemas: hostSchemas, files: files}
 	ss := newStylesheet()
+	ss.files = files
 	ss.packages = pkgs
 	if baseDir != "" {
 		// A module base (xmltree.Node.Base, set above and — per module — in
@@ -1461,6 +1475,8 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 }
 
 type compiler struct {
+	// files checks every file the compile reads; nil checks nothing.
+	files   *fsaccess.Guard
 	baseDir string
 	// hostStatic holds host-supplied static-parameter values (see
 	// CompileAtWithStatic): parameter name as written -> XPath expression. A
@@ -1597,20 +1613,21 @@ func (c *compiler) applyParameterDocument(o *Output, el *xmltree.Node) error {
 	if !ok || strings.TrimSpace(href) == "" {
 		return nil
 	}
-	return loadParameterDocument(o, el, c.baseDir, href)
+	return loadParameterDocument(o, el, c.baseDir, href, c.files)
 }
 
 // loadParameterDocument is applyParameterDocument's engine-independent core, so
 // xsl:result-document/@parameter-document — whose href is an AVT and therefore
 // only known at RUN time — can reuse exactly the same reader (result-document-
 // 1406).
-func loadParameterDocument(o *Output, el *xmltree.Node, baseDir, href string) error {
+func loadParameterDocument(o *Output, el *xmltree.Node, baseDir, href string, files *fsaccess.Guard) error {
 	// Resolve against the DECLARING element's static base URI (the module it
 	// is written in), not the principal module's directory — an xsl:output in
 	// an included module resolves its parameter-document relative to that
 	// module (output-0722).
 	base := xpath.NodeBaseURI(el, "")
 	res := newFileResolver(baseDir, nil)
+	res.files = files
 	target := strings.TrimSpace(href)
 	if base != "" {
 		if abs, err := xpath.ResolveURIRef(target, base); err == nil && abs != "" {

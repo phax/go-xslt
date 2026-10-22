@@ -89,6 +89,12 @@ func (c *compiler) compileImportedSchemas(ss *Stylesheet, mods []modChildren) er
 	// the highest import precedence are used. Collect per namespace first so a
 	// module that deliberately overrides an imported module's schema does not
 	// hand both documents to one compile and collide with itself.
+	//
+	// Import precedence orders the modules of ONE package, so the rule is
+	// applied per package (the key is package + namespace): what the
+	// stylesheet gets is "the union of the schema components imported into
+	// the packages" (override-f-031: a used package's no-namespace u1 and the
+	// principal's no-namespace u2 must both exist).
 	byNS := map[string][]isDecl{}
 	var nsOrder []string      // first-seen order — map iteration is randomized, and docs[0] is the compile's entry document
 	var firstEl *xmltree.Node // for the position of a whole-schema error
@@ -132,7 +138,7 @@ func (c *compiler) compileImportedSchemas(ss *Stylesheet, mods []modChildren) er
 				// imported, which resolution reports on its own.
 				continue
 			}
-			ns := importSchemaNamespace(el)
+			ns := scopedName(c.pkgKey(el), importSchemaNamespace(el))
 			if _, seen := byNS[ns]; !seen {
 				nsOrder = append(nsOrder, ns)
 			}
@@ -142,6 +148,7 @@ func (c *compiler) compileImportedSchemas(ss *Stylesheet, mods []modChildren) er
 	var (
 		docs    []string
 		baseFor string
+		seenDoc = map[string]bool{}
 	)
 	for _, ns := range nsOrder {
 		decls := byNS[ns]
@@ -152,9 +159,12 @@ func (c *compiler) compileImportedSchemas(ss *Stylesheet, mods []modChildren) er
 			}
 		}
 		for _, d := range decls {
-			if d.prec != top {
+			if d.prec != top || seenDoc[d.src] {
 				continue
 			}
+			// Two packages importing the same document contribute its
+			// components once, not a duplicate definition of each.
+			seenDoc[d.src] = true
 			docs = append(docs, d.src)
 			if baseFor == "" {
 				baseFor = d.base
@@ -167,7 +177,7 @@ func (c *compiler) compileImportedSchemas(ss *Stylesheet, mods []modChildren) er
 	// XSD 1.1 is the version this engine presents everywhere else (see the
 	// conformance harness's own XSD_1.1 claim), so schema components imported
 	// into a stylesheet are read under the same rules.
-	sch, err := xsd.Compile(docs, baseFor, xsd.Version11)
+	sch, err := xsd.CompileFS(docs, baseFor, xsd.Version11, c.files)
 	if err != nil {
 		if errors.Is(err, xsd.ErrUnsupported) {
 			// Not an XTSE0220: the schema is not being called invalid, this
@@ -340,7 +350,7 @@ func (c *compiler) importSchemaSource(el *xmltree.Node, baseDir string) (src, ba
 	if !filepath.IsAbs(path) && dir != "" {
 		path = filepath.Join(dir, path)
 	}
-	data, rerr := os.ReadFile(path)
+	data, rerr := c.files.ReadFile(path)
 	if rerr != nil {
 		// Not an error in itself (§3.16): a hint that leads nowhere simply
 		// contributes no components — but the HOST may still have a schema
@@ -518,6 +528,11 @@ func (a *schemaAdapter) CastToSchemaTypeIn(t xmltree.SchemaTypeName, lexical str
 
 func (a *schemaAdapter) CastToSchemaType(t xmltree.SchemaTypeName, lexical string) (xpath.AtomType, error) {
 	return a.sch.CastToSchemaType(t, lexical)
+}
+
+func (a *schemaAdapter) UnionCastMember(t xmltree.SchemaTypeName, lexical string, at *xmltree.Node) (
+	xmltree.SchemaTypeName, bool, bool) {
+	return a.sch.UnionCastMember(t, lexical, at)
 }
 
 // ValidateSchemaDocument implements xpath.SchemaDocumentValidator: the

@@ -286,13 +286,13 @@ func (s *StreamReader) directive(t xml.Directive) error {
 	}
 	// baseDir "" throughout: every one of these helpers uses it only to reach
 	// an external file, which the two checks above have already excluded.
-	if ents := documentEntities(src, ""); len(ents) > 0 {
+	if ents := documentEntities(src, "", nil); len(ents) > 0 {
 		s.dec.Entity = ents
 	}
 	s.idKinds = idAttrKinds(src)
 	s.attrDefaults = attlistDefaults(src)
-	s.elemOnly = elementOnlyDecls(src, "")
-	if u := unparsedEntityDecls(src, ""); len(u) > 0 {
+	s.elemOnly = elementOnlyDecls(src, "", nil)
+	if u := unparsedEntityDecls(src, "", nil); len(u) > 0 {
 		s.doc.SetUnparsed(u)
 	}
 	return nil

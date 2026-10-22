@@ -7,7 +7,6 @@ import (
 
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 	"github.com/tim-riep/go-xslt/internal/xpath"
-	"os"
 	"path/filepath"
 )
 
@@ -125,7 +124,7 @@ func (s *Schema) hintDocs(root *xmltree.Node) []string {
 	}
 	var out []string
 	for _, loc := range locs {
-		data, err := os.ReadFile(filepath.Clean(filepath.Join(s.baseDir, loc)))
+		data, err := s.files.ReadFile(filepath.Clean(filepath.Join(s.baseDir, loc)))
 		if err != nil {
 			continue // hints are hints
 		}

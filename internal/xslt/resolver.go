@@ -1,12 +1,14 @@
 package xslt
 
 import (
+	"bytes"
 	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
+	"github.com/tim-riep/go-xslt/internal/netfetch"
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 )
 
@@ -26,6 +28,11 @@ type fileResolver struct {
 	// the schema documents to validate them against.
 	docVal     map[string]string
 	valSchemas []string
+	// net retrieves http(s) URIs under the host's network policy; nil means
+	// no network access, and such a URI is never looked for on disk either.
+	net *netfetch.Fetcher
+	// files checks every local file this resolver reads; nil checks nothing.
+	files *fsaccess.Guard
 }
 
 func newFileResolver(baseDir string, ss *Stylesheet) *fileResolver {
@@ -43,7 +50,11 @@ func newFileResolver(baseDir string, ss *Stylesheet) *fileResolver {
 	if abs, err := filepath.Abs(baseDir); err == nil {
 		baseDir = abs
 	}
-	return &fileResolver{baseDir: baseDir, docs: map[string]*xmltree.Node{}, ss: ss}
+	r := &fileResolver{baseDir: baseDir, docs: map[string]*xmltree.Node{}, ss: ss}
+	if ss != nil {
+		r.files = ss.files
+	}
+	return r
 }
 
 // setDocValidation records the host's per-document validation requests (see
@@ -81,7 +92,14 @@ func (r *fileResolver) path(uri string) string {
 }
 
 func (r *fileResolver) ResolveText(uri string) (string, bool) {
-	b, err := os.ReadFile(r.path(uri))
+	if netfetch.IsNetworkURI(uri) {
+		resp, err := r.net.Fetch(uri)
+		if err != nil {
+			return "", false
+		}
+		return xmltree.DecodeRetrievedTextAs(resp.Body, resp.Charset), true
+	}
+	b, err := r.files.ReadFile(r.path(uri))
 	if err != nil {
 		return "", false
 	}
@@ -95,16 +113,61 @@ func (r *fileResolver) ResolveText(uri string) (string, bool) {
 // has already been read via fn:doc/document() during this run — used to
 // detect a read/write conflict on xsl:result-document (err:XTDE1500).
 func (r *fileResolver) WasRead(uri string) bool {
-	_, ok := r.docs[r.path(uri)]
+	_, ok := r.docs[r.docKey(uri)]
 	return ok
 }
 
+// docKey is the document-identity key of uri: the filesystem path for a local
+// resource, the URI without its fragment for a network one.
+func (r *fileResolver) docKey(uri string) string {
+	if netfetch.IsNetworkURI(uri) {
+		u := strings.TrimSpace(uri)
+		if i := strings.IndexByte(u, '#'); i >= 0 {
+			u = u[:i]
+		}
+		return u
+	}
+	return r.path(uri)
+}
+
+// resolveNetDoc retrieves and parses a network document. It is parsed with NO
+// base directory, which is what keeps a remote DOCTYPE from reading local
+// files: every external-subset and external-entity lookup in xmltree is
+// skipped when the base directory is empty.
+func (r *fileResolver) resolveNetDoc(key string) (*xmltree.Node, bool) {
+	resp, err := r.net.Fetch(key)
+	if err != nil {
+		return nil, false
+	}
+	var strip xmltree.StripSpaceHook
+	if r.ss != nil {
+		strip = r.ss.stripSpaceHook()
+	}
+	doc, err := xmltree.ParseLenient11WithBaseStripSpace(string(resp.Body), "", strip)
+	if err != nil {
+		return nil, false
+	}
+	if r.ss != nil {
+		r.ss.applyStripSpace(doc)
+	}
+	doc.SetBase(key)
+	r.docs[key] = doc
+	return doc, true
+}
+
 func (r *fileResolver) ResolveDoc(uri string) (*xmltree.Node, bool) {
+	if netfetch.IsNetworkURI(uri) {
+		key := r.docKey(uri)
+		if d, ok := r.docs[key]; ok {
+			return d, true
+		}
+		return r.resolveNetDoc(key)
+	}
 	p := r.path(uri)
 	if d, ok := r.docs[p]; ok {
 		return d, true
 	}
-	b, err := os.ReadFile(p)
+	b, err := r.files.ReadFile(p)
 	if err != nil {
 		return nil, false
 	}
@@ -121,7 +184,7 @@ func (r *fileResolver) ResolveDoc(uri string) (*xmltree.Node, bool) {
 	if r.ss != nil {
 		strip = r.ss.stripSpaceHook()
 	}
-	doc, err := xmltree.ParseLenient11WithBaseStripSpace(string(b), filepath.Dir(p), strip)
+	doc, err := xmltree.ParseLenient11WithBaseStripSpaceFS(string(b), filepath.Dir(p), r.files, strip)
 	if err != nil {
 		return nil, false
 	}
@@ -167,7 +230,14 @@ type streamResolver interface {
 // a hollow tree with the identity of a real one. A stylesheet that wants both
 // must read the document twice, which is exactly what it is asking for.
 func (r *fileResolver) ResolveStream(uri string) (io.ReadCloser, bool) {
-	f, err := os.Open(r.path(uri))
+	if netfetch.IsNetworkURI(uri) {
+		resp, err := r.net.Fetch(uri)
+		if err != nil {
+			return nil, false
+		}
+		return io.NopCloser(bytes.NewReader(resp.Body)), true
+	}
+	f, err := r.files.Open(r.path(uri))
 	if err != nil {
 		return nil, false
 	}
@@ -195,7 +265,7 @@ func (r *fileResolver) globCollection(uri string) ([]*xmltree.Node, bool) {
 		return nil, false
 	}
 	dir := r.path(uri[:q])
-	entries, err := os.ReadDir(dir)
+	entries, err := r.files.ReadDir(dir)
 	if err != nil {
 		return nil, false
 	}

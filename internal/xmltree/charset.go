@@ -85,6 +85,28 @@ func (l *latin1Reader) Read(p []byte) (int, error) {
 	return n2, err
 }
 
+// DecodeRetrievedTextAs is DecodeRetrievedText for a resource whose transport
+// named its encoding (the charset of an HTTP Content-Type). F&O 3.1's
+// fn:unparsed-text puts that "external encoding information" first, ahead of
+// the $encoding argument and of any heuristic (unparsed-text-2002: an ISO-8859-1 page read
+// without an $encoding). A charset this function cannot decode falls back to
+// DecodeRetrievedText.
+func DecodeRetrievedTextAs(b []byte, charset string) string {
+	label := strings.ToLower(strings.TrimSpace(charset))
+	if label == "" || strings.HasPrefix(label, "utf-16") || label == "utf16" {
+		return DecodeRetrievedText(b)
+	}
+	r, err := charsetReader(label, strings.NewReader(string(b)))
+	if err != nil {
+		return DecodeRetrievedText(b)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		return DecodeRetrievedText(b)
+	}
+	return strings.TrimPrefix(string(out), "\uFEFF")
+}
+
 // DecodeRetrievedText decodes the bytes of a retrieved text resource
 // (fn:unparsed-text and friends) to a string: a byte-order mark identifies and
 // strips itself, and a resource that is not valid UTF-8 but declares an

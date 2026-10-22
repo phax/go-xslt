@@ -54,6 +54,8 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
         params,
         initialTemplate: run.initialTemplate ?? "",
         baseDir: tab.projectId,
+        // The desktop tester keeps the engine's default: no network access.
+        security: { allowNetwork: false },
       }),
     [stylesheetBuf.text, sourceBuf.text, params, run.initialTemplate, tab.projectId],
   );

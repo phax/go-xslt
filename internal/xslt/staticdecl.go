@@ -2,7 +2,6 @@ package xslt
 
 import (
 	"github.com/tim-riep/go-xslt/internal/fileuri"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -272,11 +271,11 @@ func (c *compiler) loadStaticModule(el *xmltree.Node, baseDir string, seen map[s
 	if seen[abs] {
 		return nil, "", "", false
 	}
-	data, err := os.ReadFile(abs)
+	data, err := c.files.ReadFile(abs)
 	if err != nil {
 		return nil, "", "", false
 	}
-	doc, err := xmltree.ParseLenient11WithBase(string(data), filepath.Dir(abs))
+	doc, err := xmltree.ParseLenient11WithBaseFS(string(data), filepath.Dir(abs), c.files)
 	if err != nil {
 		return nil, "", "", false
 	}

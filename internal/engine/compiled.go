@@ -29,6 +29,11 @@ type TransformRequest struct {
 	Params map[string]string `json:"params"`
 	// InitialTemplate optionally names an xsl:template to invoke first.
 	InitialTemplate string `json:"initialTemplate"`
+	// Security limits which files (under the Stylesheet's BaseDir) and
+	// network resources this run may read; the zero value allows files under
+	// BaseDir only, and no network. The compile itself was limited by the
+	// Security of the Request given to Compile.
+	Security Security `json:"security"`
 }
 
 // Compile compiles req.Stylesheet (resolving xsl:import/xsl:include against
@@ -47,7 +52,7 @@ func Compile(req Request) (sheet *Stylesheet, diags []Diagnostic) {
 	if req.Stylesheet == "" {
 		return nil, []Diagnostic{{Severity: SeverityError, Code: "XTSE0010", Phase: "parse", Message: "empty stylesheet"}}
 	}
-	ss, err := xslt.CompileFrom(req.Stylesheet, req.BaseDir)
+	ss, err := xslt.CompileFromFS(req.Stylesheet, req.BaseDir, FileGuard(req.Security, req.BaseDir))
 	if err != nil {
 		return nil, []Diagnostic{diagFromErr(err, "compile")}
 	}
@@ -60,7 +65,7 @@ func Compile(req Request) (sheet *Stylesheet, diags []Diagnostic) {
 func (s *Stylesheet) Transform(tr TransformRequest) (res Result) {
 	start := time.Now()
 	defer s.finish(&res, start)
-	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params}
+	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir)}
 	rr, err := s.ss.TransformEntry(tr.Source, entry, s.baseDir)
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}
@@ -77,7 +82,7 @@ func (s *Stylesheet) Transform(tr TransformRequest) (res Result) {
 func (s *Stylesheet) TransformTo(w io.Writer, tr TransformRequest) (res Result) {
 	start := time.Now()
 	defer s.finish(&res, start)
-	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params}
+	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir)}
 	rr, err := s.ss.TransformEntryTo(w, tr.Source, entry, s.baseDir, chunkableStylesheet(s.src))
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}

@@ -2,10 +2,11 @@ package engine
 
 import (
 	"github.com/tim-riep/go-xslt/internal/fileuri"
-	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
+	"github.com/tim-riep/go-xslt/internal/netfetch"
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 )
 
@@ -18,6 +19,12 @@ import (
 // nothing to cache across calls.
 type standaloneResolver struct {
 	baseDir string
+	// net retrieves http(s) URIs; nil means no network access.
+	net *netfetch.Fetcher
+	// noDisk is set when there is no BaseDir: then no local file is read.
+	noDisk bool
+	// files checks every local file read; nil checks nothing.
+	files *fsaccess.Guard
 }
 
 func newStandaloneResolver(baseDir string) *standaloneResolver {
@@ -64,7 +71,17 @@ func (r *standaloneResolver) path(uri string) string {
 }
 
 func (r *standaloneResolver) ResolveText(uri string) (string, bool) {
-	b, err := os.ReadFile(r.path(uri))
+	if netfetch.IsNetworkURI(uri) {
+		resp, err := r.net.Fetch(uri)
+		if err != nil {
+			return "", false
+		}
+		return xmltree.DecodeRetrievedTextAs(resp.Body, resp.Charset), true
+	}
+	if r.noDisk {
+		return "", false
+	}
+	b, err := r.files.ReadFile(r.path(uri))
 	if err != nil {
 		return "", false
 	}
@@ -72,12 +89,28 @@ func (r *standaloneResolver) ResolveText(uri string) (string, bool) {
 }
 
 func (r *standaloneResolver) ResolveDoc(uri string) (*xmltree.Node, bool) {
+	if netfetch.IsNetworkURI(uri) {
+		resp, err := r.net.Fetch(uri)
+		if err != nil {
+			return nil, false
+		}
+		// No base directory: a remote DOCTYPE never reads a local file.
+		doc, err := xmltree.ParseLenient11WithBase(string(resp.Body), "")
+		if err != nil {
+			return nil, false
+		}
+		doc.SetBase(strings.TrimSpace(uri))
+		return doc, true
+	}
+	if r.noDisk {
+		return nil, false
+	}
 	p := r.path(uri)
-	b, err := os.ReadFile(p)
+	b, err := r.files.ReadFile(p)
 	if err != nil {
 		return nil, false
 	}
-	doc, err := xmltree.ParseLenient11WithBase(string(b), filepath.Dir(p))
+	doc, err := xmltree.ParseLenient11WithBaseFS(string(b), filepath.Dir(p), r.files)
 	if err != nil {
 		return nil, false
 	}
@@ -91,6 +124,9 @@ func (r *standaloneResolver) ResolveDoc(uri string) (*xmltree.Node, bool) {
 // unavailable — there is no host-supplied collection binding in the
 // standalone playground.
 func (r *standaloneResolver) ResolveCollection(uri string) ([]*xmltree.Node, bool) {
+	if r.noDisk {
+		return nil, false
+	}
 	q := strings.IndexByte(uri, '?')
 	if q < 0 {
 		return nil, false
@@ -105,7 +141,7 @@ func (r *standaloneResolver) ResolveCollection(uri string) ([]*xmltree.Node, boo
 		return nil, false
 	}
 	dir := r.path(uri[:q])
-	entries, err := os.ReadDir(dir)
+	entries, err := r.files.ReadDir(dir)
 	if err != nil {
 		return nil, false
 	}

@@ -3,6 +3,7 @@ package xslt
 import (
 	"fmt"
 	"github.com/tim-riep/go-xslt/internal/fileuri"
+	"github.com/tim-riep/go-xslt/internal/fsaccess"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,6 +56,10 @@ func init() {
 			baseDir:  eng.baseDir,
 			resolver: eng.resolver,
 			packages: eng.sheet.packages,
+			files:    eng.sheet.files,
+		}
+		if fr, ok := eng.resolver.(*fileResolver); ok {
+			host.files = fr.files
 		}
 		v, err := xfRun(opts, host)
 		return v, true, err
@@ -95,6 +100,9 @@ type xfHost struct {
 	baseDir  string
 	resolver xpath.ResourceResolver
 	packages []PackageSource
+	// files checks the local files the nested transformation reads; it is
+	// the caller's guard, so fn:transform cannot widen what a run may read.
+	files *fsaccess.Guard
 }
 
 // xfOptsArg validates the single map(*) argument shape shared by both call
@@ -236,13 +244,19 @@ func xfRun(opts *xpath.Map, host xfHost) (xpath.Object, error) {
 			statics[xfQNameKey(k)] = xfLiteralOf(m.Get(k))
 		}
 	}
-	ss, err := CompileAtWithPackages(src, selfPath, statics, host.packages)
+	ss, err := compileModule(src, filepath.Dir(selfPath), selfPath, statics, host.packages, nil, host.files)
 	if err != nil {
 		return nil, err
 	}
 
 	// --- build the entry point -----------------------------------------------
 	e := Entry{RequirePublicEntry: packageEntry}
+	// A nested transformation runs under its caller's network policy, and
+	// shares its caller's fetched resources (one execution scope).
+	if fr, ok := host.resolver.(*fileResolver); ok {
+		e.Fetcher = fr.net
+	}
+	e.Files = host.files
 	runDir := filepath.Dir(selfPath)
 	if runDir == "." || runDir == "" {
 		runDir = host.baseDir
@@ -488,7 +502,7 @@ func xfFetchText(uri string, host xfHost) (string, bool) {
 	}
 	p := xfPathOf(uri)
 	if filepath.IsAbs(p) {
-		if b, err := os.ReadFile(p); err == nil {
+		if b, err := host.files.ReadFile(p); err == nil {
 			return string(b), true
 		}
 	}

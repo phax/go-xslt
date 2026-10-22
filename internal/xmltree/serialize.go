@@ -408,6 +408,10 @@ func topLevel(n *Node) []*Node {
 }
 
 type serializer struct {
+	// child describes the node about to be serialized relative to its parent,
+	// set by the loop that walks the parent's children (see childPos): it is
+	// how startTag decides indentation without rescanning siblings.
+	child    childPos
 	b        outWriter
 	opts     SerializeOptions
 	declared map[string]string // uri -> prefix currently in scope
@@ -452,8 +456,14 @@ func (s *serializer) node(n *Node, depth int) {
 		if s.xmlVersion11() {
 			v = escapeControls(v)
 		}
-		if s.opts.Method == "html" || s.opts.Method == "xhtml" {
+		// &nbsp; only for the html method: the xhtml method writes XML
+		// (Serialization 3.1 §6), where an undeclared &nbsp; is not
+		// well-formed; U+00A0 is written as the character (or as a character
+		// reference by escapeRepertoire when the encoding lacks it).
+		if s.opts.Method == "html" {
 			v = strings.ReplaceAll(v, "\u00a0", "&nbsp;")
+		}
+		if s.opts.Method == "html" || s.opts.Method == "xhtml" {
 			v = escapeC1(v)
 		}
 		s.b.WriteString(v)
@@ -462,7 +472,11 @@ func (s *serializer) node(n *Node, depth int) {
 	case KindPI:
 		s.b.WriteString("<?" + n.Name.Local + " " + n.Value + "?>")
 	case KindDocument:
-		for _, c := range n.Children {
+		for i, c := range n.Children {
+			s.child = childPos{parentMayIndent: true}
+			if i > 0 {
+				s.child.prev = n.Children[i-1]
+			}
 			s.node(c, depth)
 		}
 	}
@@ -577,9 +591,18 @@ func (s *serializer) startTag(n *Node, depth int) elemOpen {
 	// its PARENT's (not-yet-suppressed) state (fn-transform-66: <my:b> has
 	// an element child and was still indenting its own </my:b>).
 	triggersSuppress := !s.suppress && nameIn(s.opts.SuppressIndentation, n.Name)
-	indent := s.opts.Indent && !s.suppress && !triggersSuppress && hasElementChildren(n)
+	// Indentation whitespace goes only where Serialization 3.1 lets it: in
+	// the immediate content of an element without non-whitespace text
+	// (§5.1.4: never next to a text node that has other characters), never
+	// inside pre/script/style/title/textarea and never next to an inline
+	// element for html/xhtml (§6.1.4, §7.4.3: it would change rendering —
+	// validation-0201's "Kennedy <span>").
+	pos := s.child
+	indent := s.opts.Indent && !s.suppress && !triggersSuppress && hasElementChildren(n) &&
+		s.mayIndentIn(n) && !s.inlineElement(lastChild(n))
 
-	if s.opts.Indent && !s.suppress && depth > 0 {
+	if s.opts.Indent && !s.suppress && depth > 0 && pos.parentMayIndent &&
+		!s.inlineElement(n) && !s.inlineElement(pos.prev) {
 		s.b.WriteString("\n" + strings.Repeat("  ", depth))
 	}
 	suppressed := false
@@ -811,7 +834,12 @@ func (s *serializer) element(n *Node, depth int) {
 	}
 
 	s.b.WriteString(">" + o.meta)
-	for _, c := range n.Children {
+	may := s.opts.Indent && s.mayIndentIn(n)
+	for i, c := range n.Children {
+		s.child = childPos{parentMayIndent: may}
+		if i > 0 {
+			s.child.prev = n.Children[i-1]
+		}
 		s.node(c, depth+1)
 	}
 	s.closeTag(o, depth)
@@ -873,6 +901,82 @@ func (s *serializer) undeclare(saves []nsSave) {
 			delete(s.prefixes, sv.pfx)
 		}
 	}
+}
+
+// childPos is what indentation needs to know about a node's position: whether
+// its parent's immediate content may take indentation whitespace at all, and
+// the node just before it.
+type childPos struct {
+	parentMayIndent bool
+	prev            *Node
+}
+
+// htmlInlineElements are the inline elements of Serialization 3.1 §6.1.4 /
+// §7.4.3: the %inline elements of the XHTML 1.0 DTDs plus the HTML5 phrasing
+// elements (meta and link only count as phrasing in special cases and are
+// left out, so a head still indents).
+var htmlInlineElements = map[string]bool{
+	"a": true, "abbr": true, "acronym": true, "applet": true, "audio": true, "b": true,
+	"basefont": true, "bdi": true, "bdo": true, "big": true, "br": true, "button": true,
+	"canvas": true, "cite": true, "code": true, "data": true, "datalist": true, "del": true,
+	"dfn": true, "em": true, "embed": true, "font": true, "i": true, "iframe": true,
+	"img": true, "input": true, "ins": true, "kbd": true, "label": true, "map": true,
+	"mark": true, "math": true, "meter": true, "noscript": true, "object": true,
+	"output": true, "picture": true, "progress": true, "q": true, "ruby": true, "s": true,
+	"samp": true, "script": true, "select": true, "slot": true, "small": true, "span": true,
+	"strike": true, "strong": true, "sub": true, "sup": true, "svg": true, "template": true,
+	"textarea": true, "time": true, "tt": true, "u": true, "var": true, "video": true, "wbr": true,
+}
+
+// htmlFormattedElements keep their content's whitespace exactly (§6.1.4,
+// §7.4.3).
+var htmlFormattedElements = map[string]bool{"pre": true, "script": true, "style": true, "title": true, "textarea": true}
+
+// htmlElement reports whether n is recognized as an HTML element by the
+// current output method: no namespace for html, the XHTML namespace for
+// xhtml.
+func (s *serializer) htmlElement(n *Node) bool {
+	if n == nil || n.Kind != KindElement {
+		return false
+	}
+	switch s.opts.Method {
+	case "html":
+		return n.Name.Space == "" || n.Name.Space == "http://www.w3.org/1999/xhtml"
+	case "xhtml":
+		return n.Name.Space == "http://www.w3.org/1999/xhtml"
+	}
+	return false
+}
+
+func (s *serializer) inlineElement(n *Node) bool {
+	return s.htmlElement(n) && htmlInlineElements[strings.ToLower(n.Name.Local)]
+}
+
+// mayIndentIn reports whether indentation whitespace may be added in the
+// immediate content of p.
+func (s *serializer) mayIndentIn(p *Node) bool {
+	if p == nil || p.Kind == KindDocument {
+		return true
+	}
+	if p.Kind != KindElement {
+		return false
+	}
+	if s.htmlElement(p) && htmlFormattedElements[strings.ToLower(p.Name.Local)] {
+		return false
+	}
+	for _, c := range p.Children {
+		if c.Kind == KindText && strings.Trim(c.Value, " \t\r\n") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func lastChild(n *Node) *Node {
+	if n == nil || len(n.Children) == 0 {
+		return nil
+	}
+	return n.Children[len(n.Children)-1]
 }
 
 func hasElementChildren(n *Node) bool {
