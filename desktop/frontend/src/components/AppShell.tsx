@@ -1,17 +1,21 @@
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { createProject, listProjects, openProject } from "../lib/api";
 import { useAppDispatch, useAppState } from "../state/store";
 import { ContextMenuHost } from "./ContextMenuHost";
 import { DialogHost } from "./DialogHost";
-import { FileEditorView } from "./FileEditorView";
 import { LicensesButton } from "./LicensesView";
 import { Sidebar } from "./Sidebar";
 import { TabStrip } from "./TabStrip";
 import { Toaster } from "./Toaster";
-import { TransformRunView } from "./TransformRunView";
-import { ValidateRunView } from "./ValidateRunView";
-import { XpathRunView } from "./XpathRunView";
+
+// The four tab views pull in CodeMirror, by far the biggest dependency. They
+// are loaded on first use, so the shell (sidebar, tabs, dialogs) starts from a
+// small bundle and the editor chunk is fetched while the first tab opens.
+const FileEditorView = lazy(() => import("./FileEditorView").then((m) => ({ default: m.FileEditorView })));
+const TransformRunView = lazy(() => import("./TransformRunView").then((m) => ({ default: m.TransformRunView })));
+const ValidateRunView = lazy(() => import("./ValidateRunView").then((m) => ({ default: m.ValidateRunView })));
+const XpathRunView = lazy(() => import("./XpathRunView").then((m) => ({ default: m.XpathRunView })));
 
 /** Runs once, ever, for the life of the app window: loads the known-project
  * registry and, if nothing has ever been opened, seeds and opens a starter
@@ -75,6 +79,7 @@ export function AppShell() {
                     <div>Pick a file or a saved run from the sidebar.</div>
                   </div>
                 )}
+                <Suspense fallback={<div className="empty-state"><div>Loading…</div></div>}>
                 {activeProject && activeTab?.kind === "file" && <FileEditorView key={activeTab.id} tab={activeTab} />}
                 {activeProject && activeTab?.kind === "run" && activeRun?.kind === "transform" && (
                   <TransformRunView key={activeTab.id} tab={activeTab} run={activeRun} />
@@ -85,6 +90,7 @@ export function AppShell() {
                 {activeProject && activeTab?.kind === "run" && activeRun?.kind === "xpath" && (
                   <XpathRunView key={activeTab.id} tab={activeTab} run={activeRun} />
                 )}
+                </Suspense>
                 {activeProject && activeTab?.kind === "run" && !activeRun && (
                   <div className="empty-state">
                     <div className="empty-state-title">Run not found</div>

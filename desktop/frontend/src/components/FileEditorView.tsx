@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { buffers, useBuffer } from "../state/buffers";
 import { useProjectActions } from "../state/projectActions";
 import { useAppState } from "../state/store";
@@ -6,7 +6,9 @@ import type { FileTab } from "../state/types";
 import { Editor } from "./Editor";
 import { dirname } from "../state/paths";
 import { Icon } from "./Icon";
-import { SchemaStructureView } from "./SchemaStructureView";
+
+// Only needed once someone switches an .xsd to the structure view.
+const SchemaStructureView = lazy(() => import("./SchemaStructureView").then((m) => ({ default: m.SchemaStructureView })));
 
 /** A plain project file opened for editing — any extension, not just the
  * ones a run references. Autosaves through the shared buffer store. */
@@ -69,11 +71,13 @@ export function FileEditorView({ tab }: { tab: FileTab }) {
       </div>
       <div className="editor-wrap">
         {isXsd && mode === "structure" ? (
-          <SchemaStructureView
-            schemas={[buf.text]}
-            baseDir={tab.path.includes("/") ? `${project.dir}/${dirname(tab.path)}` : project.dir}
-            version={xsdVersion}
-          />
+          <Suspense fallback={<div className="struct-empty">Loading…</div>}>
+            <SchemaStructureView
+              schemas={[buf.text]}
+              baseDir={tab.path.includes("/") ? `${project.dir}/${dirname(tab.path)}` : project.dir}
+              version={xsdVersion}
+            />
+          </Suspense>
         ) : (
           <Editor value={buf.text} onChange={(v) => buffers.setText(tab.projectId, tab.path, v)} />
         )}
