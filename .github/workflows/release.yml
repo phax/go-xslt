@@ -33,17 +33,24 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
-  build-macos-windows:
-    name: Build macOS + Windows
+  # One job per macOS architecture, so the two builds and — the long part —
+  # the two Apple notarizations run side by side instead of one after the other.
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
     needs: test
     runs-on: macos-latest
     # Apple's notary service can take an hour or more for a new developer
-    # account; the waits below are bounded well inside this.
+    # account; the wait below is bounded well inside this.
     timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, amd64]
     env:
-      # Without the signing secrets (a fork, say) the macOS bundles stay
-      # ad-hoc signed, as before.
+      # Without the signing secrets (a fork, say) the bundle stays ad-hoc
+      # signed, as before.
       SIGN_MACOS: ${{ secrets.MACOS_CERT_P12_BASE64 != '' }}
+      APP: go-xslt-darwin-${{ matrix.arch }}.app
     steps:
       - uses: actions/checkout@v4
 
@@ -57,20 +64,24 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/frontend/package-lock.json
 
+      - name: Cache the wails3 CLI
+        id: wails3
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/wails3
+          key: wails3-${{ runner.os }}-${{ runner.arch }}-${{ env.WAILS3_VERSION }}
+
       - name: Install wails3 CLI
+        if: steps.wails3.outputs.cache-hit != 'true'
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS3_VERSION }}
 
-      # Both macOS archs build natively (Xcode's clang cross-targets Apple
-      # Silicon + Intel from either host arch) and both Windows archs are
-      # pure-Go cross-compiles (CGO_ENABLED=0), so this one macOS runner
-      # covers all four of those variants without Docker.
-      - name: Build macOS (arm64 + amd64) and Windows (amd64 + arm64)
+      # Both archs build natively (Xcode's clang cross-targets Apple Silicon
+      # and Intel from either host arch).
+      - name: Build macOS (${{ matrix.arch }})
         working-directory: desktop
-        run: |
-          make build-mac
-          make build-win
+        run: make build-mac-${{ matrix.arch }}
 
-      # --- macOS: Developer ID signing, notarization, stapling -------------
+      # --- Developer ID signing, notarization, stapling ----------------------
       # The certificate lives in a throwaway keychain that is deleted at the
       # end. Apple's "Developer ID G2" intermediate certificate has to be in
       # it too, or the identity does not count as valid; it is pinned by its
@@ -102,20 +113,17 @@ jobs:
           echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
           echo "IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
-      - name: Sign the macOS .app bundles
+      - name: Sign the .app bundle
         if: env.SIGN_MACOS == 'true'
         working-directory: desktop/build/bin
         run: |
           set -euo pipefail
-          for app in go-xslt-darwin-arm64.app go-xslt-darwin-amd64.app; do
-            codesign --force --deep --options runtime --timestamp --keychain "$KEYCHAIN" --sign "$IDENTITY" "$app"
-            codesign --verify --deep --strict --verbose=2 "$app"
-          done
+          codesign --force --deep --options runtime --timestamp --keychain "$KEYCHAIN" --sign "$IDENTITY" "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
 
-      # Both bundles are submitted first and waited for afterwards, so the two
-      # Apple queues run side by side. Anything but "Accepted" fails the job
-      # (with Apple's log), and so the release is never published.
-      - name: Notarize the macOS .app bundles
+      # Anything but "Accepted" fails the job (with Apple's log), and so the
+      # release is never published.
+      - name: Notarize the .app bundle
         if: env.SIGN_MACOS == 'true'
         working-directory: desktop/build/bin
         env:
@@ -124,58 +132,86 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          xcrun notarytool store-credentials ci --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD" --keychain "$KEYCHAIN" > /dev/null
-          NOTARY=(xcrun notarytool --keychain-profile ci --keychain "$KEYCHAIN")
-          for arch in arm64 amd64; do
-            ditto -c -k --keepParent "go-xslt-darwin-$arch.app" "notarize-$arch.zip"
-            "${NOTARY[@]}" submit "notarize-$arch.zip" --output-format json > "submit-$arch.json"
-            echo "submitted $arch: $(jq -r .id "submit-$arch.json")"
-          done
-          failed=0
-          for arch in arm64 amd64; do
-            id="$(jq -r .id "submit-$arch.json")"
-            "${NOTARY[@]}" wait "$id" --timeout 3h > /dev/null || true
-            status="$("${NOTARY[@]}" info "$id" --output-format json | jq -r .status)"
-            echo "$arch: $status"
-            if [ "$status" != "Accepted" ]; then
-              "${NOTARY[@]}" log "$id" || true
-              failed=1
-            fi
-          done
-          exit $failed
+          # The credentials go straight to notarytool (the values are masked in
+          # the log). `store-credentials` into the throwaway keychain crashed
+          # notarytool on the runner.
+          AUTH=(--apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID")
+          ditto -c -k --keepParent "$APP" notarize.zip
+          id="$(xcrun notarytool submit notarize.zip "${AUTH[@]}" --output-format json | jq -r .id)"
+          echo "submitted ${{ matrix.arch }}: $id"
+          xcrun notarytool wait "$id" "${AUTH[@]}" --timeout 3h > /dev/null || true
+          status="$(xcrun notarytool info "$id" "${AUTH[@]}" --output-format json | jq -r .status)"
+          echo "${{ matrix.arch }}: $status"
+          if [ "$status" != "Accepted" ]; then
+            xcrun notarytool log "$id" "${AUTH[@]}" || true
+            exit 1
+          fi
+          rm -f notarize.zip
 
-      - name: Staple the notarization tickets
+      - name: Staple the notarization ticket
         if: env.SIGN_MACOS == 'true'
         working-directory: desktop/build/bin
         run: |
           set -euo pipefail
-          for app in go-xslt-darwin-arm64.app go-xslt-darwin-amd64.app; do
-            xcrun stapler staple "$app"
-            xcrun stapler validate "$app"
-            spctl --assess --type execute --verbose=4 "$app"
-          done
-          rm -f notarize-*.zip submit-*.json
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose=4 "$APP"
 
       - name: Remove the signing keychain
         if: always() && env.SIGN_MACOS == 'true'
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
-      # A directory isn't a valid single-file release asset, so zip each
-      # .app (signed and notarized above, ad-hoc signed without the secrets)
-      # before upload. -y preserves the bundle's symlinks.
-      - name: Zip the macOS .app bundles
+      # A directory isn't a valid single-file release asset, so zip the .app
+      # (signed and notarized above, ad-hoc signed without the secrets) before
+      # upload. -y preserves the bundle's symlinks.
+      - name: Zip the macOS .app bundle
         working-directory: desktop/build/bin
-        run: |
-          zip -r -y go-xslt-darwin-arm64.app.zip go-xslt-darwin-arm64.app
-          zip -r -y go-xslt-darwin-amd64.app.zip go-xslt-darwin-amd64.app
+        run: zip -r -y "$APP.zip" "$APP"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: desktop-macos-windows
+          name: desktop-macos-${{ matrix.arch }}
+          path: desktop/build/bin/go-xslt-darwin-${{ matrix.arch }}.app.zip
+          if-no-files-found: error
+
+  # Windows is pure Go (CGO_ENABLED=0, no Windows toolchain needed), so it
+  # cross-compiles on a cheap Linux runner.
+  build-windows:
+    name: Build Windows
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Cache the wails3 CLI
+        id: wails3
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/wails3
+          key: wails3-${{ runner.os }}-${{ runner.arch }}-${{ env.WAILS3_VERSION }}
+
+      - name: Install wails3 CLI
+        if: steps.wails3.outputs.cache-hit != 'true'
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS3_VERSION }}
+
+      - name: Build Windows (amd64 + arm64)
+        working-directory: desktop
+        run: make build-win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
           path: |
-            desktop/build/bin/go-xslt-darwin-arm64.app.zip
-            desktop/build/bin/go-xslt-darwin-amd64.app.zip
             desktop/build/bin/go-xslt-windows-amd64.exe
             desktop/build/bin/go-xslt-windows-arm64.exe
           if-no-files-found: error
@@ -209,7 +245,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
 
+      - name: Cache the wails3 CLI
+        id: wails3
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/wails3
+          key: wails3-${{ runner.os }}-${{ runner.arch }}-${{ env.WAILS3_VERSION }}
+
       - name: Install wails3 CLI
+        if: steps.wails3.outputs.cache-hit != 'true'
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS3_VERSION }}
 
       - name: Build Linux (amd64)
@@ -224,7 +268,7 @@ jobs:
 
   release:
     name: Publish GitHub release
-    needs: [build-macos-windows, build-linux]
+    needs: [build-macos, build-windows, build-linux]
     # A manual run (workflow_dispatch) only leaves artifacts behind.
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
