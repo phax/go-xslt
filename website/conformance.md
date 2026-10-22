@@ -9,8 +9,8 @@ Measured on 2026-10-11, release `v0.0.6`.
 
 | Suite | Source | Pass rate |
 |---|---|---|
-| XSLT 3.0, basic processor | [w3c/xslt30-test](https://github.com/w3c/xslt30-test) | **99.9%** (8,126 of 8,138) |
-| XSLT 3.0 with streaming, schema-awareness and backwards compatibility | same | **99.7%** (11,779 of 11,808) |
+| XSLT 3.0, basic processor | [w3c/xslt30-test](https://github.com/w3c/xslt30-test) | **99.9%** (8,614 of 8,626) |
+| XSLT 3.0 with streaming, schema-awareness and backwards compatibility | same | **99.8%** (12,267 of 12,296) |
 | XPath 3.1 and F&O 3.1 (QT3) | [w3c/qt3tests](https://github.com/w3c/qt3tests) | **99.8%** (22,099 of 22,153) |
 | XSD 1.0 | [w3c/xsdtests](https://github.com/w3c/xsdtests) | **99.99%** (39,346 of 39,351) |
 | XSD 1.1 | same | **99.99%** (41,499 of 41,503) |
@@ -35,13 +35,22 @@ The remaining failures fall into a few groups:
 - a few edge cases whose fix would cost far more than it is worth, each with
   its reason
 
-## Skipped by design
+## Excluded cases
 
-The `unicode-90` cases assume Unicode 9.0. Which Unicode version a processor
-supports is implementation-defined, and Go ships Unicode 15.0. A separate test
-checks every character-category escape against the suite's Unicode 9.0 data
-instead, and requires agreement for every code point whose category did not
-change between the two versions.
+Two test sets were written for old Unicode versions (`unicode-90` for 9.0,
+`regex-classes` for 3.1 to 6.0). Their cases run like any other; only these
+are excluded, each with a documented reason:
+
+- **Unicode version (44 cases).** The expected result is the character data
+  of the old version. Which Unicode version a processor supports is
+  implementation-defined; go-xslt uses Unicode 15.0 and agrees with it for
+  every code point.
+- **Defects in the suite (1,048 cases).** No implementation can pass them as
+  written: most generated `unicode-90` cases never pass the category they are
+  meant to test, so they all test lowercase letters.
+
+The full list and the reasoning are in
+[`docs/accepted-failures/xslt30.md`](https://github.com/tim-riep/go-xslt/blob/main/docs/accepted-failures/xslt30.md).
 
 ## Running the suites yourself
 

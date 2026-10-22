@@ -80,7 +80,9 @@ appends the actual error message to an `errored` failure reason;
 actually failed instead of just "all-of"/"any-of"; `XSLT30_PANICDUMP=1`
 prints a stack trace for a case that panics; `XSLT30_STRICTCODE=1`
 additionally requires an expected-error assertion's catalog `@code` to
-match, not just that some error was raised. `XSLT30_NETWORK=1` lets the
+match, not just that some error was raised. `XSLT30_U90=1` also runs the
+Unicode-version cases that are normally excluded with a reason (see
+`unicode_exclusions_test.go`). `XSLT30_NETWORK=1` lets the
 cases that read live web pages go online (off by default, so a run never
 depends on the network). Results are summarised in
 `tools/xslt30_results.txt` and `tools/xslt30_byset.csv`.

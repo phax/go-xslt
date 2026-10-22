@@ -58,6 +58,7 @@ func registryLen(m *sync.Map) int {
 // compiles one stylesheet after another would otherwise grow without bound.
 func TestRegistriesReleaseStylesheets(t *testing.T) {
 	before := registryLen(&featureRegistry)
+	beforeSchemas := registryLen(&schemaRegistry)
 	for i := 0; i < 200; i++ {
 		if _, err := CompileWith(importSchemaXSL, "", CompileOptions{Features: &Features{SchemaAware: true}}); err != nil {
 			t.Fatal(err)
@@ -68,14 +69,14 @@ func TestRegistriesReleaseStylesheets(t *testing.T) {
 	}
 	// Cleanups run after a collection, on their own goroutine; give them a
 	// bounded number of collections, not a wall-clock wait.
-	for i := 0; i < 50 && registryLen(&featureRegistry) > before+10; i++ {
+	for i := 0; i < 50 && (registryLen(&featureRegistry) > before+10 || registryLen(&schemaRegistry) > beforeSchemas+10); i++ {
 		runtime.GC()
 		runtime.Gosched()
 	}
 	if n := registryLen(&featureRegistry); n > before+10 {
 		t.Errorf("feature registry still holds %d entries after 200 discarded compiles", n-before)
 	}
-	if n := registryLen(&schemaRegistry); n > 10 {
-		t.Errorf("schema registry still holds %d entries after 200 discarded compiles", n)
+	if n := registryLen(&schemaRegistry); n > beforeSchemas+10 {
+		t.Errorf("schema registry still holds %d entries after 200 discarded compiles", n-beforeSchemas)
 	}
 }

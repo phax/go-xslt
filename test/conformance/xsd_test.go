@@ -176,7 +176,7 @@ func runXSDSet(setPath, ver string, verbose bool) *xsdResult {
 		return r
 	}
 	if !versionApplies(set.Version, ver) {
-		return r // whole set out of scope for this version (e.g. saxon 1.1 sets)
+		return r // whole set out of scope for this version (e.g. the 1.1-only sets)
 	}
 	dir := filepath.Dir(setPath)
 	for _, g := range set.Groups {

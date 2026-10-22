@@ -369,7 +369,7 @@ hard cases) after every change. Net +225 pass (1.0) over M12.
 Did NOT reach 99% — landed at 97.5%. Every change was FP-safe (the invariant held).
 The remaining ~570 (1.0) is dominated by the particle/complexType restriction-
 derivation crux (~155, resisted twice, FP-prone) and a long heterogeneous tail
-(saxon/addB/Negative ~150, regex char-class grammar ~30) that yields only a few
+(contributed/addB/Negative ~150, regex char-class grammar ~30) that yields only a few
 tests per bespoke rule.
 
 Rules added this round (all structural, FP-gated, NIST=100%):
@@ -445,7 +445,7 @@ Earlier this round (Phases B–C):
 
 Did NOT reach 98% (landed 97.7%, +111 short). The remainder is a heterogeneous
 tail: element/attribute @block instance edges (elemT/elemZ), attribute/complex
-derivation-in-restriction (attZ/ctZ), saxon combined tests (test./simple), the
+derivation-in-restriction (attZ/ctZ), contributed combined tests (test./simple), the
 sun Negative set, residual pattern FPs (\i/\c XML-name classes — shared xpath
 regex, not touched), and the restriction-derivation crux (particles/ct). Each
 yields only a few tests per bespoke rule.
@@ -485,7 +485,7 @@ Reverted (regressed / broke the invariant, per FP-gating):
   ErrUnsupported fallback is load-bearing).
 
 Remaining +67 to 98%: heterogeneous @block/substitution instance edges
-(elemT/elemZ), sun Negative set (spread across all sets), addB adhoc, saxon
+(elemT/elemZ), sun Negative set (spread across all sets), addB adhoc, contributed
 combined, and the restriction-derivation crux — each a few tests per bespoke rule.
 
 --------------------------------------------------------------------------------
@@ -520,7 +520,7 @@ panic on every schema, NIST→0). Each was caught immediately and reverted.
 
 Remaining +12 to a solid 98.0%: @block/@final for anyType-declared elements
 (elemT026 — needs union/list base tracking to walk to anyType), and the
-heterogeneous saxon-union-derivation / Negative / addB tail — all FP-prone
+heterogeneous contributed union-derivation / Negative / addB tail — all FP-prone
 instance/derivation edges. The restriction crux stays out of scope.
 
 --------------------------------------------------------------------------------
@@ -555,7 +555,7 @@ type-chain walk against typed-nil (the M16 cyclic-type walk panicked NIST→0 �
 round's derivationMethodsTo/substGroup walks are guarded).
 
 Remaining +68 to 98.2%: typed-value identity-constraint comparison (idF012 —
-boolean 1 vs decimal 1; needs PSVI), chameleon internal-ref resolution, the saxon
+boolean 1 vs decimal 1; needs PSVI), chameleon internal-ref resolution, the contributed
 union-derivation corner cases, the Negative/addB tail, and the restriction crux.
 
 --------------------------------------------------------------------------------
@@ -584,7 +584,7 @@ middle-dot U+00B7, Arabic marks, etc. — that the approximate regex misses; FP
 valid schemas that use it; net-zero pass, +2 FP).
 
 The remaining +64 to 98.2% is an increasingly FP-prone tail: the att cluster keeps
-snagging valid Unicode-name / reserved-namespace edge cases; the saxon
+snagging valid Unicode-name / reserved-namespace edge cases; the contributed
 union-derivation corner cases; typed keyref; the Negative/addB set; and the
 restriction crux. Progress is now +1..3 tests per rule with a landmine roughly
 every third attempt — the clean, NIST-100%/FP-safe frontier is thinning.
@@ -680,7 +680,7 @@ Conclusion: the FP-safe frontier above the M19 result is EXHAUSTED. Every remain
 catchable 1.0 test needs machinery that is out of scope or that trades FP for MI:
 attribute-group restriction validity (schM/ctE018/019), occurrence-counting UPA
 (mgZ005), matcher position assignment (QFE1700c2), consistent typed keyref
-(idL090/keyref cluster), or saxon leniencies that would explode MI (missing00x,
+(idL090/keyref cluster), or contributed-set leniencies that would explode MI (missing00x,
 addB193, simple003). 98.16% (38189) stands as the honest FP-safe ceiling for now;
 reaching 98.3% requires the restriction-derivation crux, which stays out of scope.
 
@@ -947,7 +947,7 @@ K  elementFormDefault / attributeFormDefault value vocabulary (+4, +4)
 
 MEASURED AND REJECTED
 E  Tolerating references to absent components — REVERTED IN FULL.
-   14 FPs say an unresolved ref should not invalidate a schema (saxonData/Missing
+   14 FPs say an unresolved ref should not invalidate a schema (contributed Missing
    6, ctE018/ctE019 4, schD10 2, xsd024 2), and XSD does describe schemas as
    possibly incomplete. But every one of the five reference kinds is a NET LOSS
    on its own, measured separately against the 1.0 baseline of 38466:
@@ -955,7 +955,7 @@ E  Tolerating references to absent components — REVERTED IN FULL.
      (attr also produced a new FP, ctE019.xml)
    and all five together gave 38416 (-50). The suite is emphatic that src-resolve
    errors are errors; the 14 FPs are the minority view. Kept out.
-   simpleType @final="extension" (saxonData/Simple simple003 says 1.0's
+   simpleType @final="extension" (contributed Simple set: simple003 says 1.0's
    disallowing it is a spec bug, and XSD 1.1 allows it): +2 there, -3 elsewhere.
    Net -1, reverted.
 
@@ -1074,7 +1074,7 @@ MEASURED AND REVERTED (do not re-try without new information)
     resisted M21–M23; it needs a substitution-aware NameAndTypeOK inside
     restriction.go, not a particle rewrite.
   +INF rejected for float/double (float018/double018 want it invalid) — but
-    saxonData simple001/002 use it in a facet and expect VALID, and 1.1 allows
+    contributed simple001/002 use it in a facet and expect VALID, and 1.1 allows
     it outright. Net -6 with 4 FPs.
   The legacy "--MM--" xs:gMonth form (gMonth002/004 want it valid): net -24,
     because the NIST gMonth pattern tests require it to be invalid.
@@ -1179,7 +1179,7 @@ KEPT (1.0 yield, then 1.1)
            (elemZ027a/b) — in 1.0 leaves must be PROPER members (a name-equal
            leaf is the Forbidden seq:elt case, particlesHb011); recurseUnordered
            gained substitution FAN-IN (several members map onto one base
-           element, occurs summed — saxon all221/225/226 would otherwise become
+           element, occurs summed — contributed all221/225/226 would otherwise become
            FPs, all216/223/224/227 bonus); skip guard at checkAllRestrictions
            REMOVED (elemZ028b/e), attr-wildcard subset check re-enabled for
            subst types (±0).
@@ -1217,7 +1217,7 @@ particlesZ018/Z039 derivation-validity siblings, elemZ026/Z027_c are queried.
 M26 — XSD 1.0 to 99.75% of ran  (TARGET EXCEEDED: 99.87%)
 ================================================================================
 Metric change (user decision): the harness now honors the suite's version=
-attribute at ALL levels — testSet (12 saxon 1.1-only sets no longer run under
+attribute at ALL levels — testSet (12 contributed 1.1-only sets no longer run under
 1.0; CTA's xs:alternative tests are unsatisfiable for a 1.0 processor by
 construction), and schemaTest/instanceTest (51 tests; stZ073b.i had been
 COUNTED TWICE via its v1.0/v1.1 twin groups). Token-list semantics per
@@ -1241,7 +1241,7 @@ EN16931 clean. QT3 side effect of the regex fixes: 86.6% -> 88.2%
 
 RECORD CORRECTIONS (trust over M23–M25 notes)
   - Absent-component tolerance is DEAD FOREVER: msData elemM002.xsd/mgP057.xsd
-    are byte-identical constructions to saxonData Missing/missing001.xsd with
+    are byte-identical constructions to the contributed Missing/missing001.xsd with
     OPPOSITE expected verdicts. The suite contradicts itself at identical
     syntax; no discriminator exists. (Exposure list if ever reopened: elemM002/
     M005, addA003/B009, idB005, mgO012/P057-P062, schG10, simple006,
@@ -1596,7 +1596,7 @@ KEPT (17 rules; 1.0 delta then 1.1):
   + 2/+ 2  chained redefines applied INNERMOST-FIRST with application-time
            snapshots (outermost wins for the shared component; stZ033.i enum
            chain, schN10 duplicate-member UPA). Full redefine canary list held.
-  + 5/+ 5  XML 1.1 instance documents (saxon XmlVersions): xmltree.
+  + 5/+ 5  XML 1.1 instance documents (contributed XmlVersions): xmltree.
            ParseLenient11 pre-passes — C0 character references to PUA
            sentinels restored post-parse, and error-driven substitution of
            5th-edition-only name chars (U+0133) via ASCII name-safe tokens,
@@ -1720,7 +1720,7 @@ every step. 24 rules kept, 0 reverted (a first: every planned rule landed).
 
 Census correction: the M29 fail list's "assert016" was really assert018 — four
 Assert groups (016/017/018/019) share the instance href
-../saxonData/Assert/assert016.v1.xml and the harness prints the href for
+the contributed Assert set's assert016.v1.xml and the harness prints the href for
 exp=valid instance fails. assert016 itself passed all along; assert018 and
 assert022 both needed typed XDM (below). Lesson: dedupe fail labels by TEST
 name, not instance href, when several groups reuse one instance.

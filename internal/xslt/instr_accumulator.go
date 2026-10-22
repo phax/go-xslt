@@ -160,7 +160,7 @@ func acc2compileRule(c *compiler, el *xmltree.Node) (*acc2Rule, error) {
 	}
 	// $value is bound only while the rule computes the NEW value (@select or
 	// the body); it is not in scope in @match, so referring to it there is an
-	// unbound-variable static error (accumulator-091, Saxon bug 6095).
+	// unbound-variable static error (accumulator-091).
 	if refsValueVariable(matchStr) {
 		return nil, errAt(el, "err:XPST0008: $value is not in scope in xsl:accumulator-rule/@match")
 	}

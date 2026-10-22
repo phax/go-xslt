@@ -803,7 +803,7 @@ func num2FormatOne(v num2Val, token, groupSep string, groupSize int, lang, ordin
 		// same algorithm as num2Alpha for a/A — XSLT's letter-value
 		//="traditional" (a locale-specific acrophonic/Milesian numbering)
 		// is deliberately not implemented; falling back to plain alphabetic
-		// numbering matches Saxon's own documented behavior for it
+		// numbering matches the common documented behavior for it
 		// (number-0901/0902's stylesheet comment notes this explicitly).
 		if alpha := num2AlphabetOf(tr[0]); alpha != nil {
 			return num2AlphaIn(num, alpha)
@@ -1062,7 +1062,7 @@ func num2FamilyOf(r rune) *num2Family {
 
 // num2isWordToken reports whether token is made up entirely of the letter "w"
 // (in either case) — the implementation-defined convention (shared with
-// Saxon) for "spell the number out in words".
+// processors) for "spell the number out in words".
 func num2isWordToken(token string) bool {
 	if token == "" {
 		return false

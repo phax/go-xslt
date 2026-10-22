@@ -548,13 +548,13 @@ func (a *strmAnalyzer) strmForEach(sh strmShape, sc xpath.StreamContext) (xpath.
 		// whose select is a union of two striding paths — crawling, as
 		// sx-union-202's own description concedes ("the union of two striding
 		// expressions is crawling. Not guaranteed streamable (though streamable
-		// in Saxon)") — over a body that atomizes an element, hence consuming.
+		// in one particular processor)") — over a body that atomizes an element, hence consuming.
 		// The REC's answer is roaming; the suite wants it to run. Classifying
 		// it unstreamable and falling back silently gives the suite what it
 		// asks for without this analysis claiming something false.
 		// A select that is crawling because of a descendant step it WRITES (the
 		// root-anchored "//ITEM/TITLE" of si-for-each-806) is not the sx-union
-		// case above: nothing about it is "streamable in Saxon" by the suite's
+		// case above: nothing about it is "streamable in one processor" by the suite's
 		// own account, and the rule applies as stated, so it is reported.
 		if strmWritesDescendantStep(sh.sel) {
 			return a.rejectREC(sc, sh.el, "xsl:for-each body consumes a crawling selection")
@@ -646,7 +646,7 @@ func (a *strmAnalyzer) strmForEachGroup(sh strmShape, sc xpath.StreamContext) (x
 	// safely — an extension beyond the minimum, exactly the kind XTSE3430's
 	// "unless the user has indicated that the processor is to handle this
 	// situation by processing the stylesheet without streaming" anticipates,
-	// and the kind Saxon takes elsewhere. So when the caller has asked for the
+	// and the kind other processors take. So when the caller has asked for the
 	// REC's guarantee to be binding, the REC's answer is given; otherwise the
 	// engine keeps streaming what it can genuinely stream. This is the same
 	// split strmEnforce/strmClaim already draws between "what must be
@@ -795,7 +795,7 @@ func (a *strmAnalyzer) strmApplyTemplates(sh strmShape, sc xpath.StreamContext) 
 		// Recommendation's verdict on the stylesheet, not this analysis giving
 		// up. sx-union-202 is the suite's own case for it, and its description
 		// concedes the point: "the union of two striding expressions is
-		// crawling. Not guaranteed streamable (though streamable in Saxon)".
+		// crawling. Not guaranteed streamable (though streamable in one processor)".
 		return a.rejectREC(sc, sh.el, "xsl:apply-templates/@select is %s, which cannot be dispatched in a single pass", strmPostureName(sp))
 	}
 	ops := []xpath.StreamOperand{{P: sp, S: ss, U: xpath.UsageAbsorption, Childless: childless}}

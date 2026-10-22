@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 )
@@ -900,9 +902,26 @@ func fnTranslate(c *Context, a []Object) (Object, error) {
 		return nil, err
 	}
 	from, to := []rune(fromS), []rune(toS)
+	lookup := func(r rune) int { return indexRune(from, r) }
+	if len(from) > 32 {
+		// A long map string is searched once per input character: index it
+		// (the FIRST occurrence of a repeated character is the one that
+		// counts), or a translate over two 850,000-character strings is
+		// quadratic (unicode90-*-030).
+		pos := make(map[rune]int, len(from))
+		for i := len(from) - 1; i >= 0; i-- {
+			pos[from[i]] = i
+		}
+		lookup = func(r rune) int {
+			if i, ok := pos[r]; ok {
+				return i
+			}
+			return -1
+		}
+	}
 	var b strings.Builder
 	for _, r := range s {
-		idx := indexRune(from, r)
+		idx := lookup(r)
 		if idx < 0 {
 			b.WriteRune(r)
 		} else if idx < len(to) {
@@ -1422,6 +1441,47 @@ func checkRegexBraces(p string) error {
 // (multiline), x (whitespace-insensitive), q (literal). strictBraces applies
 // checkRegexBraces.
 func compileRegexOpts(pattern, flags string, strictBraces, allowBackref bool, grammar RegexGrammar) (Regex, error) {
+	k := regexKey{pattern, flags, strictBraces, allowBackref, grammar}
+	if v, ok := regexCache.Load(k); ok {
+		r := v.(regexResult)
+		return r.re, r.err
+	}
+	re, err := compileRegexUncached(pattern, flags, strictBraces, allowBackref, grammar)
+	if regexCacheSize.Add(1) > regexCacheMax {
+		// A bound, not an eviction policy: a stylesheet that builds new
+		// patterns without end must not grow the cache without end.
+		regexCache.Clear()
+		regexCacheSize.Store(1)
+	}
+	regexCache.Store(k, regexResult{re, err})
+	return re, err
+}
+
+// regexCache keeps compiled regular expressions, so fn:matches and friends
+// called once per item (matches(@c, $re) over 100,000 nodes) compile their
+// pattern once instead of each time: translating an XSD class subtraction
+// over the whole code space costs milliseconds. A compiled Regex is safe for
+// concurrent use (RE2, and backrefRegex keeps its state per match), and a
+// failed compile is cached too, as the same error.
+var (
+	regexCache     sync.Map // regexKey -> regexResult
+	regexCacheSize atomic.Int64
+)
+
+const regexCacheMax = 4096
+
+type regexKey struct {
+	pattern, flags             string
+	strictBraces, allowBackref bool
+	grammar                    RegexGrammar
+}
+
+type regexResult struct {
+	re  Regex
+	err error
+}
+
+func compileRegexUncached(pattern, flags string, strictBraces, allowBackref bool, grammar RegexGrammar) (Regex, error) {
 	var goFlags string
 	literal := false
 	ignoreWS := false
@@ -1479,10 +1539,18 @@ func compileRegexOpts(pattern, flags string, strictBraces, allowBackref bool, gr
 			return compileBackref(pattern, goFlags)
 		}
 	}
+	goPattern := pattern
 	if goFlags != "" {
-		pattern = "(?" + goFlags + ")" + pattern
+		goPattern = "(?" + goFlags + ")" + pattern
 	}
-	return regexp.Compile(pattern)
+	re, err := regexp.Compile(goPattern)
+	if err != nil && !literal && allowBackref && isInvalidRepeatCountErr(err) {
+		// XSD/XPath regular expressions put no limit on a {n,m} count; 1000 is
+		// RE2's own. The backtracking matcher counts repetitions instead of
+		// unrolling them (unicode90-Ll-021: \p{Ll}{2063}).
+		return compileBackref(pattern, goFlags)
+	}
+	return re, err
 }
 
 // xsdRegexToGo translates the XSD-regex-specific constructs our RE2 engine does

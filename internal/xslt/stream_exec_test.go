@@ -116,7 +116,7 @@ func TestStreamMatchesFullMaterialization(t *testing.T) {
 			wantStream: true,
 		},
 		{
-			// The classic streaming idiom (Saxon accepts this shape), but the
+			// The classic streaming idiom (some processors accept this shape), but the
 			// current classifier (streamability.go) is conservative about a
 			// copy-of nested inside a for-each's body and rejects it — an
 			// accepted, documented gap (see CLAUDE.md's streaming milestones:

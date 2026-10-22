@@ -80,7 +80,7 @@ func ParseWithBase(src, baseDir string) (*Node, error) {
 // ParseLenient11 parses like Parse but bridges declared XML 1.1 documents to
 // Go's 1.0-4th-edition decoder with two pre-passes: C0 character references
 // (legal in 1.1) and 5th-edition-only name characters (e.g. U+0133) are
-// substituted with sentinels and restored in the parsed tree (saxon
+// substituted with sentinels and restored in the parsed tree (the
 // XmlVersions xv001/003/004/006/008). Used by the XSD validator for schema and
 // instance documents.
 func ParseLenient11(src string) (*Node, error) {

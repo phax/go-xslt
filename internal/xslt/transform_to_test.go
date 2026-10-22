@@ -169,7 +169,12 @@ func TestChunkedOutputIsMemoryBounded(t *testing.T) {
 	if ctlTreePeak < 10*ctlDrainPeak {
 		t.Errorf("drained peak %d is not meaningfully below the buffered-tree peak %d at the same size", ctlDrainPeak, ctlTreePeak)
 	}
-	if strPeak < ctlTreePeak {
+	// Both controls are read at the same probe points while the tree is being
+	// built, before the string path serializes anything, so the two peaks are
+	// the same tree give or take a few small allocations (a compile's
+	// feature-registry entry, for one). The slack absorbs those; a string path
+	// that genuinely kept less would be megabytes below.
+	if strPeak+64<<10 < ctlTreePeak {
 		t.Errorf("the string-returning path (%d) should cost at least as much as keeping the tree alone (%d)", strPeak, ctlTreePeak)
 	}
 }

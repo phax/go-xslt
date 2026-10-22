@@ -38,8 +38,8 @@ func TestStrmFuncCategoryParse(t *testing.T) {
 		"ascent":          xpath.StreamFnAscent,
 		// A QName in an implementation-defined namespace this processor does
 		// not recognise must be analysed as unclassified, not rejected.
-		"saxon:capture": xpath.StreamFnUnclassified,
-		"nonsense":      xpath.StreamFnUnclassified,
+		"ext:capture": xpath.StreamFnUnclassified,
+		"nonsense":    xpath.StreamFnUnclassified,
 	}
 	for attr, want := range cases {
 		decl := `<xsl:function name="f:g" as="xs:integer"><xsl:param name="n"/><xsl:sequence select="1"/></xsl:function>`

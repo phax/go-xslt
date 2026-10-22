@@ -397,7 +397,7 @@ func (m *matcher) groupNullable(mg *modelGroup, seen map[*modelGroup]bool) bool 
 			}
 		}
 		// An empty choice matches NOTHING — not even the empty sequence — so a
-		// required empty choice is unsatisfiable (saxon complex022).
+		// required empty choice is unsatisfiable (complex022).
 		return false
 	}
 	for _, sub := range mg.particles { // sequence / all

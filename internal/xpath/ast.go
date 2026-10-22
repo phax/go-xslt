@@ -216,9 +216,10 @@ const (
 
 // CompareExpr is a (non-chaining) comparison.
 type CompareExpr struct {
-	Kind compKind
-	Op   string
-	L, R Expr
+	Kind   compKind
+	Op     string
+	L, R   Expr
+	eqSlot // index cache for "x = $long" (compare_index.go)
 }
 
 // StringConcatExpr is the || operator over two-or-more operands.

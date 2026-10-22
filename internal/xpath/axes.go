@@ -224,7 +224,7 @@ func siblings(n *xmltree.Node, following bool) NodeSet {
 // (xsl:variable/param/function/xsl:sequence, e.g. "as=\"node()*\"") is one of
 // several INDEPENDENT roots of a "forest" sharing a throwaway NoAtomicMerge
 // collector as a raw .Parent link — following/preceding must never cross from
-// one such item into another (sequence-0113/0125: a Saxon-TinyTree-forest
+// one such item into another (sequence-0113/0125: a tree-forest
 // style test, explicitly checking axes across several parentless top-level
 // nodes sharing no ancestor).
 func docWalk(n *xmltree.Node) (NodeSet, int) {

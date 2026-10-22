@@ -81,15 +81,15 @@ implements XPath/XSLT but not XQuery); that skip is reported separately and
 never counted toward the pass rate. **"Suite self-contradiction"** means two
 suite fixtures assert mutually exclusive expected output for materially the
 same input — confirmed by running the disputed case through a live,
-independent reference processor (SaxonJS), not assumed — rather than an
+independent reference processor, not assumed — rather than an
 engine gap; see `CLAUDE.md` for the specific cases.
 
-Measured 2026-10-11 on engine commit [`35ffebc`](https://github.com/tim-riep/go-xslt/commit/35ffebc) (release `v0.0.6`), against these suite commits:
+Measured 2026-10-23, against these suite commits:
 
 | Suite | Source | Commit | Pass rate | Detail |
 |---|---|---|---|---|
-| **XSLT 3.0** — default (basic) processor | [w3c/xslt30-test](https://github.com/w3c/xslt30-test) | `fddf1cf9` (2026-06-10) | **99.9%** (8,126 / 8,138) | by min spec version: 1.0 **100.0%** (1,980/1,980), 2.0 **99.8%** (2,656/2,660), 3.0 **99.8%** (3,485/3,493) |
-| **XSLT 3.0** — combined (`XSLT30_FULL=1`: + streaming + schema-awareness + XSLT 1.0 backwards-compatible processing, see [below](#xslt-30-engine)) | same | same | **99.7%** (11,779 / 11,808) | |
+| **XSLT 3.0** — default (basic) processor | [w3c/xslt30-test](https://github.com/w3c/xslt30-test) | `fddf1cf9` (2026-06-10) | **99.9%** (8,614 / 8,626) | by min spec version: 1.0 **100.0%** (1,980/1,980), 2.0 **99.9%** (3,144/3,148), 3.0 **99.8%** (3,485/3,493) |
+| **XSLT 3.0** — combined (`XSLT30_FULL=1`: + streaming + schema-awareness + XSLT 1.0 backwards-compatible processing, see [below](#xslt-30-engine)) | same | same | **99.8%** (12,267 / 12,296) | |
 | **XPath 3.1 / XQuery F&O** (QT3/FOTS) | [w3c/qt3tests](https://github.com/w3c/qt3tests) | `201a6e46` (2026-05-14) | **99.8%** (22,099 / 22,153) | |
 | **XSD 1.0** | [w3c/xsdtests](https://github.com/w3c/xsdtests) | `7bc3365c` (2026-04-01) | **99.99%** (39,346 / 39,351) | 5 residual are suite self-contradictions |
 | **XSD 1.1** | same | same | **99.99%** (41,499 / 41,503) | 4 residual are suite self-contradictions |
@@ -109,6 +109,9 @@ patterns that actually need it.)
 **Every failing case is listed with its reason** in
 [`docs/accepted-failures/`](docs/accepted-failures/README.md) (one file per
 suite). The harnesses enforce it: an undocumented failure fails the test.
+The same files list the cases that are excluded from two Unicode test sets
+because they depend on an old Unicode version (the version is
+implementation-defined) or cannot be passed as written.
 
 **Reproducing these numbers with one command**: `make conformance` (or
 `scripts/conformance.sh`) clones the three suites at the pinned commits

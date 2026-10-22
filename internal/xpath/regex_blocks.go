@@ -135,15 +135,33 @@ var xsdBlockMoreRanges = map[string][][2]rune{
 	"PrivateUse": {{0xF0000, 0xFFFFD}, {0x100000, 0x10FFFD}},
 }
 
+// xsdLegacyBlocks are the Unicode 3.1 block names XSD 1.1 §G.4.2.3 lists as
+// superseded and encourages processors to keep: they keep their old ranges,
+// whatever the current database calls that range.
+var xsdLegacyBlocks = map[string]bool{"Greek": true, "CombiningMarksforSymbols": true, "PrivateUse": true}
+
 // blockRanges returns every range of the named block; ok is false for an
 // unknown block, and the slice is empty for a surrogate block.
+//
+// XSD 1.1 §G.4.2.3 takes block names and ranges from the Unicode database of
+// the supported version (Unicode 15.0 here, ucdBlocks), so every current block
+// is known (unicode90-100..107: \p{IsAdlam}, a Unicode 9.0 block) and an old
+// block that has since grown has its current range. The XSD 1.0 table
+// (xsdBlockRanges) still answers for the superseded names above, and for the
+// surrogate blocks, which hold no scalar value at all.
 func blockRanges(name string) ([][2]rune, bool) {
+	if r, ok := xsdBlockRanges[name]; ok && (r[0] < 0 || xsdLegacyBlocks[name]) {
+		if r[0] < 0 {
+			return nil, true
+		}
+		return append([][2]rune{r}, xsdBlockMoreRanges[name]...), true
+	}
+	if r, ok := ucdBlocks[name]; ok {
+		return [][2]rune{r}, true
+	}
 	r, ok := xsdBlockRanges[name]
 	if !ok {
 		return nil, false
-	}
-	if r[0] < 0 {
-		return nil, true
 	}
 	return append([][2]rune{r}, xsdBlockMoreRanges[name]...), true
 }

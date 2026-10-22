@@ -36,6 +36,9 @@ func evalCompareExpr(n *CompareExpr, ctx *Context) (Object, error) {
 	case compValue:
 		return valueComparison(n.Op, l, r, ctx)
 	default:
+		if v, ok := n.fastGeneralEq(l, r, ctx); ok {
+			return v, nil
+		}
 		return generalComparison(n.Op, l, r, ctx)
 	}
 }

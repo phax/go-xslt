@@ -98,7 +98,7 @@ func (e *staticEnv) ResolveFunc(prefix, local string, args []xpath.Object, _ *xp
 	case "element-available":
 		// Only the XSLT instructions this processor implements are
 		// available; an extension namespace it knows nothing about is not
-		// (use-when-0108's saxon:assign, use-when-0214's t:values-of).
+		// (use-when-0108's vendor extension instruction, use-when-0214's t:values-of).
 		name := xpath.ToString(arg0(args))
 		if !isLexicalQName(name) && !strings.HasPrefix(name, "Q{") {
 			return nil, true, errAt(e.el, "err:XTDE1440: %q is not a valid QName", name)

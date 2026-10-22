@@ -308,8 +308,8 @@ Desktop GUI (**run from `desktop/`**):
   `XSLT30_BYVER=1` for a per-version breakdown; `XSLT30_FULL=1` additionally
   claims streaming + schema-awareness + backwards-compatibility together —
   see below):
-  - **Default (basic processor): 99.9% (8,126/8,138)**. **Combined
-    (`XSLT30_FULL=1`): 99.7% (11,779/11,808)**.
+  - **Default (basic processor): 99.9% (8,614/8,626)**. **Combined
+    (`XSLT30_FULL=1`): 99.8% (12,267/12,296)**.
   - `<test><package role="principal"></test>` catalog entries (347 cases)
     used to be hard-skipped unconditionally; the engine already accepted a
     top-level `xsl:package` as a module root and already fully implemented
@@ -318,7 +318,7 @@ Desktop GUI (**run from `desktop/`**):
     packages are **not** one of the six optional features (schema-awareness,
     serialization, backwards-compatibility, streaming, dynamic evaluation,
     XQuery invocation) — so unskipping them genuinely widens the **default**
-    denominator too, not just the combined one; 8,126 of the 8,138 now pass.
+    denominator too, not just the combined one.
   - `xsl:expose` is real (`internal/xslt/expose.go`): the §3.5.3.1 precedence
     (explicit name > declared `@visibility` > partial wildcard > `*` >
     private), XTSE0020/3010/3020/3022/3025, implicit modes, and it feeds
@@ -366,21 +366,25 @@ Desktop GUI (**run from `desktop/`**):
     file used to say so) — all three were built from scratch and are now
     real, load-bearing features (see their own entries below), not
     conformance-only paper capabilities.
-  - **Skipped by design, not counted** (see the `skip reasons` line of any
-    run): `unicode-90` (1,580 cases) — the Unicode version is
-    implementation-defined (F&O 3.1 Conformance: "which version of Unicode is
-    supported" is implementation-defined, latest recommended; XSD 1.1 Part 2
-    says the same for the Unicode database), Go ships 15.0 and the cases
-    assert 9.0 totals, and the 1,444 generated ones also omit the `charclass`
-    parameter their stylesheet needs (every case but `Ll` tests the wrong
-    class) and take minutes each. The substitute is
-    `test/conformance/unicode_categories_test.go`: every `\p{..}`/`\P{..}`
-    category escape against the suite's own 9.0 data for every code point —
-    the engine must agree everywhere except exactly the 21,066 code points
-    whose category changed between 9.0 and 15.0. (Writing it found and fixed
-    real bugs: XSD class subtraction with category/`\d`/`\w`/`\s` operands
-    was handed to RE2 unreduced and matched wrongly, and `\p{C}`/`\w`/`\W`
-    ignored the unassigned code points that XSD's C includes.) Other skips:
+  - **Unicode-version sets are run, with named exclusions**
+    (`test/conformance/unicode_exclusions_test.go`): `regex-classes` (91 of
+    120 run) and `unicode-90` (397 of 1,460 run) used to be skipped whole. Now
+    only cases that cannot be judged are excluded, each with a reason:
+    `unicode-version` (44 — the expected data is an old Unicode version's, and
+    F&O 3.1 makes the version implementation-defined; the engine agrees with
+    Unicode 15 code point for code point) and `suite-defect` (1,048 — the
+    generated unicode-90 cases never pass their `charclass` parameter, so they
+    test Ll; count cases with BMP-only totals; empty `<c>` comparisons;
+    U+FFFE/FFFF as `c=""`). Running them found real gaps, all fixed: Unicode
+    15 block names (`regex_blocks_ucd.go` from Blocks.txt 15.0; the XSD 1.0
+    names stay as aliases), `{n,m}` above RE2's 1000 (falls back to the
+    backtracking matcher), and three quadratic paths (regex recompiled per
+    call — now cached; `x = $long` — hash index on the comparison node;
+    `translate()` with a long map — indexed). unicode-90 is the slowest set
+    (~4 min, ~3.7 GB: 50 MB data files); `XSLT30_U90=1` runs even the
+    excluded cases. `test/conformance/unicode_categories_test.go` still checks
+    every category escape against the suite's 9.0 data per code point. Other
+    skips:
     `spec:XSLT20`-only cases, features not claimed in a given mode,
     `feat-not:*` cases that want a processor WITHOUT a feature we implement.
   - **Residual, default mode** (12 fails; not winnable without
@@ -393,7 +397,7 @@ Desktop GUI (**run from `desktop/`**):
     `document()`/`collection()`/`fn:doc` call site down to the resolver, a
     large, high-blast-radius change for 3 tests, declined by the user);
     proven suite self-contradictions (`output-0130/0715`'s stale reference
-    fixtures vs. a live SaxonJS check; `copy-3002`'s own catalog entry says
+    fixtures vs. a live check with an independent reference processor; `copy-3002`'s own catalog entry says
     "the test should fail"); `copy-1220/1221`'s ambient-namespace-on-copy gap
     (the only known fix is measured net-negative, repeatedly); and
     `override-as-005` (two PRIVATE attribute sets of one name in two
@@ -401,9 +405,9 @@ Desktop GUI (**run from `desktop/`**):
     so scoping them means threading it through every `use-attribute-sets`
     site and the streamability analysis).
   - **Additional combined-mode-only residual** (~26 more): `catalog-005/005b`
-    (needs a schema in scope the stylesheet never imports — Saxon's own
-    global-cache behavior, not what §3.16 provides); `square-array-201`
-    (Saxon evaluates globals lazily, this engine eagerly — both orderings
+    (needs a schema in scope the stylesheet never imports — a global
+    schema cache, not what §3.16 provides); `square-array-201`
+    (the reference results assume lazy evaluation of globals, this engine evaluates eagerly — both orderings
     are spec-permitted, cross-tree document order is implementation-defined);
     broad `xsl:source-document` static enforcement (measured net-negative
     every time it's been tried); a handful of streaming/backwards-compat
@@ -444,7 +448,7 @@ Desktop GUI (**run from `desktop/`**):
     construct regardless of whether strict enforcement is on.
   - **Residual** (~44 cases): mostly broad `xsl:source-document` static
     enforcement (see above, deliberately off), a handful of individually
-    root-caused REC-non-derivable or Saxon-exceeds-the-minimum cases
+    root-caused REC-non-derivable or suite-asks-more-than-the-minimum cases
     (`su-ascent-903`, `si-fork-953`, `sf-reverse-001` — the last cites a live
     upstream XPath bug number confirming the tension is unresolved
     upstream), and the `streaming-fallback` test set (its own description

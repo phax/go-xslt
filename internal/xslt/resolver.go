@@ -245,7 +245,7 @@ func (r *fileResolver) ResolveStream(uri string) (io.ReadCloser, bool) {
 }
 
 // globCollection resolves a directory collection URI of the widely used
-// "dir?select=pattern" form (a Saxon convention the suite itself relies on —
+// "dir?select=pattern" form (a common convention the suite itself relies on —
 // merge-097's uri-collection($dir || '?select=merge-097-*.xml')): the
 // documents in dir whose file names match the glob, in name order. Any other
 // query parameter (recurse=, on-error=, …) is ignored. Not a collection this

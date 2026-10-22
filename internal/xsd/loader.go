@@ -1964,7 +1964,7 @@ func linkBase(st, base *SimpleType) {
 }
 
 // absentType is the sentinel bound where an element/attribute @type or a list
-// @itemType names a component the schema set does not contain (the saxon
+// @itemType names a component the schema set does not contain (the
 // Missing family): XSD 1.0's missing-sub-components rules keep such a schema
 // usable, and the error surfaces only when a declaration carrying the absent
 // type is actually exercised at validation time (SimpleType.check refuses it).
@@ -2027,7 +2027,7 @@ func resolveQName(node *xmltree.Node, q string) xname {
 // 1.0 schema is a reference to a type that does not exist.
 var xsd11OnlyBuiltin = map[string]bool{
 	// xs:anyAtomicType is deliberately absent: the suite expects 1.0 processors
-	// to tolerate it (saxonData/Simple simple050).
+	// to tolerate it (simple050).
 	"dateTimeStamp": true, "dayTimeDuration": true,
 	"yearMonthDuration": true, "precisionDecimal": true, "error": true,
 }

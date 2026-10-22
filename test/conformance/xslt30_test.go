@@ -350,14 +350,9 @@ func xsltSkip(deps ...xsltDeps) string {
 				return "xsd1.0"
 			}
 		}
-		for _, u := range d.Unicode {
-			// Tests pinned to an exact old Unicode version compare character
-			// ranges Go's Unicode 15 tables can never reproduce (see the
-			// unicode-90 cluster) — the dependency is unsatisfied by design.
-			if u.Satisfied != "false" && os.Getenv("XSLT30_U90") == "" {
-				return "unicode-version-pinned"
-			}
-		}
+		// A unicode-version dependency no longer skips a whole set: the cases
+		// that really depend on the old version's data are excluded one by one
+		// (unicodeExclusion, unicode_exclusions_test.go).
 		for _, y := range d.YearComps {
 			// year_component_values: "support negative year" / "support year
 			// above 9999" declares an assumption about the PROCESSOR's date/
@@ -411,7 +406,7 @@ func xsltSkip(deps ...xsltDeps) string {
 			}
 		}
 		for _, ig := range d.IgnoreDoc {
-			// ignore_doc_failure: a Saxon-specific optional recovery policy
+			// ignore_doc_failure: a vendor-specific optional recovery policy
 			// (silently swallow a failed document()/fn:doc retrieval instead
 			// of raising a fatal dynamic error). Our engine implements the
 			// spec-conformant default (raise), so a case declaring this
@@ -656,19 +651,8 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 	if reason := xsltSkip(set.Deps, tc.Deps); reason != "" {
 		return "skip", reason
 	}
-	// The unicode-90 set is skipped, for three reasons that are about the suite
-	// and not about the engine: the Unicode version is implementation-defined
-	// (F&O 3.1, Conformance — Go ships Unicode 15, the data here is 9.0);
-	// the 16 count cases assert exact 9.0 totals (\d = 370, \p{L} = 48739);
-	// and the 1,444 generated cases never pass the charclass parameter their
-	// stylesheet needs (it defaults to 'Ll', so the Zs case asks whether the Zs
-	// characters are Ll) and take minutes each. What they are FOR — the category
-	// escapes agreeing with Unicode 9.0 — is checked directly, over every code
-	// point, by TestUnicodeCategoryEscapesAgainstSuiteData. XSLT30_U90=1 runs
-	// the set anyway (slow; expect failures for the reasons above); XSLT30_CASE
-	// narrows a run to cases whose name contains the given text.
-	if strings.Contains(set.Name, "unicode-90") && os.Getenv("XSLT30_U90") == "" {
-		return "skip", "unicode-version-pinned"
+	if reason := unicodeExclusion(set.Name, tc); reason != "" {
+		return "skip", reason
 	}
 	if len(tc.Result.Children) == 0 {
 		return "skip", "no-assertion"
@@ -1408,7 +1392,7 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 		// only that is ignored, per method: xml (§5.1.4) may add whitespace
 		// between tags; xhtml/html (§6.1.4, §7.4.3) may also add or remove it
 		// next to existing whitespace, so runs are compared collapsed
-		// (validation-0201: Saxon indents by three spaces and lengthens a
+		// (validation-0201: the reference file indents by three spaces and lengthens a
 		// whitespace run, this engine indents by two).
 		if indented != "" && serialEqual(stripIndentation(exp, indented), stripIndentation(output, indented), false) {
 			return "pass", ""

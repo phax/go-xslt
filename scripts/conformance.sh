@@ -22,7 +22,7 @@ QT3_REPO=https://github.com/w3c/qt3tests;     QT3_PIN=201a6e46
 XSD_REPO=https://github.com/w3c/xsdtests;     XSD_PIN=7bc3365c
 
 # ---- published numbers (README.md): passed/ran ------------------------------
-PUB_XSLT="8126/8138"; PUB_XSLTFULL="11779/11808"; PUB_QT3="22099/22153"
+PUB_XSLT="8614/8626"; PUB_XSLTFULL="12267/12296"; PUB_QT3="22099/22153"
 PUB_XSD10="39346/39351"; PUB_XSD11="41499/41503"
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)

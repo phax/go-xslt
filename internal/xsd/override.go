@@ -9,7 +9,7 @@ import (
 
 // xs:override (XSD 1.1 §4.2.5), implemented as the spec's override
 // transformation (the suite ships the same transform as
-// saxonData/Override/override-transform.xsl): the overridden document is
+// Override/override-transform.xsl): the overridden document is
 // rewritten — matching top-level components replaced, xs:include rewritten to
 // an xs:override carrying the override's children, nested xs:override merged
 // (replace matching, keep the rest, APPEND unmatched), xs:redefine children
