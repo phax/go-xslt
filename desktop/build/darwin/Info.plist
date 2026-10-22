@@ -12,7 +12,7 @@
         <key>CFBundleVersion</key>
             <string>0.1.0</string>
         <key>CFBundleGetInfoString</key>
-            <string>This is a comment</string>
+            <string>go-xslt: XSLT 3.0, XPath 3.1 and XSD 1.0/1.1 in pure Go</string>
         <key>CFBundleShortVersionString</key>
             <string>0.1.0</string>
         <key>CFBundleIconFile</key>

@@ -17,6 +17,21 @@ WAILS    := $(GOBIN)/wails3
 TASKPATH := PATH="$(GOBIN):$$PATH"
 GO_FILES := $(shell find . -name '*.go' -not -path './frontend/*')
 
+# The version shown in the macOS "About go-xslt" panel (CFBundleShortVersionString),
+# taken from the git tag (v0.1.5 -> 0.1.5; between tags 0.1.5-3-gabc1234). CI passes
+# VERSION explicitly. CFBundleVersion wants a plain dotted number, so it gets the
+# numeric prefix; the panel shows "Version X (Y)" only when the two differ.
+VERSION        ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+BUNDLE_VERSION := $(or $(shell printf '%s' '$(VERSION)' | grep -oE '^[0-9]+(\.[0-9]+)*'),0.0.0)
+
+# stamp-mac,<bundle>: write the version into a built .app and re-sign it ad hoc
+# (changing Info.plist invalidates the signature; CI signs with Developer ID after).
+define stamp-mac
+	plutil -replace CFBundleShortVersionString -string '$(VERSION)' $(1)/Contents/Info.plist
+	plutil -replace CFBundleVersion -string '$(BUNDLE_VERSION)' $(1)/Contents/Info.plist
+	codesign --force --deep --sign - $(1)
+endef
+
 .PHONY: all dev bindings frontend build \
 	build-mac build-mac-arm64 build-mac-amd64 \
 	build-win build-win-amd64 build-win-arm64 \
@@ -61,6 +76,7 @@ build-mac-arm64:
 	rm -rf $(BIN)/$(APP)-darwin-arm64.app
 	mv bin/$(APP).app $(BIN)/$(APP)-darwin-arm64.app
 	rm -f bin/$(APP)
+	$(call stamp-mac,$(BIN)/$(APP)-darwin-arm64.app)
 
 ## build-mac-amd64: macOS build for Intel. Same pipeline, cross-compiles
 ## cleanly from an Apple Silicon Mac too.
@@ -70,6 +86,7 @@ build-mac-amd64:
 	rm -rf $(BIN)/$(APP)-darwin-amd64.app
 	mv bin/$(APP).app $(BIN)/$(APP)-darwin-amd64.app
 	rm -f bin/$(APP)
+	$(call stamp-mac,$(BIN)/$(APP)-darwin-amd64.app)
 
 ## build-mac: both macOS architectures (Apple Silicon + Intel)
 build-mac: build-mac-arm64 build-mac-amd64

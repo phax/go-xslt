@@ -89,6 +89,13 @@ jobs:
         if: steps.wails3.outputs.cache-hit != 'true'
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS3_VERSION }}
 
+      # The tag (v0.1.5 -> 0.1.5) goes into the bundle's Info.plist, which the
+      # macOS "About go-xslt" panel shows; a manual run gets 0.0.0-<sha>.
+      - name: Work out the version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-${GITHUB_SHA::7}"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
       # Both archs build natively (Xcode's clang cross-targets Apple Silicon
       # and Intel from either host arch).
       - name: Build macOS (${{ matrix.arch }})
@@ -223,6 +230,19 @@ jobs:
           CGO_ENABLED: '0'
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS3_VERSION }}
 
+      - name: Work out the version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-${GITHUB_SHA::7}"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      # The version shown in the exe's file properties (Details tab).
+      - name: Stamp the version into the Windows version info
+        working-directory: desktop
+        run: |
+          NUMERIC="$(printf '%s' "$VERSION" | grep -oE '^[0-9]+(\.[0-9]+)*' || echo 0.0.0)"
+          sed -i "s/\"file_version\": \"[^\"]*\"/\"file_version\": \"$NUMERIC\"/; s/\"ProductVersion\": \"[^\"]*\"/\"ProductVersion\": \"$VERSION\"/" build/windows/info.json
+          grep -E 'file_version|ProductVersion' build/windows/info.json
+
       - name: Build Windows (amd64 + arm64)
         working-directory: desktop
         run: make build-win
@@ -302,6 +322,11 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f -exec cp {} release/ \;
+          # go-xslt-darwin-arm64.app.zip -> go-xslt-v0.1.5-darwin-arm64.app.zip
+          for f in release/go-xslt-*; do
+            b="$(basename "$f")"
+            mv "$f" "release/go-xslt-${GITHUB_REF_NAME}-${b#go-xslt-}"
+          done
           ls -la release
 
       - name: Create/update the GitHub release for this tag

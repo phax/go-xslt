@@ -9,7 +9,7 @@
 			"FileDescription": "Local XSLT 3.0 tester",
 			"LegalCopyright": "© 2026, go-xslt by Tim Riep",
 			"ProductName": "go-xslt",
-			"Comments": "This is a comment"
+			"Comments": "XSLT 3.0, XPath 3.1 and XSD 1.0/1.1 in pure Go"
 		}
 	}
 }
