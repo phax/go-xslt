@@ -193,15 +193,20 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/frontend/package-lock.json
 
+      # The CLI also builds without CGo (a static binary), so this job needs
+      # none of the GTK/WebKitGTK libraries the Linux job installs. The cache
+      # key differs from the Linux job's, whose binary is linked against them.
       - name: Cache the wails3 CLI
         id: wails3
         uses: actions/cache@v4
         with:
           path: ~/go/bin/wails3
-          key: wails3-${{ runner.os }}-${{ runner.arch }}-${{ env.WAILS3_VERSION }}
+          key: wails3-nocgo-${{ runner.os }}-${{ runner.arch }}-${{ env.WAILS3_VERSION }}
 
       - name: Install wails3 CLI
         if: steps.wails3.outputs.cache-hit != 'true'
+        env:
+          CGO_ENABLED: '0'
         run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ env.WAILS3_VERSION }}
 
       - name: Build Windows (amd64 + arm64)
