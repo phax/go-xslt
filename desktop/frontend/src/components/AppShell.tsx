@@ -5,6 +5,7 @@ import { useAppDispatch, useAppState } from "../state/store";
 import { ContextMenuHost } from "./ContextMenuHost";
 import { DialogHost } from "./DialogHost";
 import { LicensesButton } from "./LicensesView";
+import { WrapToggle } from "./WrapToggle";
 import { Sidebar } from "./Sidebar";
 import { TabStrip } from "./TabStrip";
 import { Toaster } from "./Toaster";
@@ -58,6 +59,7 @@ export function AppShell() {
           go-xslt
         </span>
         <span className="spacer" />
+        <WrapToggle />
         <LicensesButton />
       </header>
       <div className="app-body">

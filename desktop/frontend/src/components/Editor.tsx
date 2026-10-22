@@ -1,7 +1,9 @@
 import { useMemo } from "react";
+import { useWrapLines } from "../state/prefs";
 import CodeMirror from "@uiw/react-codemirror";
 import { xml } from "@codemirror/lang-xml";
 import { linter, lintGutter, type Diagnostic as CMDiagnostic } from "@codemirror/lint";
+import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { githubDark } from "@uiw/codemirror-theme-github";
 import type { Diagnostic } from "../lib/api";
@@ -22,17 +24,23 @@ function offsetOf(doc: { line: (n: number) => { from: number; length: number }; 
   return lineObj.from + Math.min(c, lineObj.length);
 }
 
+// No blinking caret in a viewer: the text is selectable and copyable, not editable.
+const hideCaret = EditorView.theme({ ".cm-cursor, .cm-dropCursor": { display: "none" } });
+
 /** ReadOnlyViewer renders text (formatted output) in a read-only, syntax-
- * highlighted CodeMirror with no editing affordances. */
+ * highlighted CodeMirror with no editing affordances. It uses the read-only
+ * *state*, not `editable: false`: a non-editable CodeMirror cannot take focus,
+ * so Ctrl/Cmd+A (select all), Ctrl/Cmd+C and keyboard selection never reached
+ * it. This one is focusable and selectable, it just refuses edits. */
 export function ReadOnlyViewer({ value }: { value: string }) {
+  const wrap = useWrapLines();
   return (
     <CodeMirror
       value={value}
       theme={githubDark}
       height="100%"
       style={{ height: "100%", fontSize: 13 }}
-      extensions={[xml(), EditorView.lineWrapping, EditorView.editable.of(false)]}
-      editable={false}
+      extensions={[xml(), ...(wrap ? [EditorView.lineWrapping] : []), EditorState.readOnly.of(true), hideCaret]}
       basicSetup={{
         lineNumbers: true,
         foldGutter: true,
@@ -45,6 +53,7 @@ export function ReadOnlyViewer({ value }: { value: string }) {
 
 /** XSLT is XML, so the XML language mode + a diagnostics linter cover it. */
 export function Editor({ value, onChange, diagnostics = [], readOnly = false }: EditorProps) {
+  const wrap = useWrapLines();
   const lintExt = useMemo(
     () =>
       linter((view): CMDiagnostic[] => {
@@ -73,7 +82,7 @@ export function Editor({ value, onChange, diagnostics = [], readOnly = false }: 
       theme={githubDark}
       height="100%"
       style={{ height: "100%", fontSize: 13 }}
-      extensions={[xml(), lintGutter(), lintExt, EditorView.lineWrapping]}
+      extensions={[xml(), lintGutter(), lintExt, ...(wrap ? [EditorView.lineWrapping] : [])]}
       onChange={onChange}
       readOnly={readOnly}
       basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: !readOnly }}
