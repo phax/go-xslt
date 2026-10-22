@@ -53,7 +53,10 @@ export function AppShell() {
   return (
     <div className="app">
       <header className="toolbar">
-        <span className="brand">go-xslt</span>
+        <span className="brand">
+          <img className="brand-logo" src="/logo.svg" alt="" />
+          go-xslt
+        </span>
         <span className="spacer" />
         <LicensesButton />
       </header>

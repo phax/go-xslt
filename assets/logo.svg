@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="go-xslt">
+  <title>go-xslt</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#14506c"/>
+      <stop offset="1" stop-color="#071d2a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.3" cy="0.18" r="0.7">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="230" fill="url(#glow)"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="92">
+    <polyline points="284,300 140,512 284,724" stroke="#f4f8fa"/>
+    <polyline points="740,300 884,512 740,724" stroke="#00add8"/>
+    <line x1="400" y1="384" x2="624" y2="640" stroke="#ffd166"/>
+    <line x1="624" y1="384" x2="400" y2="640" stroke="#f4f8fa"/>
+  </g>
+</svg>

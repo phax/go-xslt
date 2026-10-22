@@ -26,8 +26,17 @@
   -webkit-app-region: no-drag;
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   letter-spacing: 0.3px;
+}
+.brand-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  flex-shrink: 0;
 }
 .spacer {
   flex: 1;

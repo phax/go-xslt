@@ -9,13 +9,13 @@
   
   <Identity 
     Name="de.rieptech.goxslt"
-    Publisher="CN=My Company"
+    Publisher="CN=go-xslt by Tim Riep"
     Version="0.1.0.0" 
     ProcessorArchitecture="arm64" />
   
   <Properties>
     <DisplayName>go-xslt</DisplayName>
-    <PublisherDisplayName>My Company</PublisherDisplayName>
+    <PublisherDisplayName>go-xslt by Tim Riep</PublisherDisplayName>
     <Description>Local XSLT 3.0 tester</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>

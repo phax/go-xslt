@@ -32,3 +32,6 @@ bin
 /tools/qt3_byset*.csv
 /tools/xslt30_byset*.csv
 /tools/xsd_byset*.csv
+
+# Generated from build/appicon.icon by `wails3 generate icons` (needs Xcode's actool; the CI macOS runners have it)
+desktop/build/darwin/Assets.car

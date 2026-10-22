@@ -1,4 +1,13 @@
-# go-xslt
+<p align="center">
+  <img src="assets/logo.svg" alt="go-xslt logo" width="128" height="128">
+</p>
+
+<h1 align="center">go-xslt</h1>
+
+<p align="center">
+  XSLT 3.0, XPath 3.1 and XSD 1.0 / 1.1 in pure Go.<br>
+  <sub>by Tim Riep</sub>
+</p>
 
 ## Why go-xslt?
 

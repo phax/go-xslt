@@ -5,9 +5,9 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "0.1.0",
-			"CompanyName": "My Company",
+			"CompanyName": "go-xslt by Tim Riep",
 			"FileDescription": "Local XSLT 3.0 tester",
-			"LegalCopyright": "© 2026, My Company",
+			"LegalCopyright": "© 2026, go-xslt by Tim Riep",
 			"ProductName": "go-xslt",
 			"Comments": "This is a comment"
 		}
