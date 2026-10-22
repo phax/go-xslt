@@ -25,6 +25,12 @@ A **pure-Go** implementation of the W3C XML processing stack:
 The repo also ships an optional desktop **XSLT/XSD/XPath tester** (Wails v3 +
 React + CodeMirror) built on the same engine.
 
+<p align="center">
+  <img src="assets/screenshot-transform.png" alt="The desktop tester: a stylesheet, its source XML and the live output, docked side by side" width="900">
+  <br>
+  <sub>The desktop tester: stylesheet, source and live output. Drag a pane's tab to dock it anywhere.</sub>
+</p>
+
 The repo is a monorepo of **two Go modules**:
 
 | Module | Import path | Deps | Use it for |
