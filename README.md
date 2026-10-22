@@ -9,6 +9,10 @@
   <sub>by Tim Riep</sub>
 </p>
 
+<p align="center">
+  <a href="https://tim-riep.github.io/go-xslt/"><b>Documentation</b></a>
+</p>
+
 ## Why go-xslt?
 
 A **pure-Go** implementation of the W3C XML processing stack:

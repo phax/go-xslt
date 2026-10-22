@@ -1,0 +1,86 @@
+# Desktop tester
+
+The desktop tester is an app for writing and trying out stylesheets, schemas
+and XPath expressions. It runs on the same engine as the library and works
+offline.
+
+![The desktop tester: stylesheet, source and live output, docked side by side](/screenshot-transform.png)
+
+## Download
+
+Builds for macOS (Apple Silicon and Intel), Windows (x64 and ARM64) and Linux
+(x64) are attached to every
+[release on GitHub](https://github.com/tim-riep/go-xslt/releases).
+
+## Projects
+
+A project is an ordinary folder on disk. New projects are created under
+`~/Documents/go-xslt`; any existing folder can also be opened as a project.
+The sidebar shows its files, and you can create, rename and delete files and
+folders there.
+
+A project also holds **saved runs**, kept in the file
+`goxslt.project.json` in the project folder. A saved run is a named,
+reusable configuration:
+
+| Run | Holds |
+|---|---|
+| Transform | Stylesheet, source document, parameters |
+| Validate | Instance document and an ordered list of schema files |
+| XPath | Expression and context document |
+
+## Transform
+
+Edit the stylesheet and the source next to the live output. The editor
+highlights XSLT and XML and marks the engine's diagnostics in the gutter.
+Messages from `xsl:message` and the documents from `xsl:result-document`
+appear in their own panes.
+
+## Validate
+
+Validate an instance document against one or more schemas, in XSD 1.0 or 1.1.
+Every error is listed with its position; a click jumps to it.
+
+## XPath
+
+Evaluate an XPath 3.1 expression against a document. The result is shown as a
+table with one row per item and its type.
+
+## Schema structure
+
+An `.xsd` file can be shown as **Code** or as **Structure**. The structure view
+shows the elements and types of the schema as a tree, with the cardinality of
+every element, group and wildcard. Types are expanded on demand, so large
+schemas stay fast.
+
+## Layout
+
+Every pane can be moved: drag its tab next to, above or below another pane, or
+onto it to stack them as tabs. The layout is remembered per view. **Reset
+layout** restores the default.
+
+## File access
+
+Each run may read the files of its own project folder. Network access is off.
+
+## Building from source
+
+The app is the separate Go module in `desktop/`. You need Go 1.25 or newer,
+Node 20 or newer, and the [Wails v3 CLI](https://v3.wails.io):
+
+```bash
+go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+```
+
+Run these from `desktop/`:
+
+```bash
+make dev          # live development
+make build        # build for the current platform
+make build-mac    # macOS, Apple Silicon and Intel
+make build-win    # Windows, x64 and ARM64
+make build-linux  # Linux x64 through Docker (run make setup-docker once)
+make build-all    # all of the above
+```
+
+The results are in `desktop/build/bin/`.
