@@ -28,6 +28,20 @@ libxml2, CGo or a JVM:
 - as a **library**, a **command-line tool**, and a **desktop app** for
   developing stylesheets
 
+## Desktop app
+
+<p align="center">
+  <img src="assets/screenshot-transform.png" alt="The desktop app: a stylesheet, its source XML and the live output, docked side by side" width="900">
+</p>
+
+An editor for XSLT, XSD and XPath with live results, errors marked in the
+code, project folders and saved runs. **[Download for macOS, Windows and
+Linux](https://github.com/tim-riep/go-xslt/releases/latest)** (signed for macOS
+and Windows) · [Desktop app guide →](https://tim-riep.github.io/go-xslt/desktop)
+
+It lives in the separate `desktop/` module, so importing the library never
+pulls in GUI dependencies.
+
 ## How it is tested
 
 The engine is measured against the official W3C test suites — together about
@@ -63,9 +77,7 @@ go get github.com/tim-riep/go-xslt                         # library (Go 1.25+)
 go install github.com/tim-riep/go-xslt/cmd/go-xslt@latest  # command-line tool
 ```
 
-The desktop app for macOS, Windows and Linux is on the
-[releases page](https://github.com/tim-riep/go-xslt/releases) (signed for
-macOS and Windows).
+The desktop app: see [above](#desktop-app).
 
 ## Use
 
@@ -167,18 +179,6 @@ Known limits:
 
 Everything the suites still fail is in
 [`docs/accepted-failures/`](docs/accepted-failures/README.md).
-
-## Desktop app
-
-<p align="center">
-  <img src="assets/screenshot-transform.png" alt="The desktop app: a stylesheet, its source XML and the live output, docked side by side" width="900">
-</p>
-
-An editor for XSLT, XSD and XPath with live results, located errors,
-project folders and saved runs.
-[Desktop app →](https://tim-riep.github.io/go-xslt/desktop) It lives in the
-separate `desktop/` module, so importing the library never pulls in GUI
-dependencies.
 
 ## Contributing and license
 
