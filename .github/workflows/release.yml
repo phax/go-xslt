@@ -148,11 +148,16 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP"
 
       # Anything but "Accepted" fails the job (with Apple's log), and so the
-      # release is never published.
+      # release is never published. An App Store Connect API key (Team Key,
+      # role Developer) is used when its secrets exist; otherwise the Apple ID
+      # with an app-specific password.
       - name: Notarize the .app bundle
         if: env.SIGN_MACOS == 'true'
         working-directory: desktop/build/bin
         env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -161,7 +166,16 @@ jobs:
           # The credentials go straight to notarytool (the values are masked in
           # the log). `store-credentials` into the throwaway keychain crashed
           # notarytool on the runner.
-          AUTH=(--apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID")
+          if [ -n "$APPLE_API_KEY_P8" ] && [ -n "$APPLE_API_KEY_ID" ] && [ -n "$APPLE_API_ISSUER" ]; then
+            KEYFILE="$RUNNER_TEMP/AuthKey_${{ matrix.arch }}.p8"
+            (umask 077; printf '%s\n' "$APPLE_API_KEY_P8" > "$KEYFILE")
+            trap 'rm -f "$KEYFILE"' EXIT
+            AUTH=(--key "$KEYFILE" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER")
+            echo "notarizing with the App Store Connect API key"
+          else
+            AUTH=(--apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID")
+            echo "notarizing with the Apple ID"
+          fi
           ditto -c -k --keepParent "$APP" notarize.zip
           id="$(xcrun notarytool submit notarize.zip "${AUTH[@]}" --output-format json | jq -r .id)"
           echo "submitted ${{ matrix.arch }}: $id"

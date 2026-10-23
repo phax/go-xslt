@@ -215,7 +215,9 @@ Desktop GUI (**run from `desktop/`**):
   one `macos-latest` runner; Linux amd64 natively on `ubuntu-latest` with
   GTK/WebKitGTK installed, avoiding the `wails-cross` Docker image) and
   attaches them to a **draft** GitHub release named after the tag. The macOS
-  apps are signed and notarized in CI (Developer ID). The Windows .exe files
+  apps are signed and notarized in CI (Developer ID; notarytool logs in with an
+  App Store Connect API key — secrets `APPLE_API_KEY_P8`/`_KEY_ID`/`_ISSUER` —
+  and falls back to Apple ID + app-specific password when those are absent). The Windows .exe files
   are signed afterwards on the maintainer's Mac with `scripts/sign-windows.sh
   <tag>` (Certum Open Source Code Signing, SimplySign cloud, through ssign
   0.1.8 — reviewed: talks only to Certum's cloudsign/time servers; the 6-digit
