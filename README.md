@@ -61,7 +61,7 @@ The engine is measured against the official W3C test suites — together about
 | XSD 1.0 ([xsdtests](https://github.com/w3c/xsdtests)) | **99.99%** (39,396 of 39,401) |
 | XSD 1.1 (same) | **99.99%** (41,549 of 41,553) |
 
-Measured on 2026-10-23 (after v0.2.2) against the pinned suite commits; a
+Measured on 2026-10-23 for v0.3.0 against the pinned suite commits; a
 [nightly job](https://github.com/tim-riep/go-xslt/actions/workflows/conformance.yml)
 reruns all four measurements and fails as soon as a number differs or a case
 fails that is not documented.

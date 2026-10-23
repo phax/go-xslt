@@ -77,3 +77,70 @@ export function useCheckUpdates(): boolean {
     () => checkUpdates,
   );
 }
+
+// ---- theme ----
+
+const THEME_KEY = "go-xslt.theme";
+
+/** The theme setting: follow the operating system, or a fixed one. */
+export type ThemeSetting = "system" | "light" | "dark";
+/** The theme in effect. */
+export type Theme = "light" | "dark";
+
+function readTheme(): ThemeSetting {
+  try {
+    const v = window.localStorage.getItem(THEME_KEY);
+    return v === "light" || v === "dark" ? v : "system";
+  } catch {
+    return "system";
+  }
+}
+
+const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)");
+
+let themeSetting = readTheme();
+let theme: Theme = resolveTheme();
+const themeListeners = new Set<() => void>();
+
+function resolveTheme(): Theme {
+  if (themeSetting !== "system") return themeSetting;
+  return systemDark && !systemDark.matches ? "light" : "dark";
+}
+
+// The theme in effect is a data attribute on <html>, which tokens.css
+// redefines the colors for.
+function applyTheme() {
+  theme = resolveTheme();
+  document.documentElement.dataset.theme = theme;
+  themeListeners.forEach((l) => l());
+}
+applyTheme();
+// With "system", the app follows a change of the OS appearance while it runs.
+systemDark?.addEventListener("change", () => {
+  if (themeSetting === "system") applyTheme();
+});
+
+export function setThemeSetting(t: ThemeSetting) {
+  themeSetting = t;
+  try {
+    window.localStorage.setItem(THEME_KEY, t);
+  } catch {
+    /* not persisted; the choice still holds for this session */
+  }
+  applyTheme();
+}
+
+function subscribeTheme(cb: () => void) {
+  themeListeners.add(cb);
+  return () => themeListeners.delete(cb);
+}
+
+/** The theme setting: "system" (default), "light" or "dark". */
+export function useThemeSetting(): ThemeSetting {
+  return useSyncExternalStore(subscribeTheme, () => themeSetting);
+}
+
+/** The theme in effect, after resolving "system". */
+export function useTheme(): Theme {
+  return useSyncExternalStore(subscribeTheme, () => theme);
+}

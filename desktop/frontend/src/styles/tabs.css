@@ -56,7 +56,7 @@
   color: var(--warning);
 }
 .tab-strip-item-icon.kind-xpath {
-  color: #9cdcfe;
+  color: var(--ident);
 }
 .tab-strip-item-name {
   flex: 1;

@@ -76,13 +76,25 @@ layout** restores the default.
 
 Each run may read the files of its own project folder. Network access is off.
 
+## Settings
+
+The settings button at the right end of the toolbar opens two settings:
+
+- **Appearance**: *System* follows the light or dark mode of your computer,
+  also when it changes while the app runs; *Light* and *Dark* fix one.
+- **Check for updates**: on by default, see below.
+
 ## Update check
 
-At start, and every six hours while it runs, the app asks GitHub whether a release newer
-than the installed one exists. If so, an **Update** button in the toolbar
-opens the release page. The request goes to `api.github.com` and sends
-nothing but the app version in its user agent. The **Update check** switch in
-the toolbar turns it off.
+At start, and every six hours while it runs, the app asks GitHub whether a
+release newer than the installed one exists. If so, a dialog shows what is new
+in it, with three choices: **Download** opens the release page, **Later**
+shows the dialog again at the next start, and **Skip this version** keeps it
+closed until the release after. The **Update** button in the toolbar opens
+the dialog again at any time. Links in the notes open in your browser.
+
+The request goes to `api.github.com` and sends nothing but the app version in
+its user agent. Switch it off in the settings.
 
 ## Building from source
 

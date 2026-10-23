@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, type ReactNode } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
+import { useTheme } from "../state/prefs";
 
 /** The panes of a run view, arranged the way the user likes: drag a pane's tab
  * to dock it left, right, above or below another one, or drop it on the same
@@ -62,6 +63,7 @@ export function DockLayout({
   arrange: (api: DockviewApi) => void;
 }) {
   const apiRef = useRef<DockviewApi | null>(null);
+  const theme = useTheme();
   const saveTimer = useRef<number | undefined>(undefined);
   const titles = useRef(panes);
   titles.current = panes;
@@ -120,7 +122,7 @@ export function DockLayout({
       </div>
       <div className="dock-body">
         <PaneContents.Provider value={contents}>
-          <DockviewReact className="dockview-theme-dark" components={components} onReady={onReady} disableFloatingGroups />
+          <DockviewReact className={`dock-theme ${theme === "light" ? "dockview-theme-light" : "dockview-theme-dark"}`} components={components} onReady={onReady} disableFloatingGroups />
         </PaneContents.Provider>
       </div>
     </div>

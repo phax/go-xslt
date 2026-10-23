@@ -17,7 +17,8 @@ export type IconName =
   | "check"
   | "folder"
   | "folder-plus"
-  | "file-plus";
+  | "file-plus"
+  | "settings";
 
 export function Icon({
   name,
@@ -79,6 +80,19 @@ function renderIcon(name: IconName) {
         <>
           <rect x="5.5" y="5.5" width="7" height="8" rx="1" stroke="currentColor" strokeWidth="1.2" />
           <path d="M3.5 10.5v-7a1 1 0 0 1 1-1h7" stroke="currentColor" strokeWidth="1.2" />
+        </>
+      );
+    case "settings":
+      return (
+        <>
+          <path
+            d="M2.5 4.5h7M12.5 4.5h1M2.5 11.5h1M6.5 11.5h7"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            strokeLinecap="round"
+          />
+          <circle cx="11" cy="4.5" r="1.5" stroke="currentColor" strokeWidth="1.3" />
+          <circle cx="5" cy="11.5" r="1.5" stroke="currentColor" strokeWidth="1.3" />
         </>
       );
     case "refresh":

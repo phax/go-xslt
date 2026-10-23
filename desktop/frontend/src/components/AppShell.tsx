@@ -5,6 +5,7 @@ import { useAppDispatch, useAppState } from "../state/store";
 import { ContextMenuHost } from "./ContextMenuHost";
 import { DialogHost } from "./DialogHost";
 import { LicensesButton } from "./LicensesView";
+import { SettingsButton } from "./SettingsView";
 import { UpdateNotice } from "./UpdateNotice";
 import { WrapToggle } from "./WrapToggle";
 import { Sidebar } from "./Sidebar";
@@ -63,6 +64,7 @@ export function AppShell() {
         <UpdateNotice />
         <WrapToggle />
         <LicensesButton />
+        <SettingsButton />
       </header>
       <div className="app-body">
         <PanelGroup direction="horizontal" className="panels">

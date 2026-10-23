@@ -1,11 +1,11 @@
 import { useMemo } from "react";
-import { useWrapLines } from "../state/prefs";
+import { useTheme, useWrapLines } from "../state/prefs";
 import CodeMirror from "@uiw/react-codemirror";
 import { xml } from "@codemirror/lang-xml";
 import { linter, lintGutter, type Diagnostic as CMDiagnostic } from "@codemirror/lint";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { githubDark } from "@uiw/codemirror-theme-github";
+import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
 import type { Diagnostic } from "../lib/api";
 
 interface EditorProps {
@@ -34,10 +34,11 @@ const hideCaret = EditorView.theme({ ".cm-cursor, .cm-dropCursor": { display: "n
  * it. This one is focusable and selectable, it just refuses edits. */
 export function ReadOnlyViewer({ value }: { value: string }) {
   const wrap = useWrapLines();
+  const cmTheme = useTheme() === "light" ? githubLight : githubDark;
   return (
     <CodeMirror
       value={value}
-      theme={githubDark}
+      theme={cmTheme}
       height="100%"
       style={{ height: "100%", fontSize: 13 }}
       extensions={[xml(), ...(wrap ? [EditorView.lineWrapping] : []), EditorState.readOnly.of(true), hideCaret]}
@@ -54,6 +55,7 @@ export function ReadOnlyViewer({ value }: { value: string }) {
 /** XSLT is XML, so the XML language mode + a diagnostics linter cover it. */
 export function Editor({ value, onChange, diagnostics = [], readOnly = false }: EditorProps) {
   const wrap = useWrapLines();
+  const cmTheme = useTheme() === "light" ? githubLight : githubDark;
   const lintExt = useMemo(
     () =>
       linter((view): CMDiagnostic[] => {
@@ -79,7 +81,7 @@ export function Editor({ value, onChange, diagnostics = [], readOnly = false }: 
   return (
     <CodeMirror
       value={value}
-      theme={githubDark}
+      theme={cmTheme}
       height="100%"
       style={{ height: "100%", fontSize: 13 }}
       extensions={[xml(), lintGutter(), lintExt, ...(wrap ? [EditorView.lineWrapping] : [])]}

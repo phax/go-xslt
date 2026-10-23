@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,6 +31,11 @@ type UpdateInfo struct {
 	// Newer reports that Latest is newer than Current. Always false for a
 	// development build, which has no version to compare.
 	Newer bool `json:"newer"`
+	// NotesHTML is the newest release's notes, rendered and sanitized by
+	// GitHub (the frontend cleans it once more before showing it).
+	NotesHTML string `json:"notesHtml"`
+	// PublishedAt is when the newest release was published (RFC 3339).
+	PublishedAt string `json:"publishedAt"`
 	// Error says why the check failed; empty on success.
 	Error string `json:"error,omitempty"`
 }
@@ -49,7 +55,9 @@ func (s *UpdateService) CheckForUpdate() UpdateInfo {
 		info.Error = err.Error()
 		return info
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
+	// The html media type adds body_html: the notes rendered and sanitized
+	// by GitHub, so the app needs no Markdown renderer of its own.
+	req.Header.Set("Accept", "application/vnd.github.html+json")
 	req.Header.Set("User-Agent", "go-xslt-desktop/"+appVersion)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -62,16 +70,21 @@ func (s *UpdateService) CheckForUpdate() UpdateInfo {
 		return info
 	}
 	var rel struct {
-		TagName string `json:"tag_name"`
-		HTMLURL string `json:"html_url"`
+		TagName     string `json:"tag_name"`
+		HTMLURL     string `json:"html_url"`
+		BodyHTML    string `json:"body_html"`
+		PublishedAt string `json:"published_at"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+	// A release answer is a few kilobytes; more is not one.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&rel); err != nil {
 		info.Error = err.Error()
 		return info
 	}
 	info.Latest = strings.TrimPrefix(rel.TagName, "v")
 	info.URL = rel.HTMLURL
 	info.Newer = isNewer(info.Latest, appVersion)
+	info.NotesHTML = rel.BodyHTML
+	info.PublishedAt = rel.PublishedAt
 	return info
 }
 

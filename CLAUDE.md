@@ -128,7 +128,15 @@ dragging in the GUI's Wails/CGo dependencies:
 - `desktop/updateservice.go` + `frontend/src/components/UpdateNotice.tsx` —
   the app's only network request: GitHub's latest-release API, at every start
   and every six hours, never cached across starts (a day-long cache hid a new
-  release in its first hours), switchable (pref `go-xslt.checkUpdates`). The build's version comes from
+  release in its first hours), switchable (pref `go-xslt.checkUpdates`). A newer release opens a dialog
+  with its notes once per start (`UpdateNotice.tsx`): GitHub's `body_html`
+  (asked for with the html media type), cleaned once more by
+  `sanitizeNotes`; links go to the browser; "Skip this version" is
+  `go-xslt.skippedRelease`. The settings dialog (`SettingsView.tsx`, toolbar
+  icon) holds the theme — `go-xslt.theme` = system|light|dark, resolved in
+  `prefs.ts` to `data-theme` on <html>; `tokens.css` has a light palette under
+  `:root[data-theme="light"]`, so colors belong in tokens, never literal —
+  and the update-check switch. The build's version comes from
   `desktop/version.go` (`appVersion`, "dev" by default), set by the gitignored
   `version_stamp.go` the Makefile writes before every build (`stamp-version`).
   A transform run's optional-feature switches are saved in the run

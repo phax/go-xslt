@@ -133,7 +133,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--text-sm);
-  color: #9cdcfe;
+  color: var(--ident);
   padding-top: 4px;
 }
 .param-row-value {
@@ -366,7 +366,7 @@
   min-height: 0;
   position: relative;
 }
-.dock-body .dockview-theme-dark {
+.dock-body .dock-theme {
   position: absolute;
   inset: 0;
   --dv-tabs-and-actions-container-height: 30px;

@@ -157,6 +157,17 @@ export interface UpdateInfo {
     "newer": boolean;
 
     /**
+     * NotesHTML is the newest release's notes, rendered and sanitized by
+     * GitHub (the frontend cleans it once more before showing it).
+     */
+    "notesHtml": string;
+
+    /**
+     * PublishedAt is when the newest release was published (RFC 3339).
+     */
+    "publishedAt": string;
+
+    /**
      * Error says why the check failed; empty on success.
      */
     "error"?: string;

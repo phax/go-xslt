@@ -29,7 +29,7 @@ button {
   font-size: 13px;
 }
 button:hover:not(:disabled) {
-  background: #3a3a3d;
+  background: var(--btn-hover);
 }
 button:disabled {
   opacity: 0.5;
@@ -38,6 +38,7 @@ button:disabled {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
+  color: var(--on-accent);
 }
 button.primary:hover:not(:disabled) {
   background: var(--accent-hover);
@@ -48,7 +49,7 @@ button.danger {
   color: var(--error);
 }
 button.danger:hover:not(:disabled) {
-  background: rgba(241, 76, 76, 0.12);
+  background: var(--error-soft);
 }
 button.icon-btn {
   padding: 2px 5px;
@@ -91,12 +92,12 @@ button:focus-visible,
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #4a4a4d;
+  background: var(--scroll-thumb);
   border-radius: var(--r-sm);
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #5a5a5d;
+  background: var(--scroll-thumb-hover);
   background-clip: content-box;
 }

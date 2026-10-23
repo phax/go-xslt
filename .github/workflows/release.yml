@@ -319,6 +319,17 @@ jobs:
     permissions:
       contents: write # creates the draft release and uploads its files
     steps:
+      # Only for the release notes: docs/release-notes/<tag>.md, when present.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: docs/release-notes
+
+      - name: Release notes for this tag
+        id: notes
+        run: |
+          f="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$f" ]; then echo "path=$f" >> "$GITHUB_OUTPUT"; else echo "no $f; GitHub's generated notes only"; fi
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -343,5 +354,7 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           files: release/*
+          # The hand-written notes come first, GitHub's generated list after.
+          body_path: ${{ steps.notes.outputs.path }}
           generate_release_notes: true
           draft: true

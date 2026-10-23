@@ -76,7 +76,7 @@ together (a real embedding caller does not pick one of these, it opts into all
 of them at once — see the claim switches in `internal/xslt/*_property.go`).
 `XSLT30_BYVER=1` gives a per-min-spec-version breakdown.
 
-`XSLT30_ONLY=<set-substring>` triages one test-set; `XSLT30_PROGRESS=1` prints
+`XSLT30_ONLY=<set-substring>` triages one test-set; `XSLT30_SKIP=unicode-90,regex-classes` leaves out the sets whose names contain an entry (without the two Unicode sets the run takes seconds instead of minutes); `XSLT30_PROGRESS=1` prints
 live progress; `XSLT30_SEQ=1` forces sequential (non-parallel) execution;
 `XSLT30_FAILS=1` dumps every fail name (same unanchored-grep caveat as
 `QT3_FAILDUMP` above) for a by-name regression diff; `XSLT30_ERRMSG=1`

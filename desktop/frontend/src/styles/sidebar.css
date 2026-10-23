@@ -207,7 +207,7 @@
   color: var(--warning);
 }
 .run-item-icon.kind-xpath {
-  color: #9cdcfe;
+  color: var(--ident);
 }
 .run-item-name {
   flex: 1;

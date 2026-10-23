@@ -14,10 +14,23 @@
   --fg-dim: #9d9d9d;
   --accent: #0e639c;
   --accent-hover: #1177bb;
+  --link: #4daafc; /* text links on dark backgrounds (VS Code textLink) */
   --error: #f14c4c;
   --warning: #cca700;
   --success: #4ec9b0;
   --focus-ring: #007fd4;
+  --on-accent: #fff; /* text on an accent background */
+  --btn-hover: #3a3a3d;
+  --scroll-thumb: #4a4a4d;
+  --scroll-thumb-hover: #5a5a5d;
+  --ident: #9cdcfe; /* names: XML files, XPath runs, labels */
+  --folder: #dcb67a;
+  --error-soft: rgba(241, 76, 76, 0.12);
+  --success-soft: rgba(78, 201, 176, 0.12);
+  --overlay: rgba(0, 0, 0, 0.45);
+  --chip-ct: #b9a2e6;
+  --chip-st: #6fd2b3;
+  --occ-many: #e5995a;
 
   /* spacing scale */
   --sp-1: 4px;
@@ -57,4 +70,40 @@
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   user-select: none; /* editors and text content opt back in explicitly */
+}
+
+/* Light theme (VS Code Light Modern), chosen with the toolbar switch: the
+   same tokens, redefined. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --bg-2: #f3f3f3;
+  --bg-3: #e8e8e8;
+  --bg-hover: #ececec;
+  --bg-selected: #d6ebff;
+  --border: #d4d4d4;
+  --fg: #1f1f1f;
+  --fg-dim: #616161;
+  --accent: #005fb8;
+  --accent-hover: #0258a8;
+  --link: #005fb8;
+  --error: #cd3131;
+  --warning: #946b00;
+  --success: #107c41;
+  --focus-ring: #005fb8;
+  --on-accent: #fff;
+  --btn-hover: #dcdcdc;
+  --scroll-thumb: #c1c1c1;
+  --scroll-thumb-hover: #a8a8a8;
+  --ident: #0070c1;
+  --folder: #b0812f;
+  --error-soft: rgba(205, 49, 49, 0.1);
+  --success-soft: rgba(16, 124, 65, 0.1);
+  --overlay: rgba(0, 0, 0, 0.25);
+  --chip-ct: #7a4fc4;
+  --chip-st: #11805f;
+  --occ-many: #b5651d;
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.15);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, 0.18);
 }

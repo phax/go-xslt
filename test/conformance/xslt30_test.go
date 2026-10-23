@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1882,10 +1883,22 @@ func TestXSLT30(t *testing.T) {
 		xsltCatEnvs[e.Name] = e
 	}
 	only := os.Getenv("XSLT30_ONLY")
+	// XSLT30_SKIP leaves out the test sets whose names contain one of its
+	// comma-separated entries — for a quick run without the slow Unicode sets:
+	// XSLT30_SKIP=unicode-90,regex-classes.
+	var skipSets []string
+	for _, s := range strings.Split(os.Getenv("XSLT30_SKIP"), ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			skipSets = append(skipSets, s)
+		}
+	}
 
 	var files []string
 	for _, ts := range cat.TestSets {
 		if only != "" && !strings.Contains(ts.Name, only) {
+			continue
+		}
+		if slices.ContainsFunc(skipSets, func(s string) bool { return strings.Contains(ts.Name, s) }) {
 			continue
 		}
 		files = append(files, filepath.Join(root, ts.File))

@@ -2,8 +2,11 @@
 // of every third-party dependency that ends up compiled/bundled into the
 // shipped desktop app — Go modules (root + this module, direct and
 // indirect, since Go static-links all of them into the final binary) and
-// the frontend's runtime npm dependencies (its build-time-only devDependencies
-// — typescript, vite, @types/* — never ship, so they're not listed here).
+// the frontend's runtime npm dependencies, direct AND indirect, since the
+// bundler copies all of them into the shipped JavaScript (`npm ls --omit=dev
+// --all` in frontend/ lists them; its devDependencies — typescript, vite,
+// @types/* — never ship, so they're not listed here). Go modules differ per
+// platform: check `GOOS=windows|linux|darwin go list -deps` for each.
 //
 // Regenerating after a dependency change: copy the new version's LICENSE
 // file over the matching path below (Go: $(go env GOMODCACHE)/<module>@
@@ -31,7 +34,7 @@ type Entry struct {
 	// Kind is "project", "go", "npm", or "font".
 	Kind string
 	// URL is the project's homepage or source repository, for reference.
-	URL string
+	URL  string
 	path string
 }
 
@@ -51,16 +54,10 @@ var entries = []Entry{
 		URL: "https://github.com/wailsapp/wails", path: "go/github.com/wailsapp/wails/webview2/LICENSE"},
 	{Name: "github.com/adrg/xdg", Version: "v0.5.3", License: "MIT", Kind: "go",
 		URL: "https://github.com/adrg/xdg", path: "go/github.com/adrg/xdg/LICENSE"},
-	{Name: "github.com/coder/websocket", Version: "v1.8.14", License: "ISC", Kind: "go",
-		URL: "https://github.com/coder/websocket", path: "go/github.com/coder/websocket/LICENSE"},
-	{Name: "github.com/ebitengine/purego", Version: "v0.9.1", License: "Apache-2.0", Kind: "go",
-		URL: "https://github.com/ebitengine/purego", path: "go/github.com/ebitengine/purego/LICENSE"},
 	{Name: "github.com/go-ole/go-ole", Version: "v1.3.0", License: "MIT", Kind: "go",
 		URL: "https://github.com/go-ole/go-ole", path: "go/github.com/go-ole/go-ole/LICENSE"},
 	{Name: "github.com/godbus/dbus/v5", Version: "v5.2.2", License: "BSD-2-Clause", Kind: "go",
 		URL: "https://github.com/godbus/dbus", path: "go/github.com/godbus/dbus/v5/LICENSE"},
-	{Name: "github.com/jchv/go-winloader", Version: "v0.0.0-20250406163304-c1995be93bd1", License: "ISC", Kind: "go",
-		URL: "https://github.com/jchv/go-winloader", path: "go/github.com/jchv/go-winloader/LICENSE"},
 	{Name: "github.com/mattn/go-colorable", Version: "v0.1.14", License: "MIT", Kind: "go",
 		URL: "https://github.com/mattn/go-colorable", path: "go/github.com/mattn/go-colorable/LICENSE"},
 	{Name: "github.com/mattn/go-isatty", Version: "v0.0.20", License: "MIT", Kind: "go",
@@ -89,6 +86,53 @@ var entries = []Entry{
 		URL: "https://wails.io", path: "npm/@wailsio/runtime/LICENSE"},
 	{Name: "react-resizable-panels", Version: "2.1.9", License: "MIT", Kind: "npm",
 		URL: "https://github.com/bvaughn/react-resizable-panels", path: "npm/react-resizable-panels/LICENSE"},
+	// Indirect runtime dependencies, bundled into the frontend's JavaScript too.
+	{Name: "@babel/runtime", Version: "7.29.7", License: "MIT", Kind: "npm",
+		URL: "https://babel.dev/docs/en/next/babel-runtime", path: "npm/@babel/runtime/LICENSE"},
+	{Name: "@codemirror/autocomplete", Version: "6.20.3", License: "MIT", Kind: "npm",
+		URL: "https://code.haverbeke.berlin/codemirror/autocomplete", path: "npm/@codemirror/autocomplete/LICENSE"},
+	{Name: "@codemirror/commands", Version: "6.10.3", License: "MIT", Kind: "npm",
+		URL: "https://github.com/codemirror/commands", path: "npm/@codemirror/commands/LICENSE"},
+	{Name: "@codemirror/language", Version: "6.12.3", License: "MIT", Kind: "npm",
+		URL: "https://github.com/codemirror/language", path: "npm/@codemirror/language/LICENSE"},
+	{Name: "@codemirror/search", Version: "6.7.1", License: "MIT", Kind: "npm",
+		URL: "https://code.haverbeke.berlin/codemirror/search", path: "npm/@codemirror/search/LICENSE"},
+	{Name: "@codemirror/theme-one-dark", Version: "6.1.3", License: "MIT", Kind: "npm",
+		URL: "https://github.com/codemirror/theme-one-dark", path: "npm/@codemirror/theme-one-dark/LICENSE"},
+	{Name: "@lezer/common", Version: "1.5.2", License: "MIT", Kind: "npm",
+		URL: "https://github.com/lezer-parser/common", path: "npm/@lezer/common/LICENSE"},
+	{Name: "@lezer/highlight", Version: "1.2.3", License: "MIT", Kind: "npm",
+		URL: "https://github.com/lezer-parser/highlight", path: "npm/@lezer/highlight/LICENSE"},
+	{Name: "@lezer/lr", Version: "1.4.10", License: "MIT", Kind: "npm",
+		URL: "https://code.haverbeke.berlin/lezer/lr", path: "npm/@lezer/lr/LICENSE"},
+	{Name: "@lezer/xml", Version: "1.0.6", License: "MIT", Kind: "npm",
+		URL: "https://github.com/lezer-parser/xml", path: "npm/@lezer/xml/LICENSE"},
+	{Name: "@marijn/find-cluster-break", Version: "1.0.2", License: "MIT", Kind: "npm",
+		URL: "https://github.com/marijnh/find-cluster-break", path: "npm/@marijn/find-cluster-break/LICENSE"},
+	{Name: "@uiw/codemirror-extensions-basic-setup", Version: "4.25.10", License: "MIT", Kind: "npm",
+		URL: "https://uiwjs.github.io/react-codemirror/", path: "npm/@uiw/codemirror-extensions-basic-setup/LICENSE"},
+	{Name: "@uiw/codemirror-themes", Version: "4.25.10", License: "MIT", Kind: "npm",
+		URL: "https://uiwjs.github.io/react-codemirror/", path: "npm/@uiw/codemirror-themes/LICENSE"},
+	{Name: "codemirror", Version: "6.0.2", License: "MIT", Kind: "npm",
+		URL: "https://github.com/codemirror/basic-setup", path: "npm/codemirror/LICENSE"},
+	{Name: "crelt", Version: "1.0.6", License: "MIT", Kind: "npm",
+		URL: "https://github.com/marijnh/crelt", path: "npm/crelt/LICENSE"},
+	{Name: "dockview", Version: "8.6.1", License: "MIT", Kind: "npm",
+		URL: "https://github.com/dockview/dockview", path: "npm/dockview/LICENSE"},
+	{Name: "dockview-core", Version: "8.6.1", License: "MIT", Kind: "npm",
+		URL: "https://github.com/dockview/dockview", path: "npm/dockview-core/LICENSE"},
+	{Name: "dockview-react", Version: "8.6.1", License: "MIT", Kind: "npm",
+		URL: "https://github.com/dockview/dockview", path: "npm/dockview-react/LICENSE"},
+	{Name: "js-tokens", Version: "4.0.0", License: "MIT", Kind: "npm",
+		URL: "lydell/js-tokens", path: "npm/js-tokens/LICENSE"},
+	{Name: "loose-envify", Version: "1.4.0", License: "MIT", Kind: "npm",
+		URL: "https://github.com/zertosh/loose-envify", path: "npm/loose-envify/LICENSE"},
+	{Name: "scheduler", Version: "0.23.2", License: "MIT", Kind: "npm",
+		URL: "https://reactjs.org/", path: "npm/scheduler/LICENSE"},
+	{Name: "style-mod", Version: "4.1.3", License: "MIT", Kind: "npm",
+		URL: "https://github.com/marijnh/style-mod", path: "npm/style-mod/LICENSE"},
+	{Name: "w3c-keyname", Version: "2.2.8", License: "MIT", Kind: "npm",
+		URL: "https://github.com/marijnh/w3c-keyname", path: "npm/w3c-keyname/LICENSE"},
 
 	// Bundled font.
 	{Name: "Inter", Version: "", License: "OFL-1.1", Kind: "font",

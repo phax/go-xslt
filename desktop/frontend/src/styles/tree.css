@@ -55,14 +55,14 @@
   color: var(--warning);
 }
 .tree-row-icon.kind-xml {
-  color: #9cdcfe;
+  color: var(--ident);
 }
 .tree-row-icon.kind-text,
 .tree-row-icon.kind-other {
   color: var(--fg-dim);
 }
 .tree-row-icon.dir {
-  color: #dcb67a;
+  color: var(--folder);
 }
 
 .tree-row-name {
