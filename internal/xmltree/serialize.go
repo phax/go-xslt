@@ -680,6 +680,34 @@ func (s *serializer) startTag(n *Node, depth int) elemOpen {
 		decls.WriteString(s.declare(ns.Name.Local, ns.Value, &saves))
 	}
 
+	// An element serialized on its own out of a larger tree keeps the
+	// namespace nodes it inherits from its ancestors: the reconstructed tree
+	// must have every namespace node the original has (Serialization 3.1 §5;
+	// fn-doc-37's xs:attribute keeps the xmlns:atomic of its document
+	// element). Nested elements get them from this one.
+	if depth == 0 && n.Parent != nil && n.Parent.Kind == KindElement {
+		seen := map[string]bool{}
+		for _, ns := range n.NSDecls() {
+			seen[ns.Name.Local] = true
+		}
+		for cur := n; cur.Parent != nil && cur.Parent.Kind == KindElement && !cur.NSBarrier(); cur = cur.Parent {
+			for _, ns := range cur.Parent.NSDecls() {
+				pfx := ns.Name.Local
+				if seen[pfx] {
+					continue
+				}
+				seen[pfx] = true
+				if ns.Value == "" || pfx == "xml" || (normalizePfx && pfx != "" && htmlFamilyNS[ns.Value]) {
+					continue
+				}
+				if cur, ok := s.prefixes[pfx]; ok && cur == ns.Value {
+					continue
+				}
+				decls.WriteString(s.declare(pfx, ns.Value, &saves))
+			}
+		}
+	}
+
 	// inherit-namespaces="no" (NSBarrier): this element does not inherit its
 	// ancestors' namespace declarations, so a DEFAULT namespace that is in
 	// scope in the serialized output but not in this element's own scope has

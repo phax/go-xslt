@@ -36,15 +36,42 @@ A compiled stylesheet. Immutable and safe for concurrent use.
 
 ```go
 type Request struct {
-	Stylesheet      string            // XSLT source text
+	Stylesheet      string            // XSLT source text; empty = the one the Source embeds
 	Source          string            // source document; may be empty with InitialTemplate
 	Params          map[string]string // global stylesheet parameters
 	InitialTemplate string            // named template to start with
 	BaseDir         string            // resolves relative URIs; empty = no file reads
 	Security        Security
 	Features        Features          // optional XSLT 3.0 features; zero = all off
+	Limits          Limits            // instruction steps and nesting depth; zero = defaults
 }
 ```
+
+### Embedded stylesheets
+
+When `Stylesheet` is empty, `Transform` and `TransformTo` use the stylesheet
+the source document carries itself (XSLT 3.0 §3.13): the source names it in an
+`xml-stylesheet` processing instruction before its document element, and the
+fragment identifier is the ID of the stylesheet element.
+
+```xml
+<?xml-stylesheet type="text/xsl" href="#style1"?>
+<!DOCTYPE doc [<!ATTLIST xsl:stylesheet id ID #REQUIRED>]>
+<doc xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:stylesheet id="style1" version="3.0">
+    <xsl:template match="/">…</xsl:template>
+  </xsl:stylesheet>
+  …
+</doc>
+```
+
+The ID must be an ID in the XML sense: declared `ID` in the DTD, or an
+`xml:id` attribute. The embedded module keeps the namespaces it inherits from
+its ancestors and nothing else of them, so their attributes (such as
+`xsl:version`) have no effect. Only a stylesheet inside the document itself
+(`href="#id"`) is used; a separate file named in the processing instruction
+is not loaded. A source without such an instruction is an error, as an empty
+stylesheet always was.
 
 ## TransformRequest
 
@@ -57,6 +84,7 @@ type TransformRequest struct {
 	Params          map[string]string
 	InitialTemplate string
 	Security        Security
+	Limits          Limits
 }
 ```
 
@@ -111,7 +139,7 @@ type XPathItem struct {
 
 ```go
 type ValidateRequest struct {
-	Schemas   []string   // the first is the entry schema
+	Schemas   []string   // the first is the entry schema; none: the instance's xsi:schemaLocation
 	Instance  string
 	Version   XSDVersion // XSD10 (default) or XSD11
 	BaseDir   string
@@ -154,6 +182,19 @@ type Features struct {
 All three are off by default and apply only to the stylesheet of the
 request; stylesheets compiled with different `Features` can run at the same
 time. See [Optional features](/guide/xslt#optional-features).
+
+## Limits
+
+```go
+type Limits struct {
+	MaxSteps int64 // instructions per run; default 20,000,000
+	MaxDepth int   // nesting of instructions, templates, functions; default and maximum 10,000
+}
+```
+
+A run that exceeds a limit stops with `XPDY0130`. Runs started with
+`fn:transform` spend from the same budget. See
+[Resource limits](/guide/security#resource-limits).
 
 ## Diagnostic
 

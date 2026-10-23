@@ -466,6 +466,11 @@ func (s *Schema) ValidateNode(n *xmltree.Node, opts NodeValidateOptions) error {
 	local.lenientEntities = opts.LenientEntities
 	s = &local
 
+	if n.Kind == xmltree.KindElement {
+		if e := s.checkLateHints(n); e != nil {
+			return e // the same verdict as Validate
+		}
+	}
 	clone, back := cloneForValidation(n)
 	if err := s.validateCloned(clone, opts); err != nil {
 		return err

@@ -5,17 +5,17 @@ go-xslt is measured against the official W3C test suites. The numbers count
 the engine is (for example, XQuery-only cases are not run against an XPath
 processor). Skipped cases are reported separately and never counted.
 
-Measured on 2026-10-11, release `v0.0.6`.
+Measured on 2026-10-23 against the suite commits `fddf1cf9` (xslt30-test), `201a6e46` (qt3tests) and `7bc3365c` (xsdtests).
 
 | Suite | Source | Pass rate |
 |---|---|---|
-| XSLT 3.0, basic processor | [w3c/xslt30-test](https://github.com/w3c/xslt30-test) | **99.9%** (8,614 of 8,626) |
-| XSLT 3.0 with streaming, schema-awareness and backwards compatibility | same | **99.8%** (12,267 of 12,296) |
-| XPath 3.1 and F&O 3.1 (QT3) | [w3c/qt3tests](https://github.com/w3c/qt3tests) | **99.8%** (22,099 of 22,153) |
-| XSD 1.0 | [w3c/xsdtests](https://github.com/w3c/xsdtests) | **99.99%** (39,346 of 39,351) |
-| XSD 1.1 | same | **99.99%** (41,499 of 41,503) |
+| XSLT 3.0, basic processor | [w3c/xslt30-test](https://github.com/w3c/xslt30-test) | **99.9%** (8,635 of 8,647) |
+| XSLT 3.0 with streaming, schema-awareness and backwards compatibility | same | **99.8%** (12,288 of 12,317) |
+| XPath 3.1 and F&O 3.1 (QT3) | [w3c/qt3tests](https://github.com/w3c/qt3tests) | **99.7%** (22,419 of 22,478) |
+| XSD 1.0 | [w3c/xsdtests](https://github.com/w3c/xsdtests) | **99.99%** (39,396 of 39,401) |
+| XSD 1.1 | same | **99.99%** (41,549 of 41,553) |
 
-Of the basic XSLT cases, 100% of those written for XSLT 1.0 pass, 99.8% of
+Of the basic XSLT cases, 100% of those written for XSLT 1.0 pass, 99.9% of
 those for 2.0 and 99.8% of those for 3.0.
 
 ## Every failure is documented

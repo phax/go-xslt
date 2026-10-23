@@ -14,10 +14,15 @@ import (
 // Compile parses and assembles one or more schema documents into a Schema,
 // resolving xs:include / xs:import / xs:redefine / xs:override against baseDir.
 // A handful of not-yet-handled constructs yield ErrUnsupported; anything
-// genuinely malformed yields a normal invalid error.
+// genuinely malformed yields a normal invalid error. No documents at all is
+// a schema of the built-in components only: an instance validated against it
+// is assessed by its own xsi:schemaLocation hints and xsi:type.
 func Compile(docs []string, baseDir string, v Version) (*Schema, error) {
 	return compile(docs, baseDir, v, false, nil)
 }
+
+// emptySchemaDoc is the schema document an empty schema set compiles from.
+const emptySchemaDoc = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"/>`
 
 // CompileFS is Compile with every schema document it reads (xs:include,
 // xs:import, xs:redefine, xs:override, and later the instance's
@@ -41,7 +46,14 @@ func CompileWithDocsFS(docs []string, baseDir string, v Version, files *fsaccess
 
 func compile(docs []string, baseDir string, v Version, keepDocs bool, files *fsaccess.Guard) (*Schema, error) {
 	if len(docs) == 0 {
-		return nil, ErrUnsupported
+		// No schema documents: only the built-in components, and whatever the
+		// instance's xsi:schemaLocation hints or xsi:type name (the msMeta
+		// tests that have no schema test at all, attMd001: xsi:Type).
+		sch, err := compile([]string{emptySchemaDoc}, baseDir, v, keepDocs, files)
+		if sch != nil {
+			sch.sourceDocs = nil
+		}
+		return sch, err
 	}
 	root, err := xmltree.ParseLenient11(docs[0])
 	if err != nil {

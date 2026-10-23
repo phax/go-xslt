@@ -23,6 +23,12 @@ res := engine.Transform(engine.Request{
 | `InitialTemplate` | The name of a template to start with, instead of applying templates to the source document. |
 | `BaseDir` | The directory against which relative URIs are resolved: `xsl:import`, `xsl:include`, `document()`, `fn:doc`, `fn:unparsed-text`, collections and `xsl:result-document`. Empty means no file is read. |
 | `Security` | Which files and network resources the run may read. See [Security](/guide/security). |
+| `Features` | Optional XSLT 3.0 features: schema awareness, XSLT 1.0 compatibility, strict streaming. See [Features](/reference/engine#features). |
+| `Limits` | How many instructions the run may execute and how deeply it may nest. See [Resource limits](/guide/security#resource-limits). |
+
+An empty `Stylesheet` means the one the source embeds and names in an
+`<?xml-stylesheet href="#id"?>` instruction; see
+[Embedded stylesheets](/reference/engine#embedded-stylesheets).
 
 ## The result
 

@@ -62,7 +62,7 @@ func numberWordsLang(n int64, token string, ordinal bool, lang, variant string) 
 	}
 	switch token {
 	case "W":
-		w = strings.ToUpper(w)
+		w = upperCaseFull(w) // full case mapping: "dreißig" → "DREISSIG"
 	case "Ww":
 		w = titleCaseWords(w)
 	}
@@ -70,6 +70,22 @@ func numberWordsLang(n int64, token string, ordinal bool, lang, variant string) 
 		return "-" + w
 	}
 	return w
+}
+
+// SpellNumber spells n out in words in a natively implemented language other
+// than English (German, French, Italian), for xsl:number's word tokens. token
+// is "w", "W" or "Ww"; variant is the ordinal variant ("-er",
+// "%spellout-ordinal-feminine", or "" for the default). ok is false for any
+// other language and for numbers beyond the spellout's range.
+func SpellNumber(n int64, token string, ordinal bool, lang, variant string) (string, bool) {
+	abs := n
+	if abs < 0 {
+		abs = -abs
+	}
+	if wordLangFor(lang) == nil || abs >= wordsLangMax {
+		return "", false
+	}
+	return numberWordsLang(n, token, ordinal, lang, variant), true
 }
 
 // ordinalEnding extracts the ending a variant asks for: "-er" -> "er". A CLDR

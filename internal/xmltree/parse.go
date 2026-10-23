@@ -58,6 +58,15 @@ func downgradeXMLVersion(src string) string {
 	return src
 }
 
+// MaxDepth is how deeply elements may nest in a parsed document. Copying,
+// serializing and validating a tree recurse once per level, and far deeper
+// input (a few megabytes of "<a><a><a>…") would overflow the Go stack, a
+// fatal error no recover() catches. libxml2 stops at 256 levels by default
+// (2,048 with XML_PARSE_HUGE); no real document comes near this limit.
+const MaxDepth = 10000
+
+var errTooDeep = fmt.Errorf("elements nested more than %d levels deep (implementation limit)", MaxDepth)
+
 // Parse parses an XML document into a tree. The returned node is a Document
 // node whose single element child is the root element. XML 1.1 documents are
 // parsed with 1.0 rules (see ParseLenient11 for the XSD validator's tolerant
@@ -302,6 +311,10 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	// the root element, which then rides through the transform into the result
 	// (conflict-resolution-1701: a BOM-prefixed source document).
 	src = decodeBOM(src)
+	// Undeclaring a prefix (xmlns:p="") is legal only in XML 1.1 (Namespaces
+	// 1.1); in a 1.0 document it breaks the Namespaces 1.0 constraint "No
+	// Prefix Undeclaring" (addB139: such a schema document is no schema).
+	xml10 := !declaresXML11(src)
 	// External parsed general entities are spliced in textually before
 	// tokenizing (see expandExternalEntities) — encoding/xml can only supply
 	// an entity's replacement as character data, never as markup.
@@ -471,6 +484,9 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				if !isNS {
 					continue
 				}
+				if xml10 && local != "" && a.Value == "" {
+					return nil, fmt.Errorf("namespace constraint No Prefix Undeclaring: xmlns:%s may not be empty in an XML 1.0 document", local)
+				}
 				if !cloned {
 					frame = cloneNS(frame)
 					cloned = true
@@ -502,6 +518,7 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 						an.SetIDKind(k)
 					}
 				}
+				normalizeIDAttr(an)
 				an.Parent = el
 				el.Attrs = append(el.Attrs, an)
 			}
@@ -536,6 +553,9 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 			top.Append(el)
 			stack = append(stack, el)
 			nsStack = append(nsStack, frame)
+			if len(stack) > MaxDepth+1 { // stack[0] is the document node
+				return nil, errTooDeep
+			}
 			rawNames = append(rawNames, t.Name)
 			// xml:space="preserve" forces true for this element and its
 			// descendants until overridden; any other explicit value

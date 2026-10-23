@@ -46,6 +46,7 @@ func fnAnalyzeString(c *Context, a []Object) (Object, error) {
 	if re.MatchString("") {
 		return nil, fmt.Errorf("err:FORX0003: the pattern matches a zero-length string")
 	}
+	parents := asGroupParents(ToString(arg(a, 1)), flags)
 	root := asTyped(xmltree.NewElement(asName("analyze-string-result")))
 	doc := &xmltree.Node{Kind: xmltree.KindDocument}
 	doc.Append(root)
@@ -58,7 +59,7 @@ func fnAnalyzeString(c *Context, a []Object) (Object, error) {
 		}
 		m := asTyped(xmltree.NewElement(asName("match")))
 		g := 1
-		asGroups(m, input, loc, &g, loc[0], loc[1], true)
+		asGroups(m, input, loc, parents, &g, 0, loc[0], loc[1])
 		root.Append(m)
 		pos = loc[1]
 	}
@@ -70,24 +71,23 @@ func fnAnalyzeString(c *Context, a []Object) (Object, error) {
 	return NodeSet{root}, nil
 }
 
-// asGroups fills parent with input[from:to], wrapping every capturing group
-// that lies inside that span in an fn:group element. *g is the next group
-// number to consider; groups are numbered by opening parenthesis, so a group
-// nested in another always follows it, and a group whose capture lies before
-// pos (an earlier iteration of a repeated outer group) is skipped. An empty
-// group sitting exactly at the span's end belongs to the match itself (top),
-// never to the group that happens to end there.
-func asGroups(parent *xmltree.Node, input string, loc []int, g *int, from, to int, top bool) {
+// asGroups fills parent (capturing group cur, 0 for the match itself) with
+// input[from:to], wrapping every capturing group nested directly in cur that
+// took part in the match in an fn:group element. *g is the next group number
+// to consider; groups are numbered by opening parenthesis, so the groups
+// nested in cur follow it directly and the first one that is not ends cur. A
+// group whose capture lies outside the span (an earlier iteration of a
+// repeated outer group) is skipped. Nesting comes from the pattern
+// (parents), not from the positions: (a)(b?) and (a(b?)) capture the same
+// spans of "a", but only in the second is the empty group 2 inside group 1.
+func asGroups(parent *xmltree.Node, input string, loc, parents []int, g *int, cur, from, to int) {
 	pos := from
 	n := len(loc) / 2
-	for *g < n {
+	for *g < n && asWithin(parents, *g, cur) {
 		gs, ge := loc[2**g], loc[2**g+1]
-		if gs < 0 || gs < pos {
+		if gs < 0 || gs < pos || ge > to {
 			*g++
 			continue
-		}
-		if ge > to || (gs == to && !top) {
-			break
 		}
 		if gs > pos {
 			parent.Append(xmltree.NewText(input[pos:gs]))
@@ -97,12 +97,74 @@ func asGroups(parent *xmltree.Node, input string, loc []int, g *int, from, to in
 		for _, at := range grp.Attrs {
 			at.SetTypeAnno(int32(XSpositiveInteger)) // nr is xs:positiveInteger in the schema
 		}
+		self := *g
 		*g++
-		asGroups(grp, input, loc, g, gs, ge, false)
+		asGroups(grp, input, loc, parents, g, self, gs, ge)
 		parent.Append(grp)
 		pos = ge
 	}
 	if to > pos {
 		parent.Append(xmltree.NewText(input[pos:to]))
 	}
+}
+
+// asWithin reports whether capturing group g lies inside group cur (0: the
+// whole match, which contains every group).
+func asWithin(parents []int, g, cur int) bool {
+	for g > 0 {
+		if g == cur {
+			return true
+		}
+		if g >= len(parents) {
+			return false
+		}
+		g = parents[g]
+	}
+	return cur == 0
+}
+
+// asGroupParents returns, for every capturing group of an XPath regex, the
+// number of the capturing group it is nested in (0 for none), read off the
+// pattern's parentheses: an escaped character and a character class (which
+// may nest through subtraction, [a-z-[aeiou]]) hold none, and (?:...) is a
+// group that captures nothing. With the q flag nothing is a group.
+func asGroupParents(pattern, flags string) []int {
+	parents := []int{0}
+	for _, f := range flags {
+		if f == 'q' {
+			return parents
+		}
+	}
+	var open []int // enclosing groups, innermost last; 0 = non-capturing
+	class := 0
+	rs := []rune(pattern)
+	for i := 0; i < len(rs); i++ {
+		switch r := rs[i]; {
+		case r == '\\':
+			i++
+		case r == '[':
+			class++
+		case r == ']' && class > 0:
+			class--
+		case class > 0:
+		case r == '(':
+			if i+2 < len(rs) && rs[i+1] == '?' && rs[i+2] == ':' {
+				open = append(open, 0)
+				i += 2
+				continue
+			}
+			enclosing := 0
+			for j := len(open) - 1; j >= 0; j-- {
+				if open[j] != 0 {
+					enclosing = open[j]
+					break
+				}
+			}
+			parents = append(parents, enclosing)
+			open = append(open, len(parents)-1)
+		case r == ')' && len(open) > 0:
+			open = open[:len(open)-1]
+		}
+	}
+	return parents
 }

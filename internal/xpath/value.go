@@ -10,9 +10,12 @@ import (
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 )
 
-// Object is an XPath 1.0 value: one of NodeSet, string, float64, or bool.
-// (The model is deliberately XPath-1.0-shaped for now; the evaluator and
-// function library can be extended toward the XDM sequence model later.)
+// Object is an XDM value: a Sequence of Items — nodes, typed atomic values
+// (*Atomic, carrying their XSD type: xs:integer as arbitrary precision,
+// xs:decimal as a rational, dates, durations, QNames, …), maps, arrays and
+// functions. A NodeSet is the node-only sequence. Plain Go string, float64
+// and bool also occur, as the untyped results of internal fast paths and the
+// XPath 1.0 conversion functions; Items normalizes all of them.
 type Object interface{}
 
 // NodeSet is an ordered, duplicate-free (by the time it is returned) set of

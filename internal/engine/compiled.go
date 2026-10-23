@@ -34,6 +34,9 @@ type TransformRequest struct {
 	// BaseDir only, and no network. The compile itself was limited by the
 	// Security of the Request given to Compile.
 	Security Security `json:"security"`
+	// Limits bounds what this run may execute; the zero value takes the
+	// defaults.
+	Limits Limits `json:"limits"`
 }
 
 // Compile compiles req.Stylesheet (resolving xsl:import/xsl:include against
@@ -65,7 +68,7 @@ func Compile(req Request) (sheet *Stylesheet, diags []Diagnostic) {
 func (s *Stylesheet) Transform(tr TransformRequest) (res Result) {
 	start := time.Now()
 	defer s.finish(&res, start)
-	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir)}
+	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal()}
 	rr, err := s.ss.TransformEntry(tr.Source, entry, s.baseDir)
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}
@@ -82,7 +85,7 @@ func (s *Stylesheet) Transform(tr TransformRequest) (res Result) {
 func (s *Stylesheet) TransformTo(w io.Writer, tr TransformRequest) (res Result) {
 	start := time.Now()
 	defer s.finish(&res, start)
-	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir)}
+	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal()}
 	rr, err := s.ss.TransformEntryTo(w, tr.Source, entry, s.baseDir, chunkableStylesheet(s.src))
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}

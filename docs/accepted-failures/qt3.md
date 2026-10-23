@@ -1,6 +1,6 @@
 # QT3 (`qt3tests`, XPath 3.1 / F&O 3.1): failing cases
 
-22,099 of 22,153 applicable cases pass, 54 fail. Measured offline.
+22,419 of 22,478 applicable cases pass, 59 fail. Measured offline.
 
 ### XQuery modules
 `fn-load-xquery-module-014`, `fn-load-xquery-module-015`,
@@ -13,7 +13,9 @@
 `fn-load-xquery-module-034`, `fn-load-xquery-module-035`,
 `fn-load-xquery-module-036`, `fn-load-xquery-module-037`,
 `fn-load-xquery-module-040`, `fn-load-xquery-module-041`,
-`fn-load-xquery-module-042`, `fn-load-xquery-module-061`,
+`fn-load-xquery-module-042`, `fn-load-xquery-module-045`,
+`fn-load-xquery-module-046`, `fn-load-xquery-module-050`,
+`fn-load-xquery-module-051`, `fn-load-xquery-module-061`,
 `fn-load-xquery-module-064`, `fn-load-xquery-module-065`,
 `fn-load-xquery-module-068`, `fn-load-xquery-module-069`,
 `fn-load-xquery-module-070`, `fn-load-xquery-module-073`,
@@ -52,3 +54,13 @@ Each expects `fn:transform` to be unavailable. go-xslt implements
 Reads https://timeanddate.com fifty times. Offline it cannot pass; online
 (`QT3_NETWORK=1`) the server now answers every client with HTTP 403 (bot
 protection), so it fails there too.
+
+### `parse-xml-010`
+**Status:** Accepted (implementation-defined).
+The string passed to `fn:parse-xml` declares an external entity
+(`<!ENTITY foo SYSTEM 'parse-xml/foo.entity'>`), and the test expects its
+content. A non-validating XML processor need not read external entities
+(XML 1.0 §5.1), and F&O 3.1 leaves how `fn:parse-xml` builds its tree
+implementation-defined. go-xslt does not read files from inside
+`fn:parse-xml`: the function has no resolver, so a file read there would
+bypass the `Security` settings that govern every other file access.

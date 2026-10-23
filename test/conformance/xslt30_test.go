@@ -369,17 +369,17 @@ func xsltSkip(deps ...xsltDeps) string {
 		for _, l := range d.NumLangs {
 			// languages_for_numbering: the test needs xsl:number word-spelling
 			// (@format="w"/"W"/... with @lang) in a language other than
-			// English. The engine only implements English (and a narrow
-			// single-digit German case not exercised by any test declaring
-			// this dependency — see num2SpellGerman); full non-English
-			// spellout needs CLDR locale data and is deliberately out of
-			// scope, so a value other than English is an unsatisfied
-			// dependency for us, same as e.g. an unsupported feature.
+			// English. The engine spells out English, German, French and
+			// Italian (internal/xpath/words_lang.go); any other language is
+			// an unsatisfied dependency for us, like an unsupported feature.
 			if l.Satisfied == "false" {
 				continue
 			}
 			v := strings.ToLower(strings.TrimSpace(l.Value))
-			if v != "" && v != "en" && !strings.HasPrefix(v, "en-") {
+			base, _, _ := strings.Cut(v, "-")
+			switch base {
+			case "", "en", "de", "fr", "it":
+			default:
 				return "lang:" + l.Value
 			}
 		}
@@ -450,8 +450,11 @@ type ssEntry struct {
 // (several xslt30-test cases share one stylesheet FILE but bake in a
 // DIFFERENT expression at compile time via a shadow attribute fed from a
 // per-case static param override — maps-901..907, date-094/095).
-func (c *ssCache) get(path string, static map[string]string, pkgs []xslt.PackageSource, schemas []xslt.SchemaSource) (*xslt.Stylesheet, error) {
+func (c *ssCache) get(path string, embedded bool, static map[string]string, pkgs []xslt.PackageSource, schemas []xslt.SchemaSource) (*xslt.Stylesheet, error) {
 	key := path
+	if embedded {
+		key += "\x03embedded"
+	}
 	for _, p := range pkgs {
 		key += "\x01" + p.Name + "@" + p.Version + "=" + p.Path
 	}
@@ -478,10 +481,15 @@ func (c *ssCache) get(path string, static map[string]string, pkgs []xslt.Package
 		return e.ss, e.err
 	}
 	b, err := os.ReadFile(path)
+	text := string(b)
+	if err == nil && embedded {
+		// The source carries the stylesheet (defines-stylesheet="true").
+		text, err = xslt.EmbeddedStylesheet(text, filepath.Dir(path), nil)
+	}
 	if err != nil {
 		e = ssEntry{nil, err}
 	} else {
-		ss, cerr := xslt.CompileAtWithSchemas(string(b), path, static, pkgs, schemas)
+		ss, cerr := xslt.CompileAtWithSchemas(text, path, static, pkgs, schemas)
 		e = ssEntry{ss, cerr}
 	}
 	c.mu.Lock()
@@ -690,6 +698,14 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 			}
 		}
 	}
+	embedded := false
+	if ssFile == "" {
+		for _, s := range env.Sources {
+			if s.DefinesStylesheet == "true" && s.File != "" {
+				ssFile, embedded = s.File, true
+			}
+		}
+	}
 	if ssFile == "" {
 		return "skip", "no-stylesheet"
 	}
@@ -801,7 +817,7 @@ func runXSLTCase(tc xsltCase, set xsltSet, dir string, cache *ssCache) (string, 
 			})
 		}
 	}
-	ss, cerr := cache.get(filepath.Join(dir, ssFile), staticParams, pkgs, hostSchemas)
+	ss, cerr := cache.get(filepath.Join(dir, ssFile), embedded, staticParams, pkgs, hostSchemas)
 
 	srcXML, srcSelect, srcURI, srcValidation := "", "", "", ""
 	srcStreaming := false
@@ -1575,8 +1591,8 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 		}
 		return evalXSLTAssertOn(a, doc, output, baseURI, ns, entryValue, entryVar, assertSchema)
 
-	case "assert-count", "assert-deep-eq", "assert-type":
-		// These three assert on the RAW sequence the transformation returned,
+	case "assert-count", "assert-deep-eq", "assert-type", "assert-empty":
+		// These assert on the RAW sequence the transformation returned,
 		// which only an initial-FUNCTION entry point produces (<output
 		// tree="no" serialize="no"/>). The serialized Output cannot answer
 		// them: a two-item sequence is one joined string there.
@@ -2011,11 +2027,17 @@ func closeHTMLVoidTags(s string) string {
 
 // checkXSLTValueAssert implements the catalog assertions that inspect the raw
 // returned SEQUENCE rather than the serialized output: assert-count (the
-// number of items), assert-deep-eq (fn:deep-equal against an expression) and
-// assert-type (the sequence matches a SequenceType).
+// number of items), assert-empty (no items), assert-deep-eq (fn:deep-equal
+// against an expression) and assert-type (the sequence matches a
+// SequenceType).
 func checkXSLTValueAssert(kind, text string, value xpath.Object, ns map[string]string) (string, string) {
 	items := xpath.Items(value)
 	switch kind {
+	case "assert-empty":
+		if len(items) == 0 {
+			return "pass", ""
+		}
+		return "fail", fmt.Sprintf("assert-empty got %d items", len(items))
 	case "assert-count":
 		want, err := strconv.Atoi(text)
 		if err != nil {

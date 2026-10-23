@@ -21,6 +21,9 @@ const (
 type ValidateRequest struct {
 	// Schemas holds the schema document source texts. The first is the entry
 	// schema; the rest are additional documents available to xs:import/include.
+	// With none, the instance is validated by the schema documents its own
+	// xsi:schemaLocation / xsi:noNamespaceSchemaLocation name (read under
+	// BaseDir and Security) and the built-in types its xsi:type names.
 	Schemas []string `json:"schemas"`
 	// Instance is the XML instance document to validate.
 	Instance string `json:"instance"`

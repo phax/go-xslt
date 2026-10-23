@@ -20,7 +20,7 @@ if !res.Valid {
 
 | Field | Meaning |
 |---|---|
-| `Schemas` | Schema documents as text. The first is the entry schema; the others are available to `xs:import` and `xs:include` by namespace. |
+| `Schemas` | Schema documents as text. The first is the entry schema; the others are available to `xs:import` and `xs:include` by namespace. With none, the instance is validated by the schema documents its own `xsi:schemaLocation` / `xsi:noNamespaceSchemaLocation` name (read under `BaseDir` and `Security`) and the built-in types its `xsi:type` names. |
 | `Instance` | The XML document to validate. |
 | `Version` | `engine.XSD10` (default) or `engine.XSD11`. |
 | `BaseDir` | The directory for relative `schemaLocation`s in `xs:import`, `xs:include`, `xs:redefine`, `xs:override` and `xsi:schemaLocation`. Empty means no file is read. |

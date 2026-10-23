@@ -21,6 +21,7 @@ export default defineConfig({
       { text: 'Reference', link: '/reference/engine', activeMatch: '/reference/' },
       { text: 'Desktop tester', link: '/desktop' },
       { text: 'Conformance', link: '/conformance' },
+      { text: 'Performance', link: '/performance' },
       {
         text: 'Links',
         items: [
@@ -37,6 +38,7 @@ export default defineConfig({
           items: [
             { text: 'What is go-xslt?', link: '/guide/what-is-go-xslt' },
             { text: 'Getting started', link: '/guide/getting-started' },
+            { text: 'Command line', link: '/guide/cli' },
           ],
         },
         {

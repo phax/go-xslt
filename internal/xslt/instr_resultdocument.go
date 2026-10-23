@@ -200,10 +200,17 @@ func rdCompile(c *compiler, el *xmltree.Node) (instruction, error) {
 }
 
 // rdEffectiveOutput resolves the serialization settings for this instruction:
-// the named @format output (if any) overridden by the instruction's own
-// serialization attributes.
+// the named @format output, or without one the unnamed output definition
+// (XSLT 3.0 §25.1: "The unnamed output definition is used when an
+// xsl:result-document element omits the format attribute"), overridden by the
+// instruction's own serialization attributes. The unnamed definition is the
+// containing package's; only the principal package's is kept, so one in a
+// used package starts from the defaults (an xsl:output with no attributes).
 func (n *rdResultDocument) rdEffectiveOutput(eng *engine, r rt) (Output, error) {
 	var cfg Output
+	if n.format == nil && eng.sheet.inPrincipal(n.el) {
+		cfg = eng.sheet.output
+	}
 	if n.format != nil {
 		fv, err := eng.evalAVT(n.format, n.el, r)
 		if err != nil {

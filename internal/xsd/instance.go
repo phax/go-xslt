@@ -2,6 +2,7 @@ package xsd
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -46,6 +47,9 @@ func (s *Schema) ValidateOpts(instance, lang string, maxErrors int) (res *Result
 		if ms, err := Compile(merged, s.baseDir, s.version); err == nil {
 			s = ms
 		}
+	}
+	if err := s.checkLateHints(root); err != nil {
+		return &Result{Valid: false, Errors: []Error{*err}}, nil
 	}
 	// Validate against a shallow copy so the ID/IDREF binding of this instance
 	// stays private to this call (the component maps are read-only here).
@@ -103,6 +107,58 @@ func (s *Schema) ValidateOpts(instance, lang string, maxErrors int) (res *Result
 		return nil, verr
 	}
 	return &Result{Valid: true}, nil
+}
+
+// checkLateHints enforces XSD 1.0's rule on where schema location hints may
+// appear (Structures §4.3.2): an xsi:schemaLocation or
+// xsi:noNamespaceSchemaLocation on an element is an error when an element or
+// attribute in a namespace it addresses already appeared before that element
+// within the validation root (addB156/158; addB157's hint on the first
+// element of its namespace is fine). A hint that repeats a namespace and
+// location given earlier names nothing new and is no error (addB163; the
+// suite's verdicts saying otherwise are all "queried"). XSD 1.1 dropped the
+// rule, so it is a no-op there.
+func (s *Schema) checkLateHints(root *xmltree.Node) *Error {
+	if s.version != Version10 {
+		return nil
+	}
+	seen := map[string]bool{}      // namespaces of the elements and attributes so far
+	hinted := map[[2]string]bool{} // {namespace, location} pairs hinted so far
+	var walk func(el *xmltree.Node) *Error
+	walk = func(el *xmltree.Node) *Error {
+		var addressed [][2]string
+		if v, ok := el.Attr(xsiNS, "schemaLocation"); ok {
+			f := strings.Fields(v)
+			for i := 0; i+1 < len(f); i += 2 {
+				addressed = append(addressed, [2]string{f[i], f[i+1]})
+			}
+		}
+		if v, ok := el.Attr(xsiNS, "noNamespaceSchemaLocation"); ok {
+			addressed = append(addressed, [2]string{"", strings.TrimSpace(v)})
+		}
+		for _, h := range addressed {
+			first := !hinted[h]
+			hinted[h] = true
+			if ns := h[0]; seen[ns] && first {
+				e := &Error{Line: int(el.Line), Col: int(el.Col), Path: elementPath(el),
+					Message: fmt.Sprintf("a schema location hint for namespace %q comes after an element or attribute in that namespace (XSD 1.0 §4.3.2)", ns)}
+				return e
+			}
+		}
+		seen[el.Name.Space] = true
+		for _, a := range el.Attrs {
+			seen[a.Name.Space] = true
+		}
+		for _, c := range el.Children {
+			if c.Kind == xmltree.KindElement {
+				if e := walk(c); e != nil {
+					return e
+				}
+			}
+		}
+		return nil
+	}
+	return walk(root)
 }
 
 // hintDocs reads the schema documents referenced by the document element's

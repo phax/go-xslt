@@ -1,8 +1,8 @@
 # XSLT 3.0 (`xslt30-test`): failing cases
 
-Default mode (basic processor): 8,614 of 8,626 pass, 12 fail. Combined mode
+Default mode (basic processor): 8,635 of 8,647 pass, 12 fail. Combined mode
 (`XSLT30_FULL=1`, adding streaming, schema awareness and backwards
-compatibility): 12,267 of 12,296 pass, 29 fail: the 12 below plus 17
+compatibility): 12,288 of 12,317 pass, 29 fail: the 12 below plus 17
 combined-only cases. Measured offline.
 
 ## Default mode (also failing in combined mode)

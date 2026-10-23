@@ -33,7 +33,10 @@ dragging in the GUI's Wails/CGo dependencies:
   (`engine.errSite`, set in `execInstr`, applied once at the top so error
   identity is untouched) and its W3C `Code`.
 - `internal/engine` — **stable internal facade**. `Transform(Request) Result`.
-  Panic-safe. The `engine/` re-export, GUI, and tests depend only on this;
+  Panic-safe. An empty `Request.Stylesheet` means the source's embedded one
+  (`<?xml-stylesheet href="#id"?>`, XSLT 3.0 §3.13 — `xslt.EmbeddedStylesheet`
+  serializes that element out of the source with its inherited namespaces;
+  `href="#id"` only; the harness maps `defines-stylesheet="true"` to it). The `engine/` re-export, GUI, and tests depend only on this;
   rewrite anything behind it freely.
 - `internal/xmltree` — own XML node tree (parser on `encoding/xml`), document
   order, line/col, and a serializer for xml/html/text (`serialize.go`, plus an
@@ -255,6 +258,21 @@ Desktop GUI (**run from `desktop/`**):
   unstated), and XSLT 3.0 does not require it — `docbook-001/002` (combined
   mode) fail on it and stay failing.
 
+- **Nothing may overflow the Go stack** (a fatal error no recover() catches —
+  one crafted input would kill a whole service). Recursion is bounded at
+  every level: `xmltree.MaxDepth` (10,000 element levels, both readers),
+  `maxParseDepth` (5,000 nested ExprSingle in the XPath parser),
+  `maxCallDepth` (10,000 inline-function calls; the counter travels with the
+  function value, `Context.calls`), and the XSLT engine's per-run `budget`
+  (`Limits` — MaxSteps 20 M, MaxDepth 10,000, lower only), which nested
+  `fn:transform` runs SHARE. All limit errors are XPDY0130 (not XTDE0040,
+  which means "no such initial template"). `engine/limits_test.go`'s
+  `TestNoStackOverflow` pins the crash inputs. A new recursive walk over
+  input-controlled structure needs the same treatment.
+- `cmd/go-xslt` is the CLI (`transform|validate|xpath|version`) in the
+  LIBRARY module; it may read the directories of the files on its command
+  line, more only via `-allow-*` flags. `scripts/bench/main.go` benchmarks it
+  against xsltproc/xmllint (`go run scripts/bench/main.go`).
 - **Tests are deterministic — no verdict may depend on wall-clock time or on how
   busy the machine is.** No per-case timeouts in the harnesses (a case that
   cannot finish is stopped by the engine's counted budgets — instruction steps,
@@ -272,9 +290,11 @@ Desktop GUI (**run from `desktop/`**):
   prefixes resolve via the stylesheet element's in-scope namespaces.
 - Template bodies must be compiled from `childNodesForBody(el)` (text + elements
   minus leading params), **not** `elementChildren` — text nodes matter.
-- Engine value model is currently XPath-1.0-shaped (NodeSet/string/float64/bool)
-  in `xpath/value.go`; XSLT 3.0 features (maps/arrays/HOF) extend it via
-  `Sequence`/`Item`/`RealItem` rather than replacing it.
+- Value model (`xpath/value.go`): `Object` is an XDM value — `Sequence` of
+  items (nodes, typed `*Atomic`, maps, arrays, functions); `NodeSet` is the
+  node-only form. Plain Go `string`/`float64`/`bool` still occur as untyped
+  results of fast paths and the 1.0 conversion functions — `Items()`
+  normalizes everything, so new code should work on items.
 - **Never trust the locally embedded spec copy**
   (`test/conformance/xslt30-test/specs/xslt-lcwd30.xml` is a stale March-2015
   Working Draft, not the June-2017 REC) for a precise semantic question —
@@ -316,8 +336,8 @@ Desktop GUI (**run from `desktop/`**):
   `XSLT30_BYVER=1` for a per-version breakdown; `XSLT30_FULL=1` additionally
   claims streaming + schema-awareness + backwards-compatibility together —
   see below):
-  - **Default (basic processor): 99.9% (8,614/8,626)**. **Combined
-    (`XSLT30_FULL=1`): 99.8% (12,267/12,296)**.
+  - **Default (basic processor): 99.9% (8,635/8,647)**. **Combined
+    (`XSLT30_FULL=1`): 99.8% (12,288/12,317)**.
   - `<test><package role="principal"></test>` catalog entries (347 cases)
     used to be hard-skipped unconditionally; the engine already accepted a
     top-level `xsl:package` as a module root and already fully implemented
@@ -492,7 +512,7 @@ Desktop GUI (**run from `desktop/`**):
     one — the typed value doesn't need to be *stored*, only computed when
     asked for); a handful of `XTTE1545`/`1555`/AVT-schema-awareness edge cases.
 - 🟢 **QT3/FOTS (XPath+XQuery) conformance** (`test/conformance/qt3_test.go`,
-  `TestQT3`): **99.8% (22,099/22,153 applicable), 54 fails**.
+  `TestQT3`): **99.7% (22,419/22,478 applicable), 59 fails**.
   - **Harness philosophy**: this engine is a real XP31 processor (also
     embedding a real XT30 one), not an XQuery processor — the **only**
     category-level exclusion is a spec dependency this declared identity
@@ -506,6 +526,22 @@ Desktop GUI (**run from `desktop/`**):
     pre-emptive-skip design that was quietly inflating the denominator;
     removing it exposed real capability that already worked (304 of 542
     newly-run cases already passed) alongside a real, now-visible residual.
+  - **No harness-side skips left**: `assert-xml` (parsed-tree comparison,
+    prefixes and whitespace significant, `@file`), `serialization-matches`,
+    `assert-serialization-error` and `assert-permutation` are checked; a
+    malformed environment source is left to the engine (FODC0002); an
+    assertion the engine cannot evaluate is a fail; assertions run under the
+    case's `xml-version`/`xsd-version`. Only `specApplies` and two
+    unsatisfiable dependencies skip. Running them found and fixed:
+    `fn:serialize` spaced adjacent nodes (SER 3.1 §2: only atomics); an
+    element serialized out of its tree dropped inherited namespaces (§5);
+    `analyze-string` nested groups by position, not by the pattern's
+    parentheses (`asGroupParents`); `json-to-xml` lost `key=""`; a leading
+    BOM in `parse-json`/`json-to-xml`; `xml:id` not ID-normalized at tree
+    construction (XDM §6.3.3, also DTD ID/IDREF(S)); ranges clamped integers
+    above int64 (`to` and its comparison fast path are now `big.Int`-exact;
+    an over-long range is XPDY0130); the `xml` prefix unbound without a
+    resolver.
   - `fn:transform` (F&O 3.1 §16.3.2) is real, standalone-callable, and
     XSLT-engine-backed (`internal/xpath/fn_transform.go`'s injected
     `TransformFunc` hook into `internal/xslt/fn_transform.go`), covering
@@ -561,11 +597,17 @@ Desktop GUI (**run from `desktop/`**):
     the identical shape legitimately evaluates to an empty sequence outside
     that opt-in feature.
 - 🟡 **XSD 1.0 / 1.1 validation** (`internal/xsd`, `test/conformance/xsd_test.go`
-  `TestXSD` vs the W3C `xsdtests` suite). **1.0: 99.99% (39,346/39,351). 1.1:
-  99.99% (41,499/41,503)** — `unsupported` is zero in both versions, so
+  `TestXSD` vs the W3C `xsdtests` suite). **1.0: 99.99% (39,396/39,401). 1.1:
+  99.99% (41,549/41,553)** — `unsupported` is zero in both versions, so
   of-ran and of-applicable coincide; the 9 remaining fails across both
   versions are documented suite self-contradictions (disputed/`queried`
   status, TSTF-implementation-determined cases), not engine gaps.
+  An EMPTY schema set compiles (built-ins only; `internal/xsd` `Compile(nil,
+  …)` — the public model API `xsd.Compile` still refuses it): the instance is
+  then governed by its own `xsi:schemaLocation` hints and `xsi:type`, which
+  is how the 55 msMeta groups without a schema test run. XSD 1.0 only:
+  `checkLateHints` (§4.3.2) — a NEW hint for a namespace already seen is an
+  error; repeating an earlier (namespace, location) pair is not (addB163).
   Full feature set: facets, complex content models (groups/wildcards/
   substitution groups/extension/restriction), identity constraints,
   XSD 1.1 assertions + conditional type assignment, `xs:override`,

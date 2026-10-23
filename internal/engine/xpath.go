@@ -82,7 +82,11 @@ func EvalXPath(req XPathRequest) (res XPathResult) {
 func runXPath(req XPathRequest) XPathResult {
 	parsed, err := xpath.Parse(req.Expression)
 	if err != nil {
-		return XPathResult{Diagnostics: []Diagnostic{xpathDiag("parse", err)}}
+		d := xpathDiag("parse", err)
+		if d.Code == "" {
+			d.Code = "XPST0003" // a grammar error; other static errors carry their own code
+		}
+		return XPathResult{Diagnostics: []Diagnostic{d}}
 	}
 	ctx := &xpath.Context{Pos: 1, Size: 1}
 	if strings.TrimSpace(req.Source) != "" {
@@ -134,6 +138,11 @@ func xpathDiag(phase string, err error) Diagnostic {
 		if i := strings.IndexByte(rest, ':'); i > 0 {
 			code = rest[:i]
 			msg = strings.TrimSpace(rest[i+1:])
+		}
+	} else if i := strings.Index(msg, "err:"); i >= 0 {
+		// A code inside the message (the parser prefixes the expression).
+		if j := strings.IndexByte(msg[i+4:], ':'); j > 0 {
+			code = msg[i+4 : i+4+j]
 		}
 	}
 	return Diagnostic{Severity: SeverityError, Phase: phase, Code: code, Message: msg}

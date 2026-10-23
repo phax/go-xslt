@@ -1,6 +1,6 @@
 # XSD (`xsdtests`): failing cases
 
-XSD 1.0: 39,346 of 39,351 pass, 5 fail. XSD 1.1: 41,499 of 41,503 pass,
+XSD 1.0: 39,396 of 39,401 pass, 5 fail. XSD 1.1: 41,549 of 41,553 pass,
 4 fail. Nothing is reported as unsupported. The full investigation history
 is in `tools/xsd_results.txt` (sections M28 and M30).
 

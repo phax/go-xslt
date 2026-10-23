@@ -24,7 +24,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -41,14 +40,10 @@ import (
 // repoRoot is the module root relative to this test package (test/conformance).
 func repoRoot() string { return filepath.Join("..", "..") }
 
-// stressExpr matches expressions whose eager evaluation would blow up memory in
-// our engine (large numeric ranges materialised as a slice), e.g. "1 to 1000000000".
-var stressExpr = regexp.MustCompile(`(?:to\s*\d{7,})|(?:\d{7,}\s*to)`)
-
 // safeRunCase runs a case with panic recovery. It runs inline (no goroutine) so
 // the suite is deterministic: an earlier per-case timeout goroutine would leak
-// and race the shared docCache, corrupting later results. Pathological inputs
-// that would hang/OOM are pre-filtered (see stressExpr) rather than timed out.
+// and race the shared docCache, corrupting later results. A pathologically
+// large range stops at the engine's own limit (XPDY0130) instead.
 func safeRunCase(tc fotsCase, env fotsEnv, loadDoc func(string, string) (*xmltree.Node, error)) (status, reason string) {
 	defer func() {
 		if e := recover(); e != nil {
@@ -119,6 +114,10 @@ type fotsSource struct {
 	// the XSLT harness (see xsltSourceStreamed); the QT3 catalog never sets it.
 	Streaming string `xml:"streaming,attr"`
 	Content   string `xml:"content"` // inline source content (XSLT tests)
+	// DefinesStylesheet is the xslt30-test catalog's <source
+	// defines-stylesheet="true"/>: the source embeds the stylesheet itself,
+	// named by its xml-stylesheet processing instruction.
+	DefinesStylesheet string `xml:"defines-stylesheet,attr"`
 	// Version is a <test><package> element's own package-version attribute —
 	// distinct from an <environment><package>'s (fotsPackage.Version): a
 	// SECONDARY package named directly inside one <test> (rather than shared
@@ -565,6 +564,9 @@ type fotsCase struct {
 	Res  struct {
 		Children []fotsAssert `xml:",any"`
 	} `xml:"result"`
+	// dir is the test set's directory, which an assertion's @file is
+	// relative to.
+	dir string
 }
 type fotsTestSet struct {
 	Name  string     `xml:"name,attr"`
@@ -777,6 +779,7 @@ func runSet(root, file string, globalEnv map[string]fotsEnv, verbose bool) *setR
 		// typing declares `feature value="staticTyping"` once, at the
 		// set — not the case — level).
 		tc.Deps = deps
+		tc.dir = tsDir
 		status, reason := safeRunCase(tc, env, loadDoc)
 		switch status {
 		case "pass":
@@ -1226,7 +1229,10 @@ func runCase(tc fotsCase, env fotsEnv, loadDoc func(string, string) (*xmltree.No
 	for _, s := range env.Sources {
 		d, err := loadDoc(env.base, s.File)
 		if err != nil {
-			return "skip", "src-load"
+			// A deliberately malformed source (fn-doc-27/28) is not loaded
+			// here; reading it is the engine's job, and its error (FODC0002)
+			// is what the case asserts.
+			continue
 		}
 		if envSch != nil {
 			validateEnvSource(envSch, s.Validation, d)
@@ -1348,12 +1354,6 @@ func runCase(tc fotsCase, env fotsEnv, loadDoc func(string, string) (*xmltree.No
 		}
 		expr = string(b)
 	}
-	if strings.Contains(expr, "declare ") || strings.Contains(expr, "import ") {
-		return "skip", "xquery-prolog"
-	}
-	if stressExpr.MatchString(expr) {
-		return "skip", "stress-range"
-	}
 
 	// A case (or its test-set) declaring `dependency type="feature"
 	// value="staticTyping"` explicitly OPTS IN to XPath 3.1's optional
@@ -1389,7 +1389,7 @@ func runCase(tc fotsCase, env fotsEnv, loadDoc func(string, string) (*xmltree.No
 	if len(tc.Res.Children) == 0 {
 		return "skip", "no-assertion"
 	}
-	st, reason := checkAssert(tc.Res.Children[0], result, resErr, ns, vars)
+	st, reason := checkAssert(tc.Res.Children[0], assertEnv{dir: tc.dir, xmlVersion: xmlVersion, xsdVersion: xsdVersion}, result, resErr, ns, vars)
 	return st, reason
 }
 
@@ -1401,9 +1401,18 @@ func evalXP(expr string, ctx *xpath.Context) (xpath.Object, error) {
 	return p.Eval(ctx)
 }
 
+// assertEnv is what an assertion needs from its test case: the test set's
+// directory (an assertion's @file is relative to it) and the XML and XSD
+// versions the case's dependencies run the processor under, which hold for
+// evaluating its assertions too (cbcl-cast-gYear-003a's xs:gYear('0000') is
+// only valid under XSD 1.1).
+type assertEnv struct {
+	dir, xmlVersion, xsdVersion string
+}
+
 // checkAssert evaluates a FOTS assertion against the test result.
 // Returns ("pass"|"fail"|"skip", reason).
-func checkAssert(a fotsAssert, result xpath.Object, resErr error, ns nsMap, vars varMap) (string, string) {
+func checkAssert(a fotsAssert, env assertEnv, result xpath.Object, resErr error, ns nsMap, vars varMap) (string, string) {
 	kind := a.XMLName.Local
 
 	// Build a context that binds $result for assertion expressions.
@@ -1415,9 +1424,11 @@ func checkAssert(a fotsAssert, result xpath.Object, resErr error, ns nsMap, vars
 		if resErr == nil {
 			v["result"] = result
 		}
-		return &xpath.Context{Pos: 1, Size: 1, NS: ns, Vars: v}
+		return &xpath.Context{Pos: 1, Size: 1, NS: ns, Vars: v, XMLVersion: env.xmlVersion, XSDVersion: env.xsdVersion}
 	}
-	// evalBool evaluates an XPath predicate with $result bound.
+	// evalBool evaluates an XPath predicate with $result bound. The engine under
+	// test evaluates it, so an assertion it cannot evaluate is a failure, not a
+	// skip.
 	evalBool := func(expr string) (bool, bool) {
 		o, err := evalXP(expr, withResult())
 		if err != nil {
@@ -1435,7 +1446,7 @@ func checkAssert(a fotsAssert, result xpath.Object, resErr error, ns nsMap, vars
 	switch kind {
 	case "all-of":
 		for _, c := range a.Children {
-			if st, r := checkAssert(c, result, resErr, ns, vars); st != "pass" {
+			if st, r := checkAssert(c, env, result, resErr, ns, vars); st != "pass" {
 				return st, r
 			}
 		}
@@ -1443,7 +1454,7 @@ func checkAssert(a fotsAssert, result xpath.Object, resErr error, ns nsMap, vars
 	case "any-of":
 		anySkip := ""
 		for _, c := range a.Children {
-			st, r := checkAssert(c, result, resErr, ns, vars)
+			st, r := checkAssert(c, env, result, resErr, ns, vars)
 			if st == "pass" {
 				return "pass", ""
 			}
@@ -1457,7 +1468,7 @@ func checkAssert(a fotsAssert, result xpath.Object, resErr error, ns nsMap, vars
 		return "fail", "any-of"
 	case "not":
 		if len(a.Children) == 1 {
-			st, r := checkAssert(a.Children[0], result, resErr, ns, vars)
+			st, r := checkAssert(a.Children[0], env, result, resErr, ns, vars)
 			if st == "skip" {
 				return "skip", r
 			}
@@ -1498,7 +1509,7 @@ func checkAssert(a fotsAssert, result xpath.Object, resErr error, ns nsMap, vars
 		}
 		b, ok := evalBool(fmt.Sprintf("$result instance of %s", strings.TrimSpace(a.Value)))
 		if !ok {
-			return "skip", "type-parse"
+			return "fail", "type-parse"
 		}
 		return pass(b)
 	case "assert-eq":
@@ -1507,7 +1518,7 @@ func checkAssert(a fotsAssert, result xpath.Object, resErr error, ns nsMap, vars
 		}
 		b, ok := evalBool(fmt.Sprintf("$result eq (%s)", a.Value))
 		if !ok {
-			return "skip", "eq-eval"
+			return "fail", "eq-eval"
 		}
 		return pass(b)
 	case "assert-deep-eq":
@@ -1516,7 +1527,7 @@ func checkAssert(a fotsAssert, result xpath.Object, resErr error, ns nsMap, vars
 		}
 		b, ok := evalBool(fmt.Sprintf("deep-equal($result, (%s))", a.Value))
 		if !ok {
-			return "skip", "deepeq-eval"
+			return "fail", "deepeq-eval"
 		}
 		return pass(b)
 	case "assert-string-value":
@@ -1540,16 +1551,134 @@ func checkAssert(a fotsAssert, result xpath.Object, resErr error, ns nsMap, vars
 		}
 		b, ok := evalBool(a.Value)
 		if !ok {
-			return "skip", "assert-eval"
+			return "fail", "assert-eval"
 		}
 		return pass(b)
 
-	case "assert-xml", "assert-serialization", "serialization-matches":
-		return "skip", "serialization"
+	// assert-serialization is the old name of assert-xml (catalog-schema.xsd).
+	case "assert-xml", "assert-serialization":
+		if resErr != nil {
+			return "fail", "errored"
+		}
+		want := a.Value
+		if f := a.attr("file"); f != "" {
+			b, err := os.ReadFile(filepath.Join(env.dir, f))
+			if err != nil {
+				return "fail", "xml-file"
+			}
+			want = string(b)
+		}
+		got, ok := serializeResult(withResult())
+		if !ok {
+			return "fail", "serialize"
+		}
+		if os.Getenv("QT3_XMLDIFF") != "" && !qt3XMLEqual(want, got, a.attr("ignore-prefixes") == "true") {
+			fmt.Printf("WANT %q\nGOT  %q\n", want, got)
+		}
+		return pass(qt3XMLEqual(want, got, a.attr("ignore-prefixes") == "true"))
+	case "serialization-matches":
+		if resErr != nil {
+			return "fail", "errored"
+		}
+		got, ok := serializeResult(withResult())
+		if !ok {
+			return "fail", "serialize"
+		}
+		re, err := xpath.CompileRegexStrict(a.Value, a.attr("flags"))
+		if err != nil {
+			return "fail", "regex"
+		}
+		return pass(re.MatchString(got))
 	case "assert-serialization-error":
-		return "skip", "ser-error"
+		// The query must run without error; only serializing its result fails.
+		if resErr != nil {
+			return "fail", "errored"
+		}
+		_, ok := serializeResult(withResult())
+		return pass(!ok)
 	case "assert-permutation":
-		return "skip", "permutation"
+		if resErr != nil {
+			return "fail", "errored"
+		}
+		// Some reordering of $result is deep-equal to the expected sequence:
+		// same length, and every item occurs equally often in both (deep-equal
+		// takes NaN as equal to NaN, as the assertion requires).
+		b, ok := evalBool(fmt.Sprintf(`let $e := (%s) return count($result) eq count($e) and
+			(every $r in $result satisfies
+				count($result[deep-equal(., $r)]) eq count($e[deep-equal(., $r)]))`, a.Value))
+		if !ok {
+			return "fail", "permutation-eval"
+		}
+		return pass(b)
 	}
 	return "skip", "unknown:" + kind
+}
+
+// serializeResult serializes $result with fn:serialize's defaults — method
+// xml, indent no, omit-xml-declaration yes, the parameters assert-xml names.
+// ok is false when serializing raises an error.
+func serializeResult(ctx *xpath.Context) (string, bool) {
+	o, err := evalXP("serialize($result)", ctx)
+	if err != nil {
+		return "", false
+	}
+	return xpath.ToString(o), true
+}
+
+// qt3XMLEqual reports whether the expected assert-xml fragment and the
+// serialized result are the same XML: both are parsed inside a wrapper
+// element (they may be fragments) and compared node by node — names by
+// namespace URI and, unless ignorePrefixes, prefix; attributes as a set;
+// every child including whitespace-only text, comments and processing
+// instructions, as canonicalizing both would. Namespace declarations are not
+// compared: only the names they bind are.
+func qt3XMLEqual(expected, actual string, ignorePrefixes bool) bool {
+	ed, err1 := parseAssertXML(expected)
+	ad, err2 := parseAssertXML(actual)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return qt3NodeEqual(ed, ad, ignorePrefixes)
+}
+
+func qt3NodeEqual(a, b *xmltree.Node, ignorePrefixes bool) bool {
+	if a.Kind != b.Kind {
+		return false
+	}
+	sameName := func(x, y xmltree.Name) bool {
+		return x.Local == y.Local && x.Space == y.Space && (ignorePrefixes || x.Prefix == y.Prefix)
+	}
+	switch a.Kind {
+	case xmltree.KindElement:
+		if !sameName(a.Name, b.Name) || len(a.Attrs) != len(b.Attrs) {
+			return false
+		}
+		for _, aa := range a.Attrs {
+			found := false
+			for _, ba := range b.Attrs {
+				if sameName(aa.Name, ba.Name) && aa.Value == ba.Value {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		fallthrough
+	case xmltree.KindDocument:
+		if len(a.Children) != len(b.Children) {
+			return false
+		}
+		for i := range a.Children {
+			if !qt3NodeEqual(a.Children[i], b.Children[i], ignorePrefixes) {
+				return false
+			}
+		}
+		return true
+	case xmltree.KindPI:
+		return a.Name.Local == b.Name.Local && a.Value == b.Value
+	default: // text, comment
+		return a.Value == b.Value
+	}
 }

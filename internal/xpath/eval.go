@@ -3,6 +3,7 @@ package xpath
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 	"time"
 
@@ -10,22 +11,22 @@ import (
 )
 
 // rangeMaterializeLimit caps the size of an integer range ("a to b"). Our value
-// model is eager, so a range larger than this would exhaust memory; stress tests
-// use such ranges to probe streaming engines, which we are not.
+// model is eager, so a range larger than this would exhaust memory; such a
+// range is an implementation limit (XPDY0130), which XPath 3.1 allows.
 const rangeMaterializeLimit = 10_000_000
 
 // rangeOperand atomizes an operand of the `to` operator: () → absent (the range
 // is empty — K-RangeExpr-5), a single xs:integer (an untypedAtomic is cast to
 // one) → its value, and anything else — decimals and doubles included — is
-// XPTY0004 (K-RangeExpr-33..36: 1.1 to 3). Integers beyond int64 clamp, which
-// the length guard then turns into an error or an empty range.
-func rangeOperand(ctx *Context, o Object) (int64, bool, error) {
+// XPTY0004 (K-RangeExpr-33..36: 1.1 to 3). xs:integer has no upper bound, so
+// neither has an operand (RangeExpr-409: 10^21 to 10^21+3).
+func rangeOperand(ctx *Context, o Object) (*big.Int, bool, error) {
 	items, err := Atomize(o)
 	if err != nil {
-		return 0, false, err
+		return nil, false, err
 	}
 	if len(items) == 0 {
-		return 0, false, nil
+		return nil, false, nil
 	}
 	if len(items) > 1 {
 		// XSLT's own backwards-compatible processing (ctx.BC10) restores the
@@ -35,25 +36,19 @@ func rangeOperand(ctx *Context, o Object) (int64, bool, error) {
 		if ctx != nil && ctx.BC10 {
 			items = items[:1]
 		} else {
-			return 0, false, fmt.Errorf("err:XPTY0004: range operand is a sequence of %d items", len(items))
+			return nil, false, fmt.Errorf("err:XPTY0004: range operand is a sequence of %d items", len(items))
 		}
 	}
 	a := items[0].(*Atomic)
 	if a.T == XSuntypedAtomic {
 		if a, err = CastTo(a, XSinteger); err != nil {
-			return 0, false, err
+			return nil, false, err
 		}
 	}
 	if !isIntegerType(a.T) || a.i == nil {
-		return 0, false, fmt.Errorf("err:XPTY0004: %s is not a valid range operand", a.T)
+		return nil, false, fmt.Errorf("err:XPTY0004: %s is not a valid range operand", a.T)
 	}
-	if !a.i.IsInt64() {
-		if a.i.Sign() < 0 {
-			return -1 << 63, true, nil
-		}
-		return 1<<63 - 1, true, nil
-	}
-	return a.i.Int64(), true, nil
+	return a.i, true, nil
 }
 
 // VarResolver resolves variable references.
@@ -75,6 +70,10 @@ type FuncResolver interface {
 
 // Context is the evaluation context for an XPath expression.
 type Context struct {
+	// calls counts the inline-function invocations in progress along this
+	// evaluation, shared by every context derived from it (see
+	// evalInlineFunc); nil until the first inline function is created.
+	calls   *callDepth
 	Node    *xmltree.Node // context node
 	Pos     int           // context position (1-based)
 	Size    int           // context size
@@ -665,20 +664,26 @@ func evalExpr(e Expr, ctx *Context) (Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !fromOK || !toOK || from > to {
+		if !fromOK || !toOK || from.Cmp(to) > 0 {
 			return Sequence{}, nil
 		}
-		// Guard against pathological ranges (e.g. "65 to 65536*65536") that would
-		// materialise billions of integers and OOM. We model sequences eagerly, so
-		// cap the length; any consumer of a range this large is degenerate. (A
-		// negative difference here is int64 overflow — a range beyond 2^63.)
-		span := to - from
-		if span < 0 || span >= rangeMaterializeLimit {
-			return nil, fmt.Errorf("err:FOAR0002: integer range too large (%d to %d)", from, to)
+		// We model sequences eagerly, so a range is materialized; one too
+		// long for that ("65 to 65536*65536") is an implementation limit.
+		span := new(big.Int).Sub(to, from)
+		if !span.IsInt64() || span.Int64() >= rangeMaterializeLimit {
+			return nil, fmt.Errorf("err:XPDY0130: integer range too large (%s to %s)", from, to)
 		}
-		items := make([]Item, 0, span+1)
-		for k := int64(0); k <= span; k++ { // by offset: from+k never overflows past to
-			items = append(items, NewInteger(from+k))
+		count := span.Int64()
+		items := make([]Item, 0, count+1)
+		if from.IsInt64() && to.IsInt64() {
+			lo := from.Int64()
+			for k := int64(0); k <= count; k++ { // by offset: lo+k never overflows past to
+				items = append(items, NewInteger(lo+k))
+			}
+		} else {
+			for k := int64(0); k <= count; k++ {
+				items = append(items, NewIntegerBig(new(big.Int).Add(from, big.NewInt(k))))
+			}
 		}
 		return FromItems(items), nil
 	case *IfExpr:
@@ -922,12 +927,28 @@ func evalArray(n *ArrayExpr, ctx *Context) (Object, error) {
 	return NewArray(members), nil
 }
 
+// maxCallDepth bounds how deeply inline functions may call each other. An
+// unbounded recursion of one (let $f := function($f) { $f($f) } …) would
+// otherwise overflow the Go stack, a fatal error no recover() catches; the
+// XSLT engine bounds its own templates and functions the same way.
+const maxCallDepth = 10000
+
+// callDepth is the number of inline-function calls in progress.
+type callDepth struct{ n int }
+
 func evalInlineFunc(n *InlineFunc, ctx *Context) *Function {
 	params := n.Params
 	ptypes := n.ParamTypes
 	rtype := n.RetType
 	body := n.Body
 	captured := ctx
+	// The counter travels with the function value and into the contexts its
+	// body runs in, so a recursion through it — or through the inline
+	// functions created inside it — is counted on one counter.
+	calls := ctx.calls
+	if calls == nil {
+		calls = &callDepth{}
+	}
 	return &Function{
 		Arity:  len(params),
 		Name:   "", // inline functions are anonymous (function-name returns ())
@@ -943,6 +964,12 @@ func evalInlineFunc(n *InlineFunc, ctx *Context) *Function {
 			// The current output URI is likewise absent inside a function
 			// invoked dynamically (current-output-uri-017).
 			focusless.NoOutputURI = true
+			focusless.calls = calls
+			calls.n++
+			defer func() { calls.n-- }()
+			if calls.n > maxCallDepth {
+				return nil, fmt.Errorf("err:XPDY0130: inline function calls nested more than %d levels deep (possible endless recursion)", maxCallDepth)
+			}
 			c := &focusless
 			for i, p := range params {
 				var av Object = Sequence{}

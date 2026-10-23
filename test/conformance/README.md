@@ -31,20 +31,25 @@ dependency this engine's declared identity (a real XPath 3.1 processor,
 `specApplies` in `qt3_test.go`) actually satisfies — that is the *only*
 category-level exclusion; everything else (schema-awareness, features,
 xml/xsd-version, …) is genuinely attempted rather than pre-emptively skipped,
-so a real gap shows up as a fail, not a silently-inflated pass rate. Each case
-runs under a panic guard; pathological stress ranges (huge numeric ranges) are
-pre-skipped. Test-sets run in parallel (per-worker doc cache).
+so a real gap shows up as a fail, not a silently-inflated pass rate. Every
+assertion kind is checked (`assert-xml` by comparing the parsed trees,
+`serialization-matches`, `assert-permutation`, …), and an assertion the engine
+cannot evaluate counts as a fail. Each case runs under a panic guard; a
+pathologically large range stops at the engine's own limit (XPDY0130).
+Test-sets run in parallel (per-worker doc cache).
 
 `QT3_ONLY=<set-substring>` runs and dumps failures for one test-set (triage).
 `QT3_PROGRESS=1` prints live per-set progress. `QT3_SEQ=1` forces sequential
 (non-parallel) test-set execution. `QT3_FAILDUMP=1` (with
 `grep -o 'FAIL .*'`, unanchored — the log line always carries a
 `file:line:` prefix) dumps every fail name for a by-name regression diff.
+`QT3_XMLDIFF=1` prints the expected and the serialized actual result of every
+failing `assert-xml`.
 `QT3_NETWORK=1` lets a URI the environment does not map to a local file be
 fetched for real (off by default, so a run never depends on the network).
 Results are summarised in `tools/qt3_results.txt` and `tools/qt3_byset.csv`.
 
-**Current: ~99.6% pass** of the applicable cases. Deliberately-unsupported
+**Current: 99.7% pass** (22,419 of 22,478) of the applicable cases. Deliberately-unsupported
 clusters (regex back-refs beyond RE2's reach, deep UCA tailoring, ordinal-word
 locale spellout, an IANA timezone-abbreviation database, XQuery module
 loading, XPath 3.0's full optional Static Typing Feature) are documented in

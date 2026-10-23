@@ -720,6 +720,14 @@ type Entry struct {
 	// pull in). Nil uses the Stylesheet's own guard (see CompileFromFS),
 	// which is nil — no check — unless the compile was given one.
 	Files *fsaccess.Guard
+	// Limits bounds the run (instruction steps, nesting depth); zero fields
+	// take the defaults.
+	Limits Limits
+	// budget, when set, is a caller's budget this run spends from instead of
+	// a fresh one built from Limits (fn:transform's nested runs), and
+	// startDepth the caller's nesting depth it continues from.
+	budget     *budget
+	startDepth int
 }
 
 // filesOr is the file guard a run with entry e uses.
@@ -824,6 +832,10 @@ func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string,
 	// plain-string paramOverrides path instead, arriving as its own LITERAL
 	// EXPRESSION TEXT rather than that text's evaluated value.
 	eng := &engine{sheet: ss, doc: doc, globals: map[string]xpath.Object{}, baseDir: baseDir, resolver: res, now: time.Now().UTC(), principalSealedAt: -1, paramSelects: e.ParamSelects, outURI: e.BaseOutputURI, srcSchemas: e.SourceSchemas}
+	eng.budget, eng.depth = e.budget, e.startDepth
+	if eng.budget == nil {
+		eng.budget = newBudget(e.Limits)
+	}
 	runEng = eng
 	if doc != nil && e.SourceStreamed {
 		// Deliberately NOT eng.streamedRoots, which drives XTDE3362: that
@@ -1468,7 +1480,7 @@ type engine struct {
 	tunnel     map[string]xpath.Object // active tunnel parameters
 	applyStack []*applyFrame           // for next-match / apply-imports
 	depth      int                     // template/rule invocation depth (stack-overflow guard)
-	steps      int64                   // instructions executed (runtime budget guard)
+	budget     *budget                 // the run's limits and steps spent (runtime budget guard)
 	// funcDepth > 0 while evaluating a called xsl:function's body: current-
 	// merge-group()/current-merge-key() are only available directly within an
 	// xsl:merge-action, not from a function called from it — even one called
@@ -1568,6 +1580,44 @@ const maxTemplateDepth = 10000
 // maxSteps bounds the number of instructions a single transform may execute, so
 // a non-terminating stylesheet errors out rather than hanging the test run.
 const maxSteps = 20_000_000
+
+// Limits bounds what one run may execute; a zero field takes the default.
+// MaxSteps is the number of instructions (maxSteps by default); MaxDepth the
+// nesting depth of instructions, templates and functions (maxTemplateDepth by
+// default). MaxDepth can only lower the default: deeper recursion risks
+// overflowing the goroutine stack, a fatal error no recover() catches.
+type Limits struct {
+	MaxSteps int64
+	MaxDepth int
+}
+
+// budget is one run's Limits and the steps spent so far. A nested
+// transformation (fn:transform) shares its caller's, so the limits bound the
+// whole request rather than each run within it.
+type budget struct {
+	steps, maxSteps int64
+	maxDepth        int
+}
+
+func newBudget(l Limits) *budget {
+	b := &budget{maxSteps: maxSteps, maxDepth: maxTemplateDepth}
+	if l.MaxSteps > 0 {
+		b.maxSteps = l.MaxSteps
+	}
+	if l.MaxDepth > 0 && l.MaxDepth < maxTemplateDepth {
+		b.maxDepth = l.MaxDepth
+	}
+	return b
+}
+
+// tooDeep reports whether the engine has passed its depth limit.
+func (eng *engine) tooDeep() bool {
+	limit := maxTemplateDepth
+	if eng.budget != nil {
+		limit = eng.budget.maxDepth
+	}
+	return eng.depth > limit
+}
 
 // applyFrame records the matched-template candidate list for the node currently
 // being processed, enabling xsl:next-match and xsl:apply-imports.
@@ -1998,8 +2048,8 @@ type evalOverride struct {
 func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOverride) (xpath.Object, error) {
 	eng.depth++
 	defer func() { eng.depth-- }()
-	if eng.depth > maxTemplateDepth {
-		return nil, fmt.Errorf("err:XTDE0040: evaluation recursion too deep (possible non-terminating stylesheet)")
+	if eng.tooDeep() {
+		return nil, fmt.Errorf("err:XPDY0130: evaluation recursion too deep (possible non-terminating stylesheet)")
 	}
 	env := &evalEnv{eng: eng, el: el, current: r.node, scopes: append([]map[string]xpath.Object{}, eng.scopes...)}
 	var dns, base string
@@ -2509,17 +2559,20 @@ func (eng *engine) execInstrRaw(in instruction, r rt, out *xmltree.Node) error {
 	// accumulator/key recursion) errors out rather than overflowing the stack.
 	eng.depth++
 	defer func() { eng.depth-- }()
-	if eng.depth > maxTemplateDepth {
-		return fmt.Errorf("err:XTDE0040: instruction recursion too deep (possible non-terminating stylesheet)")
+	if eng.tooDeep() {
+		return fmt.Errorf("err:XPDY0130: instruction recursion too deep (possible non-terminating stylesheet)")
 	}
 	// Step budget: bounds a single transform's runtime so a non-terminating-but-
 	// non-deepening loop (e.g. unbounded xsl:iterate) errors instead of hanging.
-	eng.steps++
-	if stepProbe != nil && stepProbeEvery > 0 && eng.steps%stepProbeEvery == 0 {
+	if eng.budget == nil {
+		eng.budget = newBudget(Limits{})
+	}
+	eng.budget.steps++
+	if stepProbe != nil && stepProbeEvery > 0 && eng.budget.steps%stepProbeEvery == 0 {
 		stepProbe()
 	}
-	if eng.steps > maxSteps {
-		return fmt.Errorf("err:XTDE0040: step budget exhausted (possible non-terminating stylesheet)")
+	if eng.budget.steps > eng.budget.maxSteps {
+		return fmt.Errorf("err:XPDY0130: step budget exhausted (possible non-terminating stylesheet)")
 	}
 	if eng.outSink != nil {
 		// The one QUIESCENT point in the whole engine: about to dispatch an
@@ -3087,8 +3140,8 @@ func (eng *engine) invokeRule(cands []*Template, idx int, node *xmltree.Node, mo
 func (eng *engine) invokeTemplate(tmpl *Template, r rt, out *xmltree.Node, callerParams []*VarDef, tunnelIn map[string]xpath.Object, callerR rt) error {
 	eng.depth++
 	defer func() { eng.depth-- }()
-	if eng.depth > maxTemplateDepth {
-		return errAt(tmpl.el, "err:XTDE0040: template recursion too deep (possible non-terminating stylesheet)")
+	if eng.tooDeep() {
+		return errAt(tmpl.el, "err:XPDY0130: template recursion too deep (possible non-terminating stylesheet)")
 	}
 	if err := checkBackwardsCompatVersion(tmpl.el); err != nil {
 		return err
@@ -4773,7 +4826,7 @@ func (eng *engine) evalKeyUse(kd *KeyDef, r rt) (xpath.Object, error) {
 func (eng *engine) keyIndexOn(name string, root *xmltree.Node) (map[string][]*xmltree.Node, error) {
 	eng.depth++
 	defer func() { eng.depth-- }()
-	if eng.depth > maxTemplateDepth || root == nil {
+	if eng.tooDeep() || root == nil {
 		return map[string][]*xmltree.Node{}, nil
 	}
 	// Building a key index means walking the entire tree (walkAll below). Over

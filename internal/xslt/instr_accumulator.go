@@ -493,7 +493,7 @@ func acc2cacheKey(clarkN string, node *xmltree.Node, after bool) string {
 func (eng *engine) acc2valueFor(def *acc2Def, node *xmltree.Node, after bool) xpath.Object {
 	eng.depth++
 	defer func() { eng.depth-- }()
-	if eng.depth > maxTemplateDepth {
+	if eng.tooDeep() {
 		return xpath.Sequence{} // break a circular accumulator/key dependency
 	}
 	if eng.accCache == nil {

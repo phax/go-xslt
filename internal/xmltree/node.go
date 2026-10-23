@@ -3,6 +3,8 @@
 // (built on encoding/xml) and serializer.
 package xmltree
 
+import "strings"
+
 // Kind enumerates the XDM node kinds we model.
 type Kind uint8
 
@@ -98,6 +100,21 @@ const (
 	IDKindIDREF  uint8 = 2
 	IDKindIDREFS uint8 = 3
 )
+
+// normalizeIDAttr applies the normalization a tokenized attribute value gets
+// beyond CDATA's (XML 1.0 §3.3.3): leading and trailing spaces dropped, every
+// run of spaces collapsed to one. It applies to xml:id, which XDM 3.1 §6.3.3
+// gives xml:id processing (fn-doc-37), and to attributes the DTD declares ID,
+// IDREF or IDREFS.
+func normalizeIDAttr(an *Node) {
+	if an.IDKind() == IDKindNone && (an.Name.Local != "id" || an.Name.Space != xmlNS) {
+		return
+	}
+	if !strings.Contains(an.Value, " ") {
+		return
+	}
+	an.Value = strings.Join(strings.FieldsFunc(an.Value, func(r rune) bool { return r == ' ' }), " ")
+}
 
 // NewElement constructs a detached element node.
 func NewElement(name Name) *Node { return &Node{Kind: KindElement, Name: name} }

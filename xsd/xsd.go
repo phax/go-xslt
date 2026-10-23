@@ -127,6 +127,11 @@ func Compile(req Request) (schema *Schema, diags []Diagnostic) {
 				Message: "internal schema compiler error"}}
 		}
 	}()
+	if len(req.Schemas) == 0 {
+		// A component model needs schema documents; validating without any
+		// (by the instance's own hints) is engine.Validate's business.
+		return nil, []Diagnostic{{Severity: engine.SeverityError, Phase: "compile", Message: "no schema documents"}}
+	}
 	v := xsd.Version10
 	if req.Version == V11 {
 		v = xsd.Version11

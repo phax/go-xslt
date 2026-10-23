@@ -58,6 +58,8 @@ func init() {
 			packages: eng.sheet.packages,
 			files:    eng.sheet.files,
 			feat:     &eng.sheet.feat,
+			budget:   eng.budget,
+			depth:    eng.depth,
 		}
 		if fr, ok := eng.resolver.(*fileResolver); ok {
 			host.files = fr.files
@@ -106,6 +108,11 @@ type xfHost struct {
 	files *fsaccess.Guard
 	// feat are the caller's optional capabilities; nil means the defaults.
 	feat *Features
+	// budget and depth are the caller's limits, steps spent and nesting
+	// depth: a nested transformation spends from the same budget, so it
+	// cannot multiply what one request may execute.
+	budget *budget
+	depth  int
 }
 
 // xfOptsArg validates the single map(*) argument shape shared by both call
@@ -260,6 +267,7 @@ func xfRun(opts *xpath.Map, host xfHost) (xpath.Object, error) {
 		e.Fetcher = fr.net
 	}
 	e.Files = host.files
+	e.budget, e.startDepth = host.budget, host.depth
 	runDir := filepath.Dir(selfPath)
 	if runDir == "." || runDir == "" {
 		runDir = host.baseDir

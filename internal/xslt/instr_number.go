@@ -750,10 +750,10 @@ func num2FormatOne(v num2Val, token, groupSep string, groupSize int, lang, ordin
 	}
 	english := num2langIsEnglish(lang)
 	// "w"/"W"/"Ww" (and similar all-w-letter tokens): spell the number out in
-	// words. Only English is fully implemented (word-spelling for other
-	// languages needs full CLDR locale data, out of scope) plus a narrow
-	// single-digit German case (num2SpellGerman); anything else falls through
-	// to the decimal fallback below, same as an unrecognised token.
+	// words — in English, or natively in German, French or Italian (the
+	// @ordinal value is then the variant: "-er", "%spellout-ordinal-feminine";
+	// "yes" asks for the default form). Any other language falls through to
+	// the decimal fallback below, same as an unrecognised token.
 	if num2isWordToken(token) {
 		if english {
 			words := num2SpellEnglish(num)
@@ -762,10 +762,12 @@ func num2FormatOne(v num2Val, token, groupSep string, groupSize int, lang, ordin
 			}
 			return num2caseWords(words, token)
 		}
-		if ordinal == "" && num2langIsGerman(lang) {
-			if w, ok := num2SpellGerman(num); ok {
-				return num2caseWords(w, token)
-			}
+		variant := ordinal
+		if variant == "yes" {
+			variant = ""
+		}
+		if w, ok := xpath.SpellNumber(num, token, ordinal != "", lang, variant); ok {
+			return w
 		}
 	}
 	// Decimal forms: an all-digit token controls zero-padding width, and the
@@ -1082,33 +1084,6 @@ func num2isWordToken(token string) bool {
 func num2langIsEnglish(lang string) bool {
 	lang = strings.ToLower(strings.TrimSpace(lang))
 	return lang == "" || lang == "en" || strings.HasPrefix(lang, "en-")
-}
-
-// num2langIsGerman reports whether lang names German.
-func num2langIsGerman(lang string) bool {
-	lang = strings.ToLower(strings.TrimSpace(lang))
-	return lang == "de" || strings.HasPrefix(lang, "de-")
-}
-
-var num2GermanOnes = []string{
-	"null", "eins", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun",
-}
-
-// num2SpellGerman renders a SINGLE-DIGIT (0-9) German cardinal number as its
-// spelled-out word, e.g. 3 -> "drei". Full German number spelling (teens,
-// "-und-" compounding, declined ordinals, hundreds/thousands/Millionen, ...)
-// needs a much larger CLDR-locale-data implementation and is deliberately out
-// of scope — test cases that need it declare a
-// <languages_for_numbering value="de"/> catalog dependency and are skipped
-// (see xsltSkip in the conformance harness). This covers exactly the
-// single-digit case exercised by a test that does NOT declare that
-// dependency (number-2506, which alternates lang="de"/"en" per xsl:number
-// call and only ever asserts single-digit German output).
-func num2SpellGerman(n int64) (string, bool) {
-	if n < 0 || n > 9 {
-		return "", false
-	}
-	return num2GermanOnes[n], true
 }
 
 // num2isLangTag reports whether s has the coarse shape of a BCP 47 language

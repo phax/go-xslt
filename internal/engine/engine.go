@@ -60,7 +60,11 @@ func (s Security) fetcher() *netfetch.Fetcher {
 
 // Request is a single transformation request.
 type Request struct {
-	// Stylesheet is the XSLT source text.
+	// Stylesheet is the XSLT source text. When it is empty, Transform and
+	// TransformTo use the stylesheet the Source embeds and names in an
+	// <?xml-stylesheet type="text/xsl" href="#id"?> processing instruction
+	// (XSLT 3.0 §3.13): the element with that ID, compiled as a module of its
+	// own.
 	Stylesheet string `json:"stylesheet"`
 	// Source is the XML input document. May be empty when InitialTemplate is set.
 	Source string `json:"source"`
@@ -79,7 +83,28 @@ type Request struct {
 	// Features turns on optional XSLT 3.0 capabilities for this stylesheet;
 	// the zero value is a basic XSLT 3.0 processor.
 	Features Features `json:"features"`
+	// Limits bounds what the run may execute; the zero value takes the
+	// defaults.
+	Limits Limits `json:"limits"`
 }
+
+// Limits bounds one transformation, including the transformations it starts
+// itself with fn:transform, which spend from the same budget. A run that
+// exceeds a limit stops with the error XPDY0130 ("implementation limit
+// exceeded"). A zero field takes the default.
+type Limits struct {
+	// MaxSteps is the number of instructions the run may execute (default
+	// 20,000,000), which bounds an endless loop such as an unbounded
+	// xsl:iterate.
+	MaxSteps int64 `json:"maxSteps"`
+	// MaxDepth is how deeply instructions, templates and functions may nest
+	// (default 10,000), which bounds endless recursion. It can only lower the
+	// default: deeper recursion could overflow the Go stack, which ends the
+	// whole process.
+	MaxDepth int `json:"maxDepth"`
+}
+
+func (l Limits) internal() xslt.Limits { return xslt.Limits{MaxSteps: l.MaxSteps, MaxDepth: l.MaxDepth} }
 
 // Features are the optional XSLT 3.0 capabilities (XSLT 3.0 §26) a
 // stylesheet is compiled with. Each is off by default and applies only to the

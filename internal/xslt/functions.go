@@ -719,8 +719,8 @@ func (eng *engine) callUserFunc(fd *FuncDef, args []xpath.Object, env *evalEnv) 
 	}
 	eng.depth++
 	defer func() { eng.depth-- }()
-	if eng.depth > maxTemplateDepth {
-		return nil, true, errAt(fd.el, "err:XTDE0040: function recursion too deep (possible non-terminating stylesheet)")
+	if eng.tooDeep() {
+		return nil, true, errAt(fd.el, "err:XPDY0130: function recursion too deep (possible non-terminating stylesheet)")
 	}
 	eng.funcDepth++
 	defer func() { eng.funcDepth-- }()

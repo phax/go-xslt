@@ -42,23 +42,17 @@ func TransformTo(w io.Writer, req Request) (res Result) {
 }
 
 func runTo(w io.Writer, req Request) Result {
-	if req.Stylesheet == "" {
-		return Result{Diagnostics: []Diagnostic{{
-			Severity: SeverityError,
-			Code:     "XTSE0010",
-			Phase:    "parse",
-			Message:  "empty stylesheet",
-		}}}
-	}
-
 	opts := compileOptions(req.Security, req.Features, req.BaseDir)
 	files := opts.Files
+	if d, ok := useEmbeddedStylesheet(&req, opts); !ok {
+		return Result{Diagnostics: []Diagnostic{d}}
+	}
 	ss, err := xslt.CompileWith(req.Stylesheet, req.BaseDir, opts)
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "compile")}}
 	}
 
-	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params, Fetcher: req.Security.fetcher(), Files: files}
+	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params, Fetcher: req.Security.fetcher(), Files: files, Limits: req.Limits.internal()}
 	rr, terr := ss.TransformEntryTo(w, req.Source, entry, req.BaseDir, chunkableStylesheet(req.Stylesheet))
 	if terr != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(terr, "run")}}

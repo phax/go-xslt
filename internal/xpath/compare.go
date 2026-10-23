@@ -80,7 +80,7 @@ func rangeComparison(n *CompareExpr, ctx *Context) (Object, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	vals := make([]float64, 0, len(items))
+	vals := make([]*Atomic, 0, len(items))
 	for _, it := range items {
 		a, isAtomic := it.(*Atomic)
 		if !isAtomic {
@@ -88,13 +88,13 @@ func rangeComparison(n *CompareExpr, ctx *Context) (Object, bool, error) {
 		}
 		switch {
 		case a.IsNumeric():
-			vals = append(vals, a.Float())
+			vals = append(vals, a)
 		case a.T == XSuntypedAtomic:
 			c, cerr := CastTo(a, XSdouble)
 			if cerr != nil {
 				return nil, false, fmt.Errorf("err:FORG0001: %v", cerr)
 			}
-			vals = append(vals, c.Float())
+			vals = append(vals, c)
 		default:
 			return nil, false, nil
 		}
@@ -115,10 +115,9 @@ func rangeComparison(n *CompareExpr, ctx *Context) (Object, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if !fromOK || !toOK || from > to || len(vals) == 0 {
+	if !fromOK || !toOK || from.Cmp(to) > 0 || len(vals) == 0 {
 		return false, true, nil
 	}
-	lo, hi := float64(from), float64(to)
 	// Orient the operator so v is always the left operand.
 	op := n.Op
 	if rangeLeft {
@@ -133,35 +132,82 @@ func rangeComparison(n *CompareExpr, ctx *Context) (Object, bool, error) {
 			op = "<="
 		}
 	}
+	switch op {
+	case "=", "!=", "<", "<=", ">", ">=":
+	default:
+		return nil, false, nil
+	}
 	for _, v := range vals {
-		if math.IsNaN(v) {
-			if op == "!=" {
-				return true, true, nil
-			}
-			continue
-		}
 		var hit bool
-		switch op {
-		case "=":
-			hit = v >= lo && v <= hi && v == math.Trunc(v)
-		case "!=":
-			hit = from != to || v != lo
-		case "<":
-			hit = v < hi
-		case "<=":
-			hit = v <= hi
-		case ">":
-			hit = v > lo
-		case ">=":
-			hit = v >= lo
-		default:
-			return nil, false, nil
+		if v.i != nil || v.d != nil {
+			hit = rangeHitExact(op, v, from, to)
+		} else {
+			hit = rangeHitFloat(op, v, from, to)
 		}
 		if hit {
 			return true, true, nil
 		}
 	}
 	return false, true, nil
+}
+
+// rangeHitExact reports whether an xs:integer or xs:decimal v compares true
+// under op with some integer of from..to. Both are compared as decimals,
+// exactly, at any magnitude (RangeExpr-409c: 10^21+20001 = 10^21 to ...).
+func rangeHitExact(op string, v *Atomic, from, to *big.Int) bool {
+	r := v.d
+	if v.i != nil {
+		r = new(big.Rat).SetInt(v.i)
+	}
+	lo, hi := new(big.Rat).SetInt(from), new(big.Rat).SetInt(to)
+	switch op {
+	case "=":
+		return r.IsInt() && r.Cmp(lo) >= 0 && r.Cmp(hi) <= 0
+	case "!=":
+		return from.Cmp(to) != 0 || r.Cmp(lo) != 0
+	case "<":
+		return r.Cmp(hi) < 0
+	case "<=":
+		return r.Cmp(hi) <= 0
+	case ">":
+		return r.Cmp(lo) > 0
+	}
+	return r.Cmp(lo) >= 0 // ">="
+}
+
+// rangeHitFloat is rangeHitExact for an xs:double or xs:float v, against
+// which every range member is first promoted to v's type. Promotion is
+// monotonic, so the promoted bounds settle each operator; for "!=" some
+// member differs from v unless both promoted bounds (and so every member
+// between them) equal it.
+func rangeHitFloat(op string, v *Atomic, from, to *big.Int) bool {
+	f := v.Float()
+	if math.IsNaN(f) {
+		return op == "!="
+	}
+	promote := func(b *big.Int) float64 {
+		bf := new(big.Float).SetInt(b)
+		if v.T == XSfloat {
+			x, _ := bf.Float32()
+			return float64(x)
+		}
+		x, _ := bf.Float64()
+		return x
+	}
+	lo, hi := promote(from), promote(to)
+	switch op {
+	case "=":
+		return f >= lo && f <= hi && f == math.Trunc(f)
+	case "!=":
+		return lo != f || hi != f
+	case "<":
+		return f < hi
+	case "<=":
+		return f <= hi
+	case ">":
+		return f > lo
+	}
+	return f >= lo // ">="
 }
 
 // ctxCollation returns the in-scope default collation comparator, or nil for

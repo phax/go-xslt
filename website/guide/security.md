@@ -53,9 +53,6 @@ points outside it is refused.
 To the stylesheet, a refused file looks like a missing one:
 `doc-available()` returns false, and `fn:unparsed-text` raises `FOUT1170`.
 
-go-xslt never writes files. The documents of `xsl:result-document` come back in
-`Result.SecondaryOutputs`.
-
 ## Network
 
 - Redirects are checked against `AllowedHosts` too.
@@ -70,6 +67,70 @@ go-xslt never writes files. The documents of `xsl:result-document` come back in
 The locations of `xsl:import`, `xsl:include`, `xsl:import-schema` and
 `xs:import` always stay local, as does static evaluation in `use-when`.
 :::
+
+## Writing files
+
+go-xslt never writes files. The principal result is returned (or written to
+the `io.Writer` you pass to `TransformTo`), and every document of
+`xsl:result-document` comes back in `Result.SecondaryOutputs`, with its `Href`
+as written in the stylesheet. Whether and where to store them is your
+program's decision.
+
+## Dynamic code
+
+`xsl:evaluate` and `fn:transform` compile and run code that is only known at
+run time. They run under the same rules as the stylesheet that calls them:
+the same `Security` settings (a nested `fn:transform` cannot read more than
+its caller), and the same [limits](#resource-limits), whose budget the nested
+run spends from. `fn:transform` reads its stylesheet through the same file
+check.
+
+## Resource limits
+
+A stylesheet can loop or recurse without end. `Limits` (a field of
+`engine.Request` and `engine.TransformRequest`) bounds a run:
+
+| Field | Default | Bounds |
+|---|---|---|
+| `MaxSteps` | 20,000,000 instructions | endless loops, e.g. an unbounded `xsl:iterate` |
+| `MaxDepth` | 10,000 levels | endless recursion of templates and functions; it can only be lowered |
+
+```go
+res := engine.Transform(engine.Request{
+	Stylesheet: src,
+	Source:     xml,
+	Limits:     engine.Limits{MaxSteps: 1_000_000, MaxDepth: 1000},
+})
+```
+
+A run that exceeds a limit stops with `XPDY0130` ("implementation limit
+exceeded"). Nested `fn:transform` runs spend from the caller's budget, so they
+cannot multiply it.
+
+Some limits always apply, because the input would otherwise crash the Go
+process (a stack overflow is a fatal error that no `recover` catches):
+
+| Input | Limit | Error |
+|---|---|---|
+| element nesting in a document | 10,000 levels | parse error |
+| nesting of an XPath expression | 5,000 levels | `XPDY0130` |
+| inline functions calling each other | 10,000 levels | `XPDY0130` |
+
+Not limited by go-xslt: memory, and time other than through `MaxSteps`. A
+single XPath expression such as `count(1 to 10000000)` is one step. To bound
+memory and wall-clock time for input you do not trust, run the
+transformation in a separate process (for example the
+[command-line tool](/guide/cli)) under the operating system's limits.
+
+## Checklist for untrusted input
+
+- Give each run its own `BaseDir` holding only what it may read, and no
+  `AllowedDirs` beyond that.
+- Leave `AllowNetwork` off, or restrict it with `AllowedHosts`.
+- Set `Limits` to what your workload needs.
+- Treat `SecondaryOutputs[].Href` as untrusted too before using it as a file
+  name.
+- For hard memory and time limits, run in a separate process.
 
 ## Trusted input
 

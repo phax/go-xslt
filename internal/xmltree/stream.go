@@ -227,6 +227,16 @@ func (s *StreamReader) advance() (StreamEvent, error) {
 		// end-tag check Token would have done is re-established too.
 		switch t := tok.(type) {
 		case xml.StartElement:
+			// A streamed document is XML 1.0 (1.1 is ErrStreamUnsupported), so
+			// a prefix may not be undeclared — parseRaw's identical check.
+			for _, a := range t.Attr {
+				if a.Name.Space == "xmlns" && a.Value == "" {
+					return StreamEvent{}, fmt.Errorf("namespace constraint No Prefix Undeclaring: xmlns:%s may not be empty in an XML 1.0 document", a.Name.Local)
+				}
+			}
+			if len(s.rawNames) >= MaxDepth {
+				return StreamEvent{}, errTooDeep
+			}
 			el := s.startElement(t)
 			return StreamEvent{Kind: StreamEnter, Node: el, Depth: len(s.stack) - 1}, nil
 
@@ -378,6 +388,7 @@ func (s *StreamReader) startElement(t xml.StartElement) *Node {
 				an.SetIDKind(k)
 			}
 		}
+		normalizeIDAttr(an)
 		an.Parent = el
 		s.stamp(an)
 		el.Attrs = append(el.Attrs, an)

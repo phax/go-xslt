@@ -10,6 +10,12 @@ Go 1.25 or newer.
 go get github.com/tim-riep/go-xslt
 ```
 
+For the [command-line tool](/guide/cli):
+
+```bash
+go install github.com/tim-riep/go-xslt/cmd/go-xslt@latest
+```
+
 ## Your first transformation
 
 ```go

@@ -681,11 +681,14 @@ func resolvePrefix(ctx *Context, prefix string) (string, error) {
 		if uri, ok := ctx.NS.ResolveNS(prefix); ok {
 			return uri, nil
 		}
+	}
+	// The "xml" prefix is always bound (XPath 3.1 §2.1.1), with or without a
+	// resolver (EvalXPath's @xml:id).
+	if prefix == "xml" {
+		return xmlNamespaceURI, nil
+	}
+	if ctx.NS != nil {
 		// A namespace resolver exists but the prefix is unbound (XPST0081).
-		// The "xml" prefix is implicitly bound.
-		if prefix == "xml" {
-			return "http://www.w3.org/XML/1998/namespace", nil
-		}
 		return "", fmt.Errorf("err:XPST0081: prefix %q has no namespace binding", prefix)
 	}
 	return "", nil

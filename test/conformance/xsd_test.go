@@ -204,7 +204,7 @@ func runXSDGroup(g xsdTestGroup, dir, ver string, r *xsdResult, verbose bool) {
 		return // not applicable to this version — excluded from the denominator
 	}
 	if g.Schema == nil {
-		r.skipWith("no-schema-test")
+		runSchemalessInstances(g, dir, ver, r, verbose)
 		return
 	}
 	if !versionApplies(g.Schema.Version, ver) {
@@ -302,6 +302,55 @@ func runXSDGroup(g xsdTestGroup, dir, ver string, r *xsdResult, verbose bool) {
 			}
 			r.score(instLabel, instExp, instUnsup, verdictOK(ourValid, instExp), verbose)
 		}
+	}
+}
+
+// runSchemalessInstances scores the instance tests of a group that has no
+// schema test (msMeta's attMd*, addB*, stZ*, …): each instance is validated
+// against the empty schema set, so only the schema documents its own
+// xsi:schemaLocation / xsi:noNamespaceSchemaLocation hints name (relative to
+// the instance) and the built-in types its xsi:type names govern it.
+func runSchemalessInstances(g xsdTestGroup, dir, ver string, r *xsdResult, verbose bool) {
+	for _, it := range g.Instances {
+		if !versionApplies(it.Version, ver) {
+			continue
+		}
+		instExp, ok := expectedFor(it.Expected, ver)
+		if !ok || instExp == "indeterminate" {
+			r.skipWith("no-instance-verdict")
+			continue
+		}
+		if isQueried(it.Current) {
+			r.queried++ // W3C-disputed verdict — excluded from the denominator
+			continue
+		}
+		p := filepath.Clean(filepath.Join(dir, it.Doc.Href))
+		data, err := os.ReadFile(p)
+		if err != nil {
+			r.skipWith("missing-instance-file")
+			continue
+		}
+		sch, cerr := xsd.Compile(nil, filepath.Dir(p), xsdVersionOf(ver))
+		if cerr != nil {
+			r.score(it.Name, instExp, errors.Is(cerr, xsd.ErrUnsupported), false, verbose)
+			continue
+		}
+		res, verr := sch.Validate(string(data))
+		ourValid := verr == nil && res.Valid
+		label := it.Name
+		if xsdShowErr {
+			if instExp == "valid" && !ourValid {
+				label = it.Doc.Href
+				if verr != nil {
+					label += " || " + verr.Error()
+				} else if len(res.Errors) > 0 {
+					label += " || " + res.Errors[0].Message
+				}
+			} else if instExp == "invalid" && ourValid {
+				label += " <<" + it.Doc.Href + ">>"
+			}
+		}
+		r.score(label, instExp, errors.Is(verr, xsd.ErrUnsupported), verdictOK(ourValid, instExp), verbose)
 	}
 }
 

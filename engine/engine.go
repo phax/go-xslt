@@ -18,6 +18,8 @@ type (
 	// Features turns on optional XSLT 3.0 capabilities (schema awareness,
 	// XSLT 1.0 backwards compatibility, strict streaming) per stylesheet.
 	Features = engine.Features
+	// Limits bounds what a run may execute (instruction steps, nesting depth).
+	Limits = engine.Limits
 	// Stylesheet is a stylesheet compiled once by Compile and run many times.
 	Stylesheet      = engine.Stylesheet
 	Result          = engine.Result

@@ -1,13 +1,28 @@
 # Contributing
 
-This project is **not accepting contributions** (issues, pull requests, or
-patches) until it reaches **version 1.0.0**.
+## Issues: welcome
 
-Before 1.0.0, the public API (the `engine` package), the on-disk project
-format the desktop app uses, and large parts of the internal architecture are
-still expected to change without notice. Reviewing and integrating outside
-contributions against a moving target isn't practical at this stage.
+Bug reports are the most useful thing you can send before 1.0. Please open an
+issue for:
 
-Feel free to open the repository, read the code, and experiment with it
-locally — just don't open a pull request; it will be closed unreviewed. This
-policy will be revisited once 1.0.0 ships.
+- a wrong result, a missing or wrong error, or a crash
+- a stylesheet, expression or schema another processor handles and go-xslt
+  does not
+- anything in the documentation that is unclear or wrong
+
+A good report has the smallest input that shows the problem (stylesheet,
+source document, schema or expression), what you expected, what go-xslt did,
+and the version (`go-xslt version`, or the module version you import).
+
+If a report concerns a security problem — a way for untrusted input to read
+files, reach the network, or crash or hang the process despite the
+[Security](https://tim-riep.github.io/go-xslt/guide/security) settings — please
+use GitHub's private vulnerability reporting instead of a public issue.
+
+## Pull requests: not before 1.0
+
+Until 1.0.0 the public API (the `engine` and `xsd` packages), the desktop app's
+project format and much of the internal architecture still change without
+notice, so pull requests are closed unreviewed. Reviewing and integrating
+code against a moving target isn't practical yet. This will be revisited once
+1.0.0 ships.

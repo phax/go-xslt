@@ -917,6 +917,8 @@ func isValidXMLChar(r rune) bool {
 // and resolved rather than silently last-wins) and the escape/fallback string
 // handling (jsTokenizer / jsDecodeString).
 func jsParseWithOptions(s string, opts jsOptions) (Object, error) {
+	// A leading byte order mark is ignored (F&O 3.1 §17.5.1).
+	s = strings.TrimPrefix(s, "\uFEFF")
 	dec := json.NewDecoder(strings.NewReader(s))
 	dec.UseNumber()
 	tz := &jsTokenizer{dec: dec, src: s, opts: opts}
@@ -1468,6 +1470,9 @@ func fnJSSerialize(ctx *Context, args []Object) (Object, error) {
 	if p.method == "adaptive" {
 		return serAdaptive(in, p)
 	}
+	// Sequence normalization (SER 3.1 §2): an item-separator goes between
+	// every pair of adjacent items; without one, only adjacent atomic values
+	// are separated (by a single space) — nodes are written back to back.
 	sep := " "
 	if p.hasItemSep {
 		sep = p.itemSeparator
@@ -1492,10 +1497,13 @@ func fnJSSerialize(ctx *Context, args []Object) (Object, error) {
 	}
 	items := Items(in)
 	var b strings.Builder
+	prevAtomic := false
 	for i, it := range items {
-		if i > 0 {
+		_, isNode := it.(*xmltree.Node)
+		if i > 0 && (p.hasItemSep || (prevAtomic && !isNode)) {
 			b.WriteString(sep)
 		}
+		prevAtomic = !isNode
 		switch n := it.(type) {
 		case *xmltree.Node:
 			// SER 3.1's own sequence-normalization step 4 rejects an
@@ -2028,9 +2036,10 @@ func fnJSXMLToJSON(ctx *Context, args []Object) (Object, error) {
 }
 
 // jsBuildXMLNode builds a json-to-xml style element node for the given Go value
-// graph (as produced by encoding/json with UseNumber). When key is non-empty a
-// "key" attribute is set on the produced element.
-func jsBuildXMLNode(v any, key string) *xmltree.Node {
+// graph (as produced by encoding/json with UseNumber). A map entry's element
+// carries its key — possibly the empty string (json-to-xml-034) — in a "key"
+// attribute; key is nil for every other value.
+func jsBuildXMLNode(v any, key *string) *xmltree.Node {
 	return jsBuildXMLNodeEsc(v, key, false)
 }
 
@@ -2041,7 +2050,7 @@ func jsBuildXMLNode(v any, key string) *xmltree.Node {
 // CONTAINS a backslash escape; a string that needed none is indistinguishable
 // from an unescaped one and carries no attribute (json-to-xml-escape-003 vs
 // -005/-006).
-func jsBuildXMLNodeEsc(v any, key string, escape bool) *xmltree.Node {
+func jsBuildXMLNodeEsc(v any, key *string, escape bool) *xmltree.Node {
 	esc := func(s string) bool { return escape && strings.Contains(s, `\`) }
 	var el *xmltree.Node
 	switch t := v.(type) {
@@ -2068,19 +2077,19 @@ func jsBuildXMLNodeEsc(v any, key string, escape bool) *xmltree.Node {
 	case *jsObj:
 		el = xmltree.NewElement(xmltree.Name{Local: "map", Space: jsXFNS})
 		for i, k := range t.keys {
-			el.Append(jsBuildXMLNodeEsc(t.vals[i], k, escape))
+			el.Append(jsBuildXMLNodeEsc(t.vals[i], &k, escape))
 		}
 	case []any:
 		el = xmltree.NewElement(xmltree.Name{Local: "array", Space: jsXFNS})
 		for _, mv := range t {
-			el.Append(jsBuildXMLNodeEsc(mv, "", escape))
+			el.Append(jsBuildXMLNodeEsc(mv, nil, escape))
 		}
 	default:
 		el = xmltree.NewElement(xmltree.Name{Local: "null", Space: jsXFNS})
 	}
-	if key != "" {
-		el.SetAttr(xmltree.Name{Local: "key"}, key)
-		if esc(key) {
+	if key != nil {
+		el.SetAttr(xmltree.Name{Local: "key"}, *key)
+		if esc(*key) {
 			el.SetAttr(xmltree.Name{Local: "escaped-key"}, "true")
 		}
 	}
@@ -2155,7 +2164,8 @@ func fnJSJSONToXML(ctx *Context, args []Object) (Object, error) {
 			}
 		}
 	}
-	src := ToString(in)
+	// A leading byte order mark is ignored (F&O 3.1 §17.5.4).
+	src := strings.TrimPrefix(ToString(in), "\uFEFF")
 	dec := json.NewDecoder(strings.NewReader(src))
 	dec.UseNumber()
 	tok := &jsTokenizer{dec: dec, src: src, opts: opts}
@@ -2176,7 +2186,7 @@ func fnJSJSONToXML(ctx *Context, args []Object) (Object, error) {
 	}
 	doc := &xmltree.Node{Kind: xmltree.KindDocument}
 	doc.SetEphemeral(true)
-	root := jsBuildXMLNodeEsc(v, "", opts.escape)
+	root := jsBuildXMLNodeEsc(v, nil, opts.escape)
 	// The elements are built with their expanded name only; the serializer
 	// synthesizes xmlns="…" from Name.Space at write time, so the output looks
 	// right, but the NAMESPACE AXIS is derived from Node.NS and would be empty

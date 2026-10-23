@@ -85,6 +85,9 @@ func parseWithSchema(src string, sn SchemaNameLookup) (*Parsed, error) {
 type parser struct {
 	toks []token
 	pos  int
+	// depth is the nesting of ExprSingle being parsed (parentheses,
+	// arguments, predicates, …), bounded by maxParseDepth.
+	depth int
 	// schema is the host's schema component lookup, nil for every ordinary
 	// (schema-unaware) parse. When set, a type name in a kind test and the
 	// declaration named by schema-element()/schema-attribute() are resolved
@@ -131,8 +134,19 @@ func (p *parser) parseExpr() (Expr, error) {
 	return &SequenceExpr{Items: items}, nil
 }
 
+// maxParseDepth bounds how deeply expressions may nest. The parser and the
+// evaluator recurse once per level, through some twenty precedence levels
+// each; far deeper input (a few megabytes of "((((…") would overflow the Go
+// stack, a fatal error no recover() catches. No real expression comes near.
+const maxParseDepth = 5000
+
 // ExprSingle := ForExpr | LetExpr | QuantifiedExpr | IfExpr | OrExpr
 func (p *parser) parseExprSingle() (Expr, error) {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > maxParseDepth {
+		return nil, fmt.Errorf("err:XPDY0130: expression nested more than %d levels deep", maxParseDepth)
+	}
 	switch {
 	case p.isKeyword("for") && p.peekKind(1) == tDollar:
 		return p.parseFor()
