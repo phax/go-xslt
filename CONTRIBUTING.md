@@ -17,7 +17,8 @@ and the version (`go-xslt version`, or the module version you import).
 If a report concerns a security problem — a way for untrusted input to read
 files, reach the network, or crash or hang the process despite the
 [Security](https://tim-riep.github.io/go-xslt/guide/security) settings — please
-use GitHub's private vulnerability reporting instead of a public issue.
+use GitHub's private vulnerability reporting instead of a public issue; see
+[SECURITY.md](SECURITY.md).
 
 ## Pull requests: not accepted
 

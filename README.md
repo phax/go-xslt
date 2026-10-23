@@ -172,7 +172,8 @@ absurdly nested expressions, endless recursion of inline functions) is
 refused with an error instead of crashing the process. The memory of the
 trees a run builds is not limited by the library; for a hard memory limit on
 untrusted input, run it in a separate process.
-[Security guide →](https://tim-riep.github.io/go-xslt/guide/security)
+[Security guide →](https://tim-riep.github.io/go-xslt/guide/security) ·
+[Reporting a vulnerability →](SECURITY.md)
 
 ## Performance
 
