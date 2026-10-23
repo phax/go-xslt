@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# The token gets read access to the repository only; a job that needs more
+# says so itself.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

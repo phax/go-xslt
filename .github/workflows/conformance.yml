@@ -11,6 +11,11 @@ on:
     - cron: '17 2 * * *'
   workflow_dispatch:
 
+# The token gets read access to the repository only; a job that needs more
+# says so itself.
+permissions:
+  contents: read
+
 concurrency:
   group: conformance
   cancel-in-progress: false

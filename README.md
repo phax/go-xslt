@@ -210,6 +210,7 @@ Everything the suites still fail is in
 
 ## Contributing and license
 
-Bug reports are welcome as [issues](https://github.com/tim-riep/go-xslt/issues);
-pull requests wait until 1.0 — see [CONTRIBUTING.md](CONTRIBUTING.md).
+From v0.3.0 on, bug reports are welcome as
+[issues](https://github.com/tim-riep/go-xslt/issues); pull requests are not
+accepted — see [CONTRIBUTING.md](CONTRIBUTING.md).
 Apache License 2.0, see [LICENSE](LICENSE).
