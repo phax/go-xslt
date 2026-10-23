@@ -2,6 +2,8 @@ import { FileKind } from "../lib/api";
 import type { ProjectState } from "../state/types";
 import { FilePickerField } from "./FilePickerField";
 import { Icon } from "./Icon";
+import { useT } from "../i18n";
+import { runsMessages } from "../i18n/messages/runs";
 
 /** The ordered, multi-file schema set a validate run compiles against — the
  * first entry is the entry schema, the rest are made available to its
@@ -15,6 +17,7 @@ export function SchemaListEditor({
   value: string[];
   onChange: (paths: string[]) => void;
 }) {
+  const t = useT(runsMessages);
   const move = (from: number, to: number) => {
     if (to < 0 || to >= value.length) return;
     const next = value.slice();
@@ -25,14 +28,14 @@ export function SchemaListEditor({
 
   return (
     <div className="schema-list">
-      {value.length === 0 && <div className="sidebar-empty">No schema files yet — add at least one below.</div>}
+      {value.length === 0 && <div className="sidebar-empty">{t("noSchemaFiles")}</div>}
       {value.map((path, i) => (
         <div key={`${path}-${i}`} className="schema-list-row">
           <span className="schema-list-row-index">{i + 1}</span>
           <span className={`schema-list-row-path${!project.nodes[path] ? " missing" : ""}`} title={path}>
             {path}
           </span>
-          <button type="button" className="icon-btn" disabled={i === 0} onClick={() => move(i, i - 1)} title="Move up">
+          <button type="button" className="icon-btn" disabled={i === 0} onClick={() => move(i, i - 1)} title={t("moveUp")}>
             ↑
           </button>
           <button
@@ -40,7 +43,7 @@ export function SchemaListEditor({
             className="icon-btn"
             disabled={i === value.length - 1}
             onClick={() => move(i, i + 1)}
-            title="Move down"
+            title={t("moveDown")}
           >
             ↓
           </button>
@@ -48,7 +51,7 @@ export function SchemaListEditor({
             type="button"
             className="icon-btn"
             onClick={() => onChange(value.filter((_, idx) => idx !== i))}
-            title="Remove"
+            title={t("remove")}
           >
             <Icon name="close" size={11} />
           </button>
@@ -58,7 +61,7 @@ export function SchemaListEditor({
         project={project}
         value=""
         kinds={[FileKind.KindSchema]}
-        placeholder="+ Add schema file"
+        placeholder={t("addSchemaFile")}
         className="schema-list-add"
         onChange={(p) => onChange([...value, p])}
       />

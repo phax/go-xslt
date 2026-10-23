@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { DockviewApi } from "dockview-react";
 import { FileKind, runValidate, XSDVersion, type SavedRun, type ValidateResult } from "../lib/api";
 import { RUN_SHORTCUT } from "../lib/platform";
+import { useT } from "../i18n";
+import { runsMessages } from "../i18n/messages/runs";
 import { buffers, useBuffer } from "../state/buffers";
+import { useLanguage } from "../state/prefs";
 import { useProjectActions } from "../state/projectActions";
 import { useRunner } from "../state/runner";
 import { useAppState } from "../state/store";
@@ -33,6 +36,8 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
   const state = useAppState();
   const actions = useProjectActions();
   const project = state.projects[tab.projectId];
+  const t = useT(runsMessages);
+  const language = useLanguage();
 
   const schemas = run.schemas ?? [];
   const schemaInline = run.schemaInline ?? "";
@@ -62,8 +67,8 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
         )
       : [schemaInline];
     const instanceText = instanceFileMode ? instanceBuf.text : instanceInline;
-    return runValidate({ schemas: schemaTexts, instance: instanceText, version, baseDir: tab.projectId, language: "", maxErrors: 0, security: { allowNetwork: false } });
-  }, [schemaFileMode, schemas, schemaInline, instanceFileMode, instanceBuf.text, instanceInline, version, tab.projectId]);
+    return runValidate({ schemas: schemaTexts, instance: instanceText, version, baseDir: tab.projectId, language, maxErrors: 0, security: { allowNetwork: false } });
+  }, [schemaFileMode, schemas, schemaInline, instanceFileMode, instanceBuf.text, instanceInline, version, tab.projectId, language]);
 
   const { run: doRun, status, result } = useRunner<ValidateResult>(tab.id, tab.projectId, execute);
   const running = status === "running";
@@ -96,27 +101,27 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
   const panes: DockPane[] = [
     {
       id: "schema",
-      title: "Schema",
+      title: t("paneSchema"),
       content: (
           <div className="pane">
             <div className="pane-header">
-              <span className="pane-title">Schema</span>
-              <span className="meta">{schemaFileMode ? `${schemas.length} file${schemas.length === 1 ? "" : "s"}` : "inline"}</span>
+              <span className="pane-title">{t("paneSchema")}</span>
+              <span className="meta">{schemaFileMode ? t(schemas.length === 1 ? "schemaFilesOne" : "schemaFilesMany", { count: schemas.length }) : t("inline")}</span>
               <span className="spacer" />
               {schemaFileMode ? (
                 <button
                   className="link-btn"
                   onClick={() => void actions.upsertRun(tab.projectId, { ...run, schemas: [] })}
-                  title="Switch back to typing the schema directly"
+                  title={t("useInlineSchemaTitle")}
                 >
-                  Use inline text
+                  {t("useInline")}
                 </button>
               ) : (
                 <FilePickerField
                   project={project}
                   value=""
                   kinds={[FileKind.KindSchema]}
-                  placeholder="Use project file(s) instead"
+                  placeholder={t("useProjectFiles")}
                   className="link-btn"
                   onChange={(p) => void actions.upsertRun(tab.projectId, { ...run, schemas: [p] })}
                 />
@@ -141,27 +146,27 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
     },
     {
       id: "instance",
-      title: "Instance XML",
+      title: t("paneInstance"),
       content: (
           <div className="pane">
             <div className="pane-header">
-              <span className="pane-title">Instance XML</span>
-              <span className="meta">{instanceFileMode ? instancePath : "inline"}</span>
+              <span className="pane-title">{t("paneInstance")}</span>
+              <span className="meta">{instanceFileMode ? instancePath : t("inline")}</span>
               <span className="spacer" />
               {instanceFileMode ? (
                 <button
                   className="link-btn"
                   onClick={() => void actions.upsertRun(tab.projectId, { ...run, instance: "" })}
-                  title="Switch back to typing the instance directly"
+                  title={t("useInlineInstanceTitle")}
                 >
-                  Use inline text
+                  {t("useInline")}
                 </button>
               ) : (
                 <FilePickerField
                   project={project}
                   value=""
                   kinds={[FileKind.KindXML]}
-                  placeholder="Use a project file instead"
+                  placeholder={t("useProjectFile")}
                   className="link-btn"
                   onChange={(p) => void actions.upsertRun(tab.projectId, { ...run, instance: p })}
                 />
@@ -182,20 +187,20 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
     },
     {
       id: "validation",
-      title: "Validation",
+      title: t("paneValidation"),
       content: (
           <div className="pane output-pane">
             <div className="pane-header">
-              <span className="pane-title">Validation</span>
+              <span className="pane-title">{t("paneValidation")}</span>
             </div>
             <div className="output-body output-body-scroll validation-result">
-              {running && <div className="placeholder">Validating…</div>}
+              {running && <div className="placeholder">{t("validating")}</div>}
               {!running && result && (
                 <div className={result.valid ? "validity ok" : "validity bad"}>
-                  {result.valid ? "Instance is schema-valid." : "Instance is NOT schema-valid."}
+                  {result.valid ? t("instanceValid") : t("instanceInvalid")}
                 </div>
               )}
-              {!running && !result && <div className="placeholder">Type or pick a schema and an instance, then Validate.</div>}
+              {!running && !result && <div className="placeholder">{t("validateHint")}</div>}
             </div>
             <DiagnosticsList diagnostics={diags} />
           </div>
@@ -207,7 +212,7 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
     <>
       <div className="params-bar">
         <label className="auto">
-          Version{" "}
+          {t("version")}{" "}
           <select value={version} onChange={(e) => void actions.upsertRun(tab.projectId, { ...run, xsdVersion: e.target.value })}>
             <option value={XSDVersion.XSD10}>1.0</option>
             <option value={XSDVersion.XSD11}>1.1</option>
@@ -215,14 +220,14 @@ export function ValidateRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
         </label>
         <span className="spacer" />
         <button className="primary" onClick={() => void doRun()} disabled={running || !hasSchema}>
-          {running ? "Validating…" : `Validate ${RUN_SHORTCUT}`}
+          {running ? t("validating") : t("validateButton", { shortcut: RUN_SHORTCUT })}
         </button>
         <label className="auto">
-          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> Auto
+          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> {t("auto")}
         </label>
         {result && !running && (
           <span className={result.valid ? "valid-badge ok" : "valid-badge bad"}>
-            {result.valid ? "✓ valid" : "✗ invalid"} · {result.durationMs} ms
+            {result.valid ? t("validBadge") : t("invalidBadge")} · {result.durationMs} ms
           </span>
         )}
       </div>

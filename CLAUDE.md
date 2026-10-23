@@ -136,7 +136,15 @@ dragging in the GUI's Wails/CGo dependencies:
   icon) holds the theme — `go-xslt.theme` = system|light|dark, resolved in
   `prefs.ts` to `data-theme` on <html>; `tokens.css` has a light palette under
   `:root[data-theme="light"]`, so colors belong in tokens, never literal —
-  and the update-check switch. The build's version comes from
+  and the update-check switch, and the language (`go-xslt.language` =
+  system|en|de|fr|it). UI text lives in `frontend/src/i18n/messages/<area>.ts`
+  (settings, shell, runs, views, actions), declared with `defineMessages`:
+  English is the reference and tsc fails when de/fr/it lack a key or have an
+  extra one. Components use `useT(messages)`, non-React code
+  `translate(messages, key, params)`; placeholders are `{name}`, one key per
+  whole sentence. A new visible string goes into a messages file in all four
+  languages, never as a literal. Engine diagnostics stay English; Validate
+  passes the language on for `msg:message`. The build's version comes from
   `desktop/version.go` (`appVersion`, "dev" by default), set by the gitignored
   `version_stamp.go` the Makefile writes before every build (`stamp-version`).
   A transform run's optional-feature switches are saved in the run

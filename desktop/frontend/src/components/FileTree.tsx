@@ -4,6 +4,8 @@ import { FILE_KIND_LABEL } from "../lib/labels";
 import { useContextMenu } from "../state/overlays";
 import { useProjectActions } from "../state/projectActions";
 import { dirname } from "../state/paths";
+import { useT } from "../i18n";
+import { shellMessages } from "../i18n/messages/shell";
 import { useAppState } from "../state/store";
 import type { ProjectState } from "../state/types";
 import { Icon } from "./Icon";
@@ -34,47 +36,48 @@ export function FileTree({ project }: { project: ProjectState }) {
   const state = useAppState();
   const actions = useProjectActions();
   const openMenu = useContextMenu();
+  const t = useT(shellMessages);
   const rows = useMemo(() => buildVisibleRows(project), [project]);
 
   const activeTab = state.activeTabId ? state.tabs[state.activeTabId] : null;
   const selectedPath = activeTab?.kind === "file" && activeTab.projectId === project.id ? activeTab.path : null;
 
   const newFileAt = async (dir: string) => {
-    const name = await actions.prompt({ title: "New file", label: "Name", placeholder: "template.xsl" });
+    const name = await actions.prompt({ title: t("newFileTitle"), label: t("nameLabel"), placeholder: "template.xsl" });
     if (name && !name.includes("/")) await actions.newFile(project.id, dir, name);
   };
   const newFolderAt = async (dir: string) => {
-    const name = await actions.prompt({ title: "New folder", label: "Name", placeholder: "lib" });
+    const name = await actions.prompt({ title: t("newFolderTitle"), label: t("nameLabel"), placeholder: "lib" });
     if (name && !name.includes("/")) await actions.newFolder(project.id, dir, name);
   };
 
   const menuForRow = (row: VisibleRow) => [
     ...(row.dir
       ? [
-          { id: "new-file", label: "New File…", onSelect: () => void newFileAt(row.path) },
-          { id: "new-folder", label: "New Folder…", onSelect: () => void newFolderAt(row.path) },
+          { id: "new-file", label: t("newFileMenu"), onSelect: () => void newFileAt(row.path) },
+          { id: "new-folder", label: t("newFolderMenu"), onSelect: () => void newFolderAt(row.path) },
         ]
       : []),
     {
       id: "rename",
-      label: "Rename…",
+      label: t("renameMenu"),
       separatorBefore: row.dir,
       onSelect: async () => {
-        const name = await actions.prompt({ title: "Rename", initialValue: row.name });
+        const name = await actions.prompt({ title: t("renameTitle"), initialValue: row.name });
         if (name && name !== row.name && !name.includes("/")) {
           const parent = dirname(row.path);
           await actions.renameNode(project.id, row.path, parent ? `${parent}/${name}` : name);
         }
       },
     },
-    ...(row.dir ? [] : [{ id: "duplicate", label: "Duplicate", onSelect: () => void actions.duplicateNode(project.id, row.path) }]),
+    ...(row.dir ? [] : [{ id: "duplicate", label: t("duplicate"), onSelect: () => void actions.duplicateNode(project.id, row.path) }]),
     {
       id: "delete",
-      label: "Delete…",
+      label: t("deleteMenu"),
       danger: true,
       onSelect: () => void actions.confirmDeleteNode(project.id, row.path, row.dir),
     },
-    { id: "reveal", label: "Reveal in Finder", separatorBefore: true, onSelect: () => void actions.revealNode(project.id, row.path) },
+    { id: "reveal", label: t("reveal"), separatorBefore: true, onSelect: () => void actions.revealNode(project.id, row.path) },
   ];
 
   return (
@@ -83,12 +86,12 @@ export function FileTree({ project }: { project: ProjectState }) {
       onContextMenu={(e: ReactMouseEvent) => {
         if (e.target !== e.currentTarget) return;
         openMenu(e, [
-          { id: "new-file", label: "New File…", onSelect: () => void newFileAt("") },
-          { id: "new-folder", label: "New Folder…", onSelect: () => void newFolderAt("") },
+          { id: "new-file", label: t("newFileMenu"), onSelect: () => void newFileAt("") },
+          { id: "new-folder", label: t("newFolderMenu"), onSelect: () => void newFolderAt("") },
         ]);
       }}
     >
-      {rows.length === 0 && <div className="sidebar-empty">No files yet. Right-click to add one.</div>}
+      {rows.length === 0 && <div className="sidebar-empty">{t("noFiles")}</div>}
       {rows.map((row) => (
         <div
           key={row.path}

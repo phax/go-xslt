@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useT } from "../i18n";
+import { shellMessages } from "../i18n/messages/shell";
 import { useAppDispatch, useAppState } from "../state/store";
 import { useProjectActions } from "../state/projectActions";
 import { Icon } from "./Icon";
@@ -7,6 +9,7 @@ export function ProjectSwitcher() {
   const state = useAppState();
   const dispatch = useAppDispatch();
   const actions = useProjectActions();
+  const t = useT(shellMessages);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -24,7 +27,7 @@ export function ProjectSwitcher() {
   return (
     <div className="project-switcher" ref={ref}>
       <button className="project-switcher-trigger" onClick={() => setOpen((o) => !o)}>
-        <span className="project-switcher-name">{active?.name ?? "No project open"}</span>
+        <span className="project-switcher-name">{active?.name ?? t("switcherNoProject")}</span>
         <Icon
           name="chevron-right"
           className="project-switcher-caret"
@@ -33,7 +36,7 @@ export function ProjectSwitcher() {
       </button>
       {open && (
         <div className="project-switcher-menu">
-          {state.knownProjects.length === 0 && <div className="sidebar-empty">No projects yet.</div>}
+          {state.knownProjects.length === 0 && <div className="sidebar-empty">{t("noProjects")}</div>}
           {state.knownProjects.map((ref_) => (
             <div
               key={ref_.dir}
@@ -56,7 +59,7 @@ export function ProjectSwitcher() {
               await actions.promptNewProject();
             }}
           >
-            + New project…
+            {t("newProject")}
           </div>
           <div
             className="project-switcher-action"
@@ -65,7 +68,7 @@ export function ProjectSwitcher() {
               await actions.openFolderPicker();
             }}
           >
-            Open folder…
+            {t("openFolder")}
           </div>
         </div>
       )}

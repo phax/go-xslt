@@ -27,6 +27,8 @@ import { results } from "./results";
 import { useConfirm, usePrompt, useToast } from "./overlays";
 import { useAppDispatch, useAppState } from "./store";
 import { fileTabId, join, runTabId } from "./paths";
+import { translate } from "../i18n";
+import { actionsMessages } from "../i18n/messages/actions";
 import type { FileTab, Tab } from "./types";
 
 let runIdSeq = 0;
@@ -66,14 +68,14 @@ function defaultRun(kind: RunKind): SavedRun {
   const id = genRunId();
   switch (kind) {
     case "transform":
-      return { id, name: "Untitled transform", kind, stylesheet: "", source: "", params: {} };
+      return { id, name: translate(actionsMessages, "defaultTransformName"), kind, stylesheet: "", source: "", params: {} };
     case "validate":
       // Inline by design (see ValidateRunView) — schemas/instance are typed
       // directly into the run, no project file required, seeded with a tiny
       // sample so the first thing you see isn't a blank editor.
-      return { id, name: "Untitled validation", kind, schemas: [], schemaInline: sampleSchema, instance: "", instanceInline: sampleNote, xsdVersion: "1.0" };
+      return { id, name: translate(actionsMessages, "defaultValidateName"), kind, schemas: [], schemaInline: sampleSchema, instance: "", instanceInline: sampleNote, xsdVersion: "1.0" };
     case "xpath":
-      return { id, name: "Untitled XPath", kind, expression: "//book[@price > 30]/title/string()", contextDoc: "", contextInline: sampleCatalog };
+      return { id, name: translate(actionsMessages, "defaultXpathName"), kind, expression: "//book[@price > 30]/title/string()", contextDoc: "", contextInline: sampleCatalog };
     default:
       // The generated RunKind enum also carries Go's zero value ("") for
       // JSON round-tripping — never a kind the UI itself asks to create.
@@ -100,7 +102,7 @@ export function useProjectActions() {
         if (project) dispatch({ type: "PROJECT_OPENED", project });
         await refreshKnownProjects();
       } catch (e) {
-        toast("error", `Couldn't open project: ${String(e)}`);
+        toast("error", translate(actionsMessages, "openProjectFailed", { error: String(e) }));
       }
     },
     [dispatch, refreshKnownProjects, toast],
@@ -113,14 +115,18 @@ export function useProjectActions() {
         if (project) dispatch({ type: "PROJECT_OPENED", project });
         await refreshKnownProjects();
       } catch (e) {
-        toast("error", `Couldn't create project: ${String(e)}`);
+        toast("error", translate(actionsMessages, "createProjectFailed", { error: String(e) }));
       }
     },
     [dispatch, refreshKnownProjects, toast],
   );
 
   const promptNewProject = useCallback(async () => {
-    const name = await prompt({ title: "New project", label: "Name", placeholder: "My project" });
+    const name = await prompt({
+      title: translate(actionsMessages, "newProjectTitle"),
+      label: translate(actionsMessages, "newProjectLabel"),
+      placeholder: translate(actionsMessages, "newProjectPlaceholder"),
+    });
     if (name) await createAndOpen(name);
   }, [prompt, createAndOpen]);
 
@@ -163,7 +169,7 @@ export function useProjectActions() {
         const tree = await refreshTree(projectId);
         if (tree) dispatch({ type: "TREE_SCANNED", projectId, tree });
       } catch (e) {
-        toast("error", `Couldn't read project files: ${String(e)}`);
+        toast("error", translate(actionsMessages, "readFilesFailed", { error: String(e) }));
       }
     },
     [dispatch, toast],
@@ -176,7 +182,7 @@ export function useProjectActions() {
       try {
         await buffers.ensureLoaded(projectId, path);
       } catch (e) {
-        toast("error", `Couldn't open ${path}: ${String(e)}`);
+        toast("error", translate(actionsMessages, "openFileFailed", { path, error: String(e) }));
         return;
       }
       const id = fileTabId(projectId, path);
@@ -229,7 +235,7 @@ export function useProjectActions() {
         await openFile(projectId, rel);
         return rel;
       } catch (e) {
-        toast("error", `Couldn't create ${name}: ${String(e)}`);
+        toast("error", translate(actionsMessages, "createFileFailed", { name, error: String(e) }));
         return null;
       }
     },
@@ -245,7 +251,7 @@ export function useProjectActions() {
         dispatch({ type: "NODE_TOGGLED", projectId, path: rel });
         return rel;
       } catch (e) {
-        toast("error", `Couldn't create folder ${name}: ${String(e)}`);
+        toast("error", translate(actionsMessages, "createFolderFailed", { name, error: String(e) }));
         return null;
       }
     },
@@ -260,7 +266,7 @@ export function useProjectActions() {
         dispatch({ type: "PATH_RENAMED", projectId, from, to });
         await rescan(projectId);
       } catch (e) {
-        toast("error", `Couldn't rename: ${String(e)}`);
+        toast("error", translate(actionsMessages, "renameFailed", { error: String(e) }));
       }
     },
     [dispatch, rescan, toast],
@@ -274,7 +280,7 @@ export function useProjectActions() {
         dispatch({ type: "PATH_DELETED", projectId, path });
         await rescan(projectId);
       } catch (e) {
-        toast("error", `Couldn't delete: ${String(e)}`);
+        toast("error", translate(actionsMessages, "deleteFailed", { error: String(e) }));
       }
     },
     [dispatch, rescan, toast],
@@ -288,7 +294,7 @@ export function useProjectActions() {
         if (newRel) await openFile(projectId, newRel);
         return newRel;
       } catch (e) {
-        toast("error", `Couldn't duplicate: ${String(e)}`);
+        toast("error", translate(actionsMessages, "duplicateFailed", { error: String(e) }));
         return null;
       }
     },
@@ -300,7 +306,7 @@ export function useProjectActions() {
       try {
         await reveal(projectId, path);
       } catch (e) {
-        toast("error", `Couldn't reveal: ${String(e)}`);
+        toast("error", translate(actionsMessages, "revealFailed", { error: String(e) }));
       }
     },
     [toast],
@@ -313,7 +319,7 @@ export function useProjectActions() {
       try {
         await saveManifest(projectId, { ...project.manifest, runs });
       } catch (e) {
-        toast("error", `Couldn't save: ${String(e)}`);
+        toast("error", translate(actionsMessages, "saveFailed", { error: String(e) }));
       }
     },
     [state.projects, toast],
@@ -378,7 +384,7 @@ export function useProjectActions() {
     async (projectId: string, runId: string) => {
       const run = state.projects[projectId]?.manifest.runs?.find((r) => r.id === runId);
       if (!run) return;
-      const name = await prompt({ title: "Rename run", initialValue: run.name });
+      const name = await prompt({ title: translate(actionsMessages, "renameRunTitle"), initialValue: run.name });
       if (name && name !== run.name) await upsertRun(projectId, { ...run, name });
     },
     [state.projects, prompt, upsertRun],
@@ -388,7 +394,7 @@ export function useProjectActions() {
     async (projectId: string, runId: string) => {
       const run = state.projects[projectId]?.manifest.runs?.find((r) => r.id === runId);
       if (!run) return;
-      const copy = { ...run, id: genRunId(), name: `${run.name} copy` };
+      const copy = { ...run, id: genRunId(), name: translate(actionsMessages, "runCopyName", { name: run.name }) };
       await upsertRun(projectId, copy);
       openRun(projectId, copy.id);
     },
@@ -398,9 +404,9 @@ export function useProjectActions() {
   const confirmDeleteNode = useCallback(
     async (projectId: string, path: string, isDir: boolean) => {
       const ok = await confirm({
-        title: `Delete ${isDir ? "folder" : "file"}?`,
-        message: `"${path}" will be permanently deleted. This can't be undone.`,
-        confirmLabel: "Delete",
+        title: translate(actionsMessages, isDir ? "deleteFolderTitle" : "deleteFileTitle"),
+        message: translate(actionsMessages, isDir ? "deleteFolderMessage" : "deleteFileMessage", { path }),
+        confirmLabel: translate(actionsMessages, "deleteConfirm"),
         danger: true,
       });
       if (ok) await deleteNode(projectId, path);
@@ -411,9 +417,9 @@ export function useProjectActions() {
   const confirmDeleteRun = useCallback(
     async (projectId: string, runId: string, name: string) => {
       const ok = await confirm({
-        title: "Delete run?",
-        message: `"${name}" will be permanently deleted.`,
-        confirmLabel: "Delete",
+        title: translate(actionsMessages, "deleteRunTitle"),
+        message: translate(actionsMessages, "deleteRunMessage", { name }),
+        confirmLabel: translate(actionsMessages, "deleteConfirm"),
         danger: true,
       });
       if (ok) await deleteRun(projectId, runId);

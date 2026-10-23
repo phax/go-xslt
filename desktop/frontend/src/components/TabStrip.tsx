@@ -2,17 +2,20 @@ import { FILE_KIND_LABEL, RUN_KIND_BADGE } from "../lib/labels";
 import { buffers, useBuffer } from "../state/buffers";
 import { useContextMenu } from "../state/overlays";
 import { useProjectActions } from "../state/projectActions";
+import { useT } from "../i18n";
+import { shellMessages } from "../i18n/messages/shell";
 import { useAppDispatch, useAppState, useOrderedTabs } from "../state/store";
 import type { ContextMenuItem, Tab } from "../state/types";
 import { Icon } from "./Icon";
 
 export function TabStrip() {
   const tabs = useOrderedTabs();
+  const t = useT(shellMessages);
 
   if (tabs.length === 0) {
     return (
       <div className="tab-strip">
-        <div className="tab-strip-empty">No tabs open — pick a file or a run from the sidebar</div>
+        <div className="tab-strip-empty">{t("noTabs")}</div>
       </div>
     );
   }
@@ -31,6 +34,7 @@ function TabItem({ tab }: { tab: Tab }) {
   const dispatch = useAppDispatch();
   const actions = useProjectActions();
   const openMenu = useContextMenu();
+  const t = useT(shellMessages);
   const buf = useBuffer(tab.kind === "file" ? tab.projectId : null, tab.kind === "file" ? tab.path : null);
 
   const active = tab.id === state.activeTabId;
@@ -38,23 +42,23 @@ function TabItem({ tab }: { tab: Tab }) {
   const project = state.projects[tab.projectId];
   const run = tab.kind === "run" ? project?.manifest.runs?.find((r) => r.id === tab.runId) : null;
 
-  const name = tab.kind === "file" ? tab.path.split("/").pop() || tab.path : (run?.name ?? "Untitled run");
+  const name = tab.kind === "file" ? tab.path.split("/").pop() || tab.path : (run?.name ?? t("untitledRun"));
   const badge =
     tab.kind === "file" ? FILE_KIND_LABEL[project?.nodes[tab.path]?.kind ?? "other"] : RUN_KIND_BADGE[run?.kind ?? "transform"];
   const kindClass = tab.kind === "file" ? `kind-${project?.nodes[tab.path]?.kind ?? "other"}` : `kind-${run?.kind ?? "transform"}`;
 
   const menu: ContextMenuItem[] = [
-    { id: "close", label: "Close", onSelect: () => actions.closeTab(tab) },
-    { id: "close-others", label: "Close Others", onSelect: () => actions.closeOtherTabs(tab.id) },
-    { id: "close-all", label: "Close All", onSelect: () => actions.closeAllTabs() },
+    { id: "close", label: t("close"), onSelect: () => actions.closeTab(tab) },
+    { id: "close-others", label: t("closeOthers"), onSelect: () => actions.closeOtherTabs(tab.id) },
+    { id: "close-all", label: t("closeAll"), onSelect: () => actions.closeAllTabs() },
     {
       id: "pin",
-      label: tab.pinned ? "Unpin Tab" : "Pin Tab",
+      label: tab.pinned ? t("unpinTab") : t("pinTab"),
       separatorBefore: true,
       onSelect: () => dispatch({ type: "TAB_PIN", id: tab.id, pinned: !tab.pinned }),
     },
     ...(tab.kind === "file"
-      ? [{ id: "reveal", label: "Reveal in Finder", onSelect: () => void actions.revealNode(tab.projectId, tab.path) }]
+      ? [{ id: "reveal", label: t("reveal"), onSelect: () => void actions.revealNode(tab.projectId, tab.path) }]
       : []),
   ];
 

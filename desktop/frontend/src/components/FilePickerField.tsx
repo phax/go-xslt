@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FileKind } from "../lib/api";
 import type { ProjectState } from "../state/types";
+import { useT } from "../i18n";
+import { runsMessages } from "../i18n/messages/runs";
 
 /** A button showing the currently-picked project-relative path; clicking it
  * opens a dropdown of every file in the project matching `kinds` (omit for
@@ -10,7 +12,7 @@ export function FilePickerField({
   project,
   value,
   kinds,
-  placeholder = "Choose file…",
+  placeholder,
   className = "file-picker-field",
   onChange,
 }: {
@@ -21,6 +23,7 @@ export function FilePickerField({
   className?: string;
   onChange: (path: string) => void;
 }) {
+  const t = useT(runsMessages);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -49,12 +52,12 @@ export function FilePickerField({
         {value ? (
           <span className={`file-picker-field-path${missing ? " missing" : ""}`}>{value}</span>
         ) : (
-          <span className="file-picker-field-empty">{placeholder}</span>
+          <span className="file-picker-field-empty">{placeholder ?? t("chooseFile")}</span>
         )}
       </button>
       {open && (
         <div className="project-switcher-menu" style={{ minWidth: 240, left: 0, right: "auto" }}>
-          {options.length === 0 && <div className="sidebar-empty">No matching files in this project.</div>}
+          {options.length === 0 && <div className="sidebar-empty">{t("noMatchingFiles")}</div>}
           {options.map((n) => (
             <div
               key={n.path}

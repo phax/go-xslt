@@ -2,6 +2,8 @@ import type { DockviewApi } from "dockview-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileKind, runXPath, type SavedRun, type XPathResult } from "../lib/api";
 import { RUN_SHORTCUT } from "../lib/platform";
+import { useT } from "../i18n";
+import { runsMessages } from "../i18n/messages/runs";
 import { buffers, useBuffer } from "../state/buffers";
 import { useProjectActions } from "../state/projectActions";
 import { useRunner } from "../state/runner";
@@ -32,6 +34,7 @@ export function XpathRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
   const state = useAppState();
   const actions = useProjectActions();
   const project = state.projects[tab.projectId];
+  const t = useT(runsMessages);
 
   const expression = run.expression ?? "";
   const contextPath = run.contextDoc ?? "";
@@ -88,18 +91,18 @@ export function XpathRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
   const panes: DockPane[] = [
     {
       id: "expression",
-      title: "XPath expression",
+      title: t("paneExpression"),
       content: (
           <div className="pane">
             <div className="pane-header">
-              <span className="pane-title">XPath expression</span>
-              <span className="meta">{RUN_SHORTCUT} to evaluate</span>
+              <span className="pane-title">{t("paneExpression")}</span>
+              <span className="meta">{t("toEvaluate", { shortcut: RUN_SHORTCUT })}</span>
             </div>
             <textarea
               className="xpath-editor"
               value={expression}
               onChange={(e) => void actions.upsertRun(tab.projectId, { ...run, expression: e.target.value }, { debounceMs: 400 })}
-              placeholder={"XPath 3.1 expression, e.g.\n//book[@price > 30]/title\nor\nstring-join((1 to 5) ! string(), ',')"}
+              placeholder={t("xpathPlaceholder")}
               spellCheck={false}
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -113,27 +116,27 @@ export function XpathRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
     },
     {
       id: "context",
-      title: "Context document",
+      title: t("paneContext"),
       content: (
           <div className="pane">
             <div className="pane-header">
-              <span className="pane-title">Context document</span>
-              <span className="meta">{contextFileMode ? contextPath : "inline"}</span>
+              <span className="pane-title">{t("paneContext")}</span>
+              <span className="meta">{contextFileMode ? contextPath : t("inline")}</span>
               <span className="spacer" />
               {contextFileMode ? (
                 <button
                   className="link-btn"
                   onClick={() => void actions.upsertRun(tab.projectId, { ...run, contextDoc: "" })}
-                  title="Switch back to typing the context document directly"
+                  title={t("useInlineContextTitle")}
                 >
-                  Use inline text
+                  {t("useInline")}
                 </button>
               ) : (
                 <FilePickerField
                   project={project}
                   value=""
                   kinds={[FileKind.KindXML]}
-                  placeholder="Use a project file instead"
+                  placeholder={t("useProjectFile")}
                   className="link-btn"
                   onChange={(p) => void actions.upsertRun(tab.projectId, { ...run, contextDoc: p })}
                 />
@@ -154,22 +157,22 @@ export function XpathRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
     },
     {
       id: "result",
-      title: "Result",
+      title: t("paneResult"),
       content: (
           <div className="pane output-pane">
             <div className="pane-header">
-              <span className="pane-title">Result</span>
-              {result && !running && diags.length === 0 && <span className="meta">value: {truncate(result.value)}</span>}
+              <span className="pane-title">{t("paneResult")}</span>
+              {result && !running && diags.length === 0 && <span className="meta">{t("valueSummary", { value: truncate(result.value) })}</span>}
             </div>
             <div className="output-body output-body-scroll">
-              {running && <div className="placeholder">Evaluating…</div>}
+              {running && <div className="placeholder">{t("evaluating")}</div>}
               {!running && diags.length === 0 && items.length > 0 && (
                 <table className="xpath-items">
                   <thead>
                     <tr>
                       <th className="idx">#</th>
-                      <th className="ty">type</th>
-                      <th>value</th>
+                      <th className="ty">{t("colType")}</th>
+                      <th>{t("colValue")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -183,8 +186,8 @@ export function XpathRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
                   </tbody>
                 </table>
               )}
-              {!running && diags.length === 0 && items.length === 0 && result && <div className="placeholder">empty sequence</div>}
-              {!running && !result && <div className="placeholder">Type an expression above.</div>}
+              {!running && diags.length === 0 && items.length === 0 && result && <div className="placeholder">{t("emptySequence")}</div>}
+              {!running && !result && <div className="placeholder">{t("typeExpression")}</div>}
             </div>
             <DiagnosticsList diagnostics={diags} />
           </div>
@@ -197,15 +200,15 @@ export function XpathRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
       <div className="params-bar xpath-bar">
         <span className="params-label">XPath 3.1</span>
         <button className="param-add" onClick={() => void doRun()} disabled={running}>
-          {running ? "…" : `Eval ${RUN_SHORTCUT}`}
+          {running ? "…" : t("evalButton", { shortcut: RUN_SHORTCUT })}
         </button>
         <label className="auto">
-          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> Auto
+          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> {t("auto")}
         </label>
         <span className="spacer" />
         {result && !running && (
           <span className="meta">
-            {result.count} item{result.count === 1 ? "" : "s"} · {result.durationMs} ms
+            {t(result.count === 1 ? "itemsOne" : "itemsMany", { count: result.count })} · {result.durationMs} ms
           </span>
         )}
       </div>

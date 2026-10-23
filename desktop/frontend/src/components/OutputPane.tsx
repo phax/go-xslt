@@ -3,6 +3,8 @@ import { ReadOnlyViewer } from "./Editor";
 import { formatXml } from "../lib/format";
 import type { Diagnostic, TransformResult } from "../lib/api";
 import { DiagnosticsList, MessagesList, SecondaryOutputsList } from "./ResultParts";
+import { useT } from "../i18n";
+import { runsMessages } from "../i18n/messages/runs";
 
 interface OutputPaneProps {
   result: TransformResult | null;
@@ -11,6 +13,7 @@ interface OutputPaneProps {
 }
 
 export function OutputPane({ result, running, onDiagnosticClick }: OutputPaneProps) {
+  const t = useT(runsMessages);
   const [tab, setTab] = useState<"output" | "rendered">("output");
   const [pretty, setPretty] = useState(true);
   const diags = result?.diagnostics ?? [];
@@ -29,20 +32,20 @@ export function OutputPane({ result, running, onDiagnosticClick }: OutputPanePro
   return (
     <div className="pane output-pane">
       <div className="pane-header">
-        <span className="pane-title">Output</span>
+        <span className="pane-title">{t("paneOutput")}</span>
         <div className="tabs">
           <button className={tab === "output" ? "tab active" : "tab"} onClick={() => setTab("output")}>
-            Source
+            {t("tabSource")}
           </button>
           {canRender && (
             <button className={tab === "rendered" ? "tab active" : "tab"} onClick={() => setTab("rendered")}>
-              Rendered
+              {t("tabRendered")}
             </button>
           )}
         </div>
         {isMarkup && tab === "output" && (
-          <label className="auto" title="Pretty-print the output">
-            <input type="checkbox" checked={pretty} onChange={(e) => setPretty(e.target.checked)} /> Format
+          <label className="auto" title={t("formatTitle")}>
+            <input type="checkbox" checked={pretty} onChange={(e) => setPretty(e.target.checked)} /> {t("format")}
           </label>
         )}
         <span className="spacer" />
@@ -54,12 +57,12 @@ export function OutputPane({ result, running, onDiagnosticClick }: OutputPanePro
       </div>
 
       <div className="output-body">
-        {running && <div className="placeholder">Running…</div>}
+        {running && <div className="placeholder">{t("running")}</div>}
         {!running && tab === "output" && (
           <ReadOnlyViewer value={shown} />
         )}
         {!running && tab === "rendered" && canRender && (
-          <iframe className="render-frame" title="rendered" sandbox="" srcDoc={raw} />
+          <iframe className="render-frame" title={t("renderedFrame")} sandbox="" srcDoc={raw} />
         )}
       </div>
 

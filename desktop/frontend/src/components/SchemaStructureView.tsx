@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { schemaStructure, type SchemaModel, type SMAttr, type SMNode, type SMType } from "../lib/api";
 import { DiagnosticsList } from "./ResultParts";
+import { useT } from "../i18n";
+import { viewsMessages } from "../i18n/messages/views";
 
 /** The resolved structure of an XSD — across every file it imports/includes —
  * as an expandable tree: global elements, types and attributes on the left,
@@ -41,6 +43,7 @@ export function SchemaStructureView({
   const [filter, setFilter] = useState("");
   const [toggles, setToggles] = useState<Record<string, boolean>>({});
   const [level, setLevel] = useState(0);
+  const tr = useT(viewsMessages);
 
   const key = JSON.stringify([schemas, baseDir, projectDir, version]);
   useEffect(() => {
@@ -108,9 +111,9 @@ export function SchemaStructureView({
         <div className="struct-tabs">
           {(
             [
-              ["element", "Elements", elements.length],
-              ["type", "Types", typeIds.length],
-              ["attribute", "Attributes", attrs.length],
+              ["element", tr("tabElements"), elements.length],
+              ["type", tr("tabTypes"), typeIds.length],
+              ["attribute", tr("tabAttributes"), attrs.length],
             ] as const
           ).map(([k, label, n]) => (
             <button key={k} className={list === k ? "on" : ""} onClick={() => setList(k)}>
@@ -118,7 +121,7 @@ export function SchemaStructureView({
             </button>
           ))}
         </div>
-        <input className="struct-filter" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <input className="struct-filter" placeholder={tr("filterPlaceholder")} value={filter} onChange={(e) => setFilter(e.target.value)} />
         <ul className="struct-list">
           {list === "element" &&
             shownElements.map((e) => (
@@ -145,11 +148,11 @@ export function SchemaStructureView({
       </div>
       <div className="struct-main">
         <div className="struct-bar">
-          <button onClick={() => { setToggles({}); setLevel(8); }}>Expand all</button>
-          <button onClick={() => { setToggles({}); setLevel(0); }}>Collapse</button>
+          <button onClick={() => { setToggles({}); setLevel(8); }}>{tr("expandAll")}</button>
+          <button onClick={() => { setToggles({}); setLevel(0); }}>{tr("collapse")}</button>
           <span className="spacer" />
-          {busy && <span className="meta">Reading schema…</span>}
-          {!busy && model && <span className="meta">{Object.keys(types).length} types · {elements.length} global elements</span>}
+          {busy && <span className="meta">{tr("readingSchema")}</span>}
+          {!busy && model && <span className="meta">{tr("summary", { types: Object.keys(types).length, elements: elements.length })}</span>}
         </div>
         {failure && <div className="struct-empty">{failure}</div>}
         {diags.length > 0 && <DiagnosticsList diagnostics={diags} />}
@@ -161,8 +164,8 @@ export function SchemaStructureView({
               {sel.kind === "attribute" && attrs.filter((a) => a.name === sel.key).map((a) => <AttrRow key={a.name} a={a} />)}
             </C.Provider>
           )}
-          {!sel && !busy && !hasErrors && !failure && <div className="struct-empty">This schema declares no global elements or types.</div>}
-          {!sel && hasErrors && <div className="struct-empty">The schema does not compile — fix the errors above to see its structure.</div>}
+          {!sel && !busy && !hasErrors && !failure && <div className="struct-empty">{tr("emptySchema")}</div>}
+          {!sel && hasErrors && <div className="struct-empty">{tr("schemaBroken")}</div>}
         </div>
       </div>
     </div>
@@ -180,9 +183,10 @@ function Chevron({ open, show }: { open: boolean; show: boolean }) {
 
 function TypeChip({ id, name }: { id?: string; name?: string }) {
   const c = useContext(C)!;
+  const tr = useT(viewsMessages);
   if (!id) return null;
   const t = c.model.types?.[id];
-  const label = name || t?.name || "(anonymous)";
+  const label = name || t?.name || tr("anonymous");
   const navigable = !!t && !t.builtin && !!(t.name || t.model || t.attributes?.length);
   return (
     <span
@@ -238,6 +242,7 @@ function Flags({ min, max, extra }: { min: number; max: number; extra?: React.Re
 /** One node of a content model; `trail` holds the type ids above it (to cut recursion). */
 function ModelNode({ node, path, depth, trail }: { node: SMNode; path: string; depth: number; trail: string[] }) {
   const c = useContext(C)!;
+  const tr = useT(viewsMessages);
   if (node.kind === "element") return <ElementRow node={node} path={path} depth={depth} trail={trail} />;
   if (node.kind === "any") {
     return (
@@ -245,7 +250,7 @@ function ModelNode({ node, path, depth, trail }: { node: SMNode; path: string; d
         <div className="row any optional-box">
           <Chevron open={false} show={false} />
           <span className="name">any</span>
-          <span className="meta">{node.mode === "other" ? "##other" : node.mode === "list" ? "listed namespaces" : "##any"} · {node.process}</span>
+          <span className="meta">{node.mode === "other" ? "##other" : node.mode === "list" ? tr("listedNamespaces") : "##any"} · {node.process}</span>
           <Flags min={node.min} max={node.max} />
         </div>
       </li>
@@ -260,7 +265,7 @@ function ModelNode({ node, path, depth, trail }: { node: SMNode; path: string; d
         <GroupIcon kind={node.kind} />
         <span className="gname">{node.kind}</span>
         <Flags min={node.min} max={node.max} />
-        <span className="meta">{kids.length} item{kids.length === 1 ? "" : "s"}</span>
+        <span className="meta">{tr(kids.length === 1 ? "itemsOne" : "itemsMany", { n: kids.length })}</span>
       </div>
       {open && kids.length > 0 && (
         <ul className="tree">
@@ -273,6 +278,7 @@ function ModelNode({ node, path, depth, trail }: { node: SMNode; path: string; d
 
 function ElementRow({ node, path, depth, trail, root }: { node: SMNode; path: string; depth: number; trail: string[]; root?: boolean }) {
   const c = useContext(C)!;
+  const tr = useT(viewsMessages);
   const t = node.typeId ? c.model.types?.[node.typeId] : undefined;
   const recursive = !!node.typeId && trail.includes(node.typeId);
   const expandable = !!t && !recursive && hasBody(t);
@@ -283,7 +289,7 @@ function ElementRow({ node, path, depth, trail, root }: { node: SMNode; path: st
       <span className="glyph el">E</span>
       <span className="name" title={node.ns ? `{${node.ns}}${node.name}` : node.name}>{node.name}</span>
       <TypeChip id={node.typeId} name={node.typeName} />
-      {recursive && <span className="rec" title="This type contains itself — expansion stops here">↻ recursive</span>}
+      {recursive && <span className="rec" title={tr("recursiveTitle")}>{tr("recursive")}</span>}
       <Flags
         min={node.min}
         max={node.max}
@@ -291,9 +297,9 @@ function ElementRow({ node, path, depth, trail, root }: { node: SMNode; path: st
           <>
             {node.nillable && <span className="flag" title="nillable">nil</span>}
             {node.abstract && <span className="flag">abstract</span>}
-            {node.fixed !== undefined && node.fixed !== "" && <span className="flag" title="fixed value">= {node.fixed}</span>}
-            {node.default !== undefined && node.default !== "" && <span className="flag" title="default value">default {node.default}</span>}
-            {(node.substitutes ?? []).map((s) => <span key={s} className="flag" title="substitution group head">≈ {s}</span>)}
+            {node.fixed !== undefined && node.fixed !== "" && <span className="flag" title={tr("fixedValueTitle")}>= {node.fixed}</span>}
+            {node.default !== undefined && node.default !== "" && <span className="flag" title={tr("defaultValueTitle")}>default {node.default}</span>}
+            {(node.substitutes ?? []).map((s) => <span key={s} className="flag" title={tr("substitutionHeadTitle")}>≈ {s}</span>)}
           </>
         }
       />
@@ -329,37 +335,38 @@ function AttrRow({ a }: { a: SMAttr }) {
 
 function SimpleDetails({ t }: { t: SMType }) {
   const c = useContext(C)!;
+  const tr = useT(viewsMessages);
   const enums = t.enumeration ?? [];
   return (
     <div className="details">
       <div className="kv">
-        <span className="k">kind</span>
+        <span className="k">{tr("kindLabel")}</span>
         <span>{t.variety ?? "atomic"}{t.primitive && t.variety !== "union" ? ` · ${t.primitive}` : ""}</span>
       </div>
       {t.baseId && (
         <div className="kv">
-          <span className="k">restricts</span>
+          <span className="k">{tr("restricts")}</span>
           <TypeChip id={t.baseId} name={t.baseName} />
         </div>
       )}
       {t.itemId && (
         <div className="kv">
-          <span className="k">list of</span>
+          <span className="k">{tr("listOf")}</span>
           <TypeChip id={t.itemId} name={t.itemName} />
         </div>
       )}
       {(t.members ?? []).length > 0 && (
         <div className="kv">
-          <span className="k">union of</span>
+          <span className="k">{tr("unionOf")}</span>
           <span className="chips">{t.members!.map((m) => <TypeChip key={m} id={m} name={c.model.types?.[m]?.name} />)}</span>
         </div>
       )}
       {enums.length > 0 && (
         <div className="kv">
-          <span className="k">values</span>
+          <span className="k">{tr("values")}</span>
           <span className="chips">
             {enums.slice(0, 60).map((v, i) => <span key={i} className="enum">{v}</span>)}
-            {enums.length > 60 && <span className="meta">+{enums.length - 60} more</span>}
+            {enums.length > 60 && <span className="meta">{tr("more", { n: enums.length - 60 })}</span>}
           </span>
         </div>
       )}
@@ -370,6 +377,7 @@ function SimpleDetails({ t }: { t: SMType }) {
 /** Attributes, then the content model (or the simple-content type) of a type. */
 function TypeBody({ type: t, path, depth, trail }: { type: SMType; path: string; depth: number; trail: string[] }) {
   const c = useContext(C)!;
+  const tr = useT(viewsMessages);
   if (t.simple) return <div className="body"><SimpleDetails t={t} /></div>;
   const attrs = t.attributes ?? [];
   const content = t.contentId ? c.model.types?.[t.contentId] : undefined;
@@ -379,7 +387,7 @@ function TypeBody({ type: t, path, depth, trail }: { type: SMType; path: string;
         <li>
           <div className="row note">
             <Chevron open={false} show={false} />
-            <span className="meta">{t.derivation} of</span> <TypeChip id={t.baseId} name={t.baseName} />
+            <span className="meta">{tr("derivationOf", { derivation: t.derivation })}</span> <TypeChip id={t.baseId} name={t.baseName} />
             {t.mixed && <span className="flag">mixed</span>}
             {t.abstract && <span className="flag">abstract</span>}
           </div>
@@ -389,7 +397,7 @@ function TypeBody({ type: t, path, depth, trail }: { type: SMType; path: string;
         <li>
           <div className="row note">
             <Chevron open={false} show={false} />
-            <span className="meta">text content</span> <TypeChip id={t.contentId} name={content.name} />
+            <span className="meta">{tr("textContent")}</span> <TypeChip id={t.contentId} name={content.name} />
           </div>
           {content.simple && <SimpleDetails t={content} />}
         </li>
@@ -402,21 +410,22 @@ function TypeBody({ type: t, path, depth, trail }: { type: SMType; path: string;
       )}
       {t.model && <ModelNode node={t.model} path={`${path}/m`} depth={depth} trail={trail} />}
       {!t.model && !content && attrs.length === 0 && !t.anyAttribute && (
-        <li><div className="row note"><Chevron open={false} show={false} /><span className="meta">{t.content === "empty" ? "empty content" : "no content"}</span></div></li>
+        <li><div className="row note"><Chevron open={false} show={false} /><span className="meta">{t.content === "empty" ? tr("emptyContent") : tr("noContent")}</span></div></li>
       )}
     </ul>
   );
 }
 
 function TypeRoot({ type: t }: { type: SMType }) {
+  const tr = useT(viewsMessages);
   return (
     <ul className="tree">
       <li className="root">
         <div className="row element">
           <Chevron open show={false} />
           <span className={`glyph ${t.simple ? "st" : "ct"}`}>{t.simple ? "S" : "C"}</span>
-          <span className="name" title={t.ns ? `{${t.ns}}${t.name}` : t.name}>{t.name || "(anonymous)"}</span>
-          {t.ns === XS && <span className="meta">built-in</span>}
+          <span className="name" title={t.ns ? `{${t.ns}}${t.name}` : t.name}>{t.name || tr("anonymous")}</span>
+          {t.ns === XS && <span className="meta">{tr("builtIn")}</span>}
           {t.abstract && <span className="flag">abstract</span>}
           {t.mixed && <span className="flag">mixed</span>}
         </div>

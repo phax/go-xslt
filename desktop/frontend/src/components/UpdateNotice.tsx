@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Browser } from "@wailsio/runtime";
 import { checkForUpdate, type UpdateInfo } from "../lib/api";
-import { useCheckUpdates } from "../state/prefs";
+import { useCheckUpdates, useLanguage } from "../state/prefs";
 import { Modal } from "./Modal";
+import { useT } from "../i18n";
+import { viewsMessages } from "../i18n/messages/views";
 
 // Checked at every start and then every six hours while the app runs: a new
 // release matters most in its first hours, so the answer is never cached
@@ -41,6 +43,7 @@ export function UpdateNotice() {
   const enabled = useCheckUpdates();
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [open, setOpen] = useState(false);
+  const t = useT(viewsMessages);
 
   useEffect(() => {
     try {
@@ -77,10 +80,10 @@ export function UpdateNotice() {
       {info?.newer && (
         <button
           className="update-notice"
-          title={`You have ${info.current}. Show what is new in ${info.latest}.`}
+          title={t("updateButtonTitle", { current: info.current, latest: info.latest })}
           onClick={() => setOpen(true)}
         >
-          Update: v{info.latest}
+          {t("updateButton", { latest: info.latest })}
         </button>
       )}
       {open && info?.newer && (
@@ -98,8 +101,10 @@ export function UpdateNotice() {
 }
 
 function UpdateDialog({ info, onClose, onSkip }: { info: UpdateInfo; onClose: () => void; onSkip: () => void }) {
+  const t = useT(viewsMessages);
+  const lang = useLanguage();
   const notes = useMemo(() => sanitizeNotes(info.notesHtml), [info.notesHtml]);
-  const published = info.publishedAt ? new Date(info.publishedAt).toLocaleDateString() : "";
+  const published = info.publishedAt ? new Date(info.publishedAt).toLocaleDateString(lang) : "";
 
   // A link in the notes opens in the browser, never inside the app window.
   const onNotesClick = (e: MouseEvent<HTMLDivElement>) => {
@@ -114,28 +119,27 @@ function UpdateDialog({ info, onClose, onSkip }: { info: UpdateInfo; onClose: ()
     <Modal onDismiss={onClose} className="update-modal">
       <div className="licenses-modal-header">
         <span className="modal-title">
-          go-xslt {info.latest} is available
+          {t("updateTitle", { version: info.latest })}
         </span>
-        <button className="licenses-close" onClick={onClose} aria-label="Close">
+        <button className="licenses-close" onClick={onClose} aria-label={t("close")}>
           ✕
         </button>
       </div>
       <div className="update-meta">
-        You have {info.current}
-        {published ? ` · released ${published}` : ""}
+        {published ? t("youHaveReleased", { current: info.current, date: published }) : t("youHave", { current: info.current })}
       </div>
       {notes ? (
         <div className="update-notes" onClick={onNotesClick} dangerouslySetInnerHTML={{ __html: notes }} />
       ) : (
-        <div className="update-notes update-notes-empty">This release has no notes.</div>
+        <div className="update-notes update-notes-empty">{t("noNotes")}</div>
       )}
       <div className="modal-actions">
-        <button onClick={onSkip} title="Do not open this dialog again until a newer release">
-          Skip this version
+        <button onClick={onSkip} title={t("skipTitle")}>
+          {t("skip")}
         </button>
-        <button onClick={onClose}>Later</button>
+        <button onClick={onClose}>{t("later")}</button>
         <button className="primary" onClick={() => void Browser.OpenURL(info.url)}>
-          Download
+          {t("download")}
         </button>
       </div>
     </Modal>

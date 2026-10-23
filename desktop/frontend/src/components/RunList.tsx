@@ -3,6 +3,8 @@ import { RunKind, type SavedRun } from "../lib/api";
 import { RUN_KIND_BADGE } from "../lib/labels";
 import { useContextMenu } from "../state/overlays";
 import { useProjectActions } from "../state/projectActions";
+import { useT } from "../i18n";
+import { shellMessages } from "../i18n/messages/shell";
 import { useAppState } from "../state/store";
 import type { ProjectState } from "../state/types";
 import { Icon } from "./Icon";
@@ -11,6 +13,7 @@ export function RunList({ project }: { project: ProjectState }) {
   const state = useAppState();
   const actions = useProjectActions();
   const openMenu = useContextMenu();
+  const t = useT(shellMessages);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const runs = project.manifest.runs ?? [];
@@ -29,21 +32,21 @@ export function RunList({ project }: { project: ProjectState }) {
 
   const newRunMenu = (e: { clientX: number; clientY: number; preventDefault: () => void }) =>
     openMenu(e, [
-      { id: "t", label: "New Transform Run", onSelect: () => void actions.newRun(project.id, RunKind.RunTransform) },
-      { id: "v", label: "New Validate Run", onSelect: () => void actions.newRun(project.id, RunKind.RunValidate) },
-      { id: "x", label: "New XPath Run", onSelect: () => void actions.newRun(project.id, RunKind.RunXPath) },
+      { id: "t", label: t("newTransformRun"), onSelect: () => void actions.newRun(project.id, RunKind.RunTransform) },
+      { id: "v", label: t("newValidateRun"), onSelect: () => void actions.newRun(project.id, RunKind.RunValidate) },
+      { id: "x", label: t("newXpathRun"), onSelect: () => void actions.newRun(project.id, RunKind.RunXPath) },
     ]);
 
   return (
     <>
       <div className="sidebar-section-header">
-        <span>Runs</span>
-        <button className="icon-btn sidebar-add-btn" onClick={(e) => newRunMenu(e)} title="New run">
+        <span>{t("runs")}</span>
+        <button className="icon-btn sidebar-add-btn" onClick={(e) => newRunMenu(e)} title={t("newRun")}>
           <Icon name="plus" />
         </button>
       </div>
       <div className="run-list">
-        {runs.length === 0 && <div className="sidebar-empty">No saved runs yet. Click + to add a transform, validation, or XPath run.</div>}
+        {runs.length === 0 && <div className="sidebar-empty">{t("noRuns")}</div>}
         {groups.map(([folder, items]) => (
           <div key={folder || "__root"}>
             {folder && (
@@ -60,11 +63,11 @@ export function RunList({ project }: { project: ProjectState }) {
                   onClick={() => actions.openRun(project.id, run.id)}
                   onContextMenu={(e) =>
                     openMenu(e, [
-                      { id: "rename", label: "Rename…", onSelect: () => void actions.renameRun(project.id, run.id) },
-                      { id: "duplicate", label: "Duplicate", onSelect: () => void actions.duplicateRun(project.id, run.id) },
+                      { id: "rename", label: t("renameMenu"), onSelect: () => void actions.renameRun(project.id, run.id) },
+                      { id: "duplicate", label: t("duplicate"), onSelect: () => void actions.duplicateRun(project.id, run.id) },
                       {
                         id: "delete",
-                        label: "Delete…",
+                        label: t("deleteMenu"),
                         danger: true,
                         separatorBefore: true,
                         onSelect: () => void actions.confirmDeleteRun(project.id, run.id, run.name),

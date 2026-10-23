@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, type ReactNo
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import "dockview-react/dist/styles/dockview.css";
 import { useTheme } from "../state/prefs";
+import { useT } from "../i18n";
+import { runsMessages } from "../i18n/messages/runs";
 
 /** The panes of a run view, arranged the way the user likes: drag a pane's tab
  * to dock it left, right, above or below another one, or drop it on the same
@@ -64,6 +66,7 @@ export function DockLayout({
 }) {
   const apiRef = useRef<DockviewApi | null>(null);
   const theme = useTheme();
+  const t = useT(runsMessages);
   const saveTimer = useRef<number | undefined>(undefined);
   const titles = useRef(panes);
   titles.current = panes;
@@ -96,6 +99,8 @@ export function DockLayout({
         }
       }
       if (!restored) addDefault(api);
+      // a stored layout keeps the titles of its day (and language): show today's
+      else for (const p of titles.current) api.getPanel(p.id)?.api.setTitle(p.title);
       api.onDidLayoutChange(() => {
         window.clearTimeout(saveTimer.current);
         saveTimer.current = window.setTimeout(() => writeLayout(storageKey, api.toJSON()), 300);
@@ -106,6 +111,17 @@ export function DockLayout({
 
   useEffect(() => () => window.clearTimeout(saveTimer.current), []);
 
+  // the titles follow the app's language
+  const titleKey = panes.map((p) => p.title).join("|");
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api) return;
+    for (const p of titles.current) {
+      const panel = api.getPanel(p.id);
+      if (panel && panel.title !== p.title) panel.api.setTitle(p.title);
+    }
+  }, [titleKey]);
+
   const contents: Record<string, ReactNode> = {};
   for (const p of panes) contents[p.id] = p.content;
 
@@ -114,10 +130,10 @@ export function DockLayout({
       <div className="dock-bar">
         <button
           className="dock-reset"
-          title="Put the panes back in their default arrangement"
+          title={t("resetLayoutTitle")}
           onClick={() => apiRef.current && addDefault(apiRef.current)}
         >
-          Reset layout
+          {t("resetLayout")}
         </button>
       </div>
       <div className="dock-body">

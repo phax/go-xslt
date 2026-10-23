@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { DockviewApi } from "dockview-react";
 import { FileKind, runTransform, type Diagnostic, type SavedRun, type TransformResult } from "../lib/api";
 import { RUN_SHORTCUT } from "../lib/platform";
+import { useT } from "../i18n";
+import { runsMessages } from "../i18n/messages/runs";
 import { buffers, useBuffer } from "../state/buffers";
 import { useProjectActions } from "../state/projectActions";
 import { useRunner } from "../state/runner";
@@ -28,6 +30,7 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
   const state = useAppState();
   const actions = useProjectActions();
   const project = state.projects[tab.projectId];
+  const t = useT(runsMessages);
 
   const stylesheetPath = run.stylesheet ?? "";
   const sourcePath = run.source ?? "";
@@ -124,12 +127,12 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
   const panes: DockPane[] = [
     {
       id: "stylesheet",
-      title: "Stylesheet",
+      title: t("paneStylesheet"),
       content: (
         <div className="pane">
           <div className="pane-header">
-            <span className="pane-title">Stylesheet</span>
-            <span className="meta">{stylesheetPath || "none picked"}</span>
+            <span className="pane-title">{t("paneStylesheet")}</span>
+            <span className="meta">{stylesheetPath || t("nonePicked")}</span>
           </div>
           <div className="editor-wrap">
             {stylesheetPath ? (
@@ -139,7 +142,7 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
                 diagnostics={styDiags}
               />
             ) : (
-              <div className="placeholder">Pick a stylesheet above.</div>
+              <div className="placeholder">{t("pickStylesheetAbove")}</div>
             )}
           </div>
         </div>
@@ -147,24 +150,24 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
     },
     {
       id: "source",
-      title: "Source XML",
+      title: t("paneSource"),
       content: (
         <div className="pane">
           <div className="pane-header">
-            <span className="pane-title">Source XML</span>
-            <span className="meta">{sourcePath || "none picked"}</span>
+            <span className="pane-title">{t("paneSource")}</span>
+            <span className="meta">{sourcePath || t("nonePicked")}</span>
           </div>
           <div className="editor-wrap">
             {sourcePath ? (
               <Editor value={sourceBuf.text} onChange={(v) => buffers.setText(tab.projectId, sourcePath, v)} />
             ) : (
-              <div className="placeholder">Pick a source XML above (optional if the stylesheet uses an initial template).</div>
+              <div className="placeholder">{t("pickSourceAbove")}</div>
             )}
           </div>
         </div>
       ),
     },
-    { id: "output", title: "Output", content: <OutputPane result={result} running={running} /> },
+    { id: "output", title: t("paneOutput"), content: <OutputPane result={result} running={running} /> },
   ];
 
   return (
@@ -174,14 +177,14 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
           project={project}
           value={stylesheetPath}
           kinds={[FileKind.KindStylesheet]}
-          placeholder="Choose stylesheet…"
+          placeholder={t("chooseStylesheet")}
           onChange={(p) => void actions.upsertRun(tab.projectId, { ...run, stylesheet: p })}
         />
         <FilePickerField
           project={project}
           value={sourcePath}
           kinds={[FileKind.KindXML]}
-          placeholder="Choose source XML…"
+          placeholder={t("chooseSource")}
           onChange={(p) => void actions.upsertRun(tab.projectId, { ...run, source: p })}
         />
         <FeatureSwitches
@@ -190,17 +193,17 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
         />
         <span className="spacer" />
         <button className="primary" onClick={() => void doRun()} disabled={running || !stylesheetPath}>
-          {running ? "Running…" : `Run ${RUN_SHORTCUT}`}
+          {running ? t("running") : t("runButton", { shortcut: RUN_SHORTCUT })}
         </button>
         <label className="auto">
-          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> Auto
+          <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} /> {t("auto")}
         </label>
       </div>
 
       <div className="params-panel">
         <div className="params-panel-header">
-          <span className="params-label">Params</span>
-          {Object.entries(params).length === 0 && <span className="params-empty">none</span>}
+          <span className="params-label">{t("params")}</span>
+          {Object.entries(params).length === 0 && <span className="params-empty">{t("paramsNone")}</span>}
         </div>
         <div className="params-list">
           {Object.entries(params).map(([name, value]) => (
@@ -212,7 +215,7 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
                 className="param-row-value"
                 value={value}
                 onChange={(e) => setParam(name, e.target.value)}
-                placeholder="value"
+                placeholder={t("paramValue")}
                 rows={1}
                 spellCheck={false}
               />
@@ -232,10 +235,10 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
                   commitNewParam();
                 }
               }}
-              placeholder="new param name"
+              placeholder={t("newParamName")}
             />
             <button className="param-add" onClick={commitNewParam} disabled={!newParam.trim()}>
-              + add
+              {t("addParam")}
             </button>
           </div>
         </div>
@@ -247,34 +250,24 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
 }
 
 type FeatureKey = "schemaAware" | "backwardsCompatible" | "strictStreaming";
+type RunsKey = keyof typeof runsMessages.en;
 
-const FEATURES: { key: FeatureKey; label: string; title: string }[] = [
-  {
-    key: "schemaAware",
-    label: "Schema-aware",
-    title: "xsl:import-schema, validation and typed nodes. Off: xsl:import-schema is an error.",
-  },
-  {
-    key: "backwardsCompatible",
-    label: "XSLT 1.0 mode",
-    title: "XSLT 1.0 rules where version is below 2.0. Off: a version=\"1.0\" stylesheet runs under XSLT 3.0 rules.",
-  },
-  {
-    key: "strictStreaming",
-    label: "Strict streaming",
-    title: "A streamable construct that cannot be proven streamable is XTSE3430. Off: it runs with the whole document in memory.",
-  },
+const FEATURES: { key: FeatureKey; label: RunsKey; title: RunsKey }[] = [
+  { key: "schemaAware", label: "featSchemaAware", title: "featSchemaAwareTitle" },
+  { key: "backwardsCompatible", label: "featBackCompat", title: "featBackCompatTitle" },
+  { key: "strictStreaming", label: "featStrictStreaming", title: "featStrictStreamingTitle" },
 ];
 
 /** The optional XSLT 3.0 features this run's stylesheet is compiled with
  * (engine.Features), saved with the run. */
 function FeatureSwitches({ run, onChange }: { run: SavedRun; onChange: (next: Partial<SavedRun>) => void }) {
+  const t = useT(runsMessages);
   return (
     <span className="feature-switches">
       {FEATURES.map((f) => (
-        <label key={f.key} className="auto" title={f.title}>
+        <label key={f.key} className="auto" title={t(f.title)}>
           <input type="checkbox" checked={!!run[f.key]} onChange={(e) => onChange({ [f.key]: e.target.checked })} />{" "}
-          {f.label}
+          {t(f.label)}
         </label>
       ))}
     </span>

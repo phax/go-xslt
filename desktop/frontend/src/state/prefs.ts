@@ -3,6 +3,7 @@
 // Stored in localStorage; every access is guarded, since a locked-down webview
 // may refuse it, and the app has to work without.
 import { useSyncExternalStore } from "react";
+import type { Language } from "../i18n";
 
 const WRAP_KEY = "go-xslt.wrapLines";
 
@@ -143,4 +144,69 @@ export function useThemeSetting(): ThemeSetting {
 /** The theme in effect, after resolving "system". */
 export function useTheme(): Theme {
   return useSyncExternalStore(subscribeTheme, () => theme);
+}
+
+// ---- language ----
+
+const LANGUAGE_KEY = "go-xslt.language";
+
+/** The language setting: follow the operating system, or a fixed language. */
+export type LanguageSetting = "system" | Language;
+
+const SUPPORTED: Language[] = ["en", "de", "fr", "it"];
+
+function readLanguage(): LanguageSetting {
+  try {
+    const v = window.localStorage.getItem(LANGUAGE_KEY);
+    return v && (SUPPORTED as string[]).includes(v) ? (v as Language) : "system";
+  } catch {
+    return "system";
+  }
+}
+
+// The first of the system's preferred languages the app offers; English
+// when none is.
+function systemLanguage(): Language {
+  for (const tag of navigator.languages ?? [navigator.language]) {
+    const base = tag.toLowerCase().split("-")[0] as Language;
+    if (SUPPORTED.includes(base)) return base;
+  }
+  return "en";
+}
+
+let languageSetting = readLanguage();
+let language: Language = languageSetting === "system" ? systemLanguage() : languageSetting;
+const languageListeners = new Set<() => void>();
+document.documentElement.lang = language;
+
+export function setLanguageSetting(l: LanguageSetting) {
+  languageSetting = l;
+  language = l === "system" ? systemLanguage() : l;
+  document.documentElement.lang = language;
+  try {
+    window.localStorage.setItem(LANGUAGE_KEY, l);
+  } catch {
+    /* not persisted; the choice still holds for this session */
+  }
+  languageListeners.forEach((fn) => fn());
+}
+
+function subscribeLanguage(cb: () => void) {
+  languageListeners.add(cb);
+  return () => languageListeners.delete(cb);
+}
+
+/** The language setting: "system" (default) or a language. */
+export function useLanguageSetting(): LanguageSetting {
+  return useSyncExternalStore(subscribeLanguage, () => languageSetting);
+}
+
+/** The language in effect, after resolving "system". */
+export function useLanguage(): Language {
+  return useSyncExternalStore(subscribeLanguage, () => language);
+}
+
+/** The language in effect, for code outside React. */
+export function currentLanguage(): Language {
+  return language;
 }

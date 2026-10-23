@@ -78,10 +78,15 @@ Each run may read the files of its own project folder. Network access is off.
 
 ## Settings
 
-The settings button at the right end of the toolbar opens two settings:
+The settings button at the right end of the toolbar opens three settings:
 
 - **Appearance**: *System* follows the light or dark mode of your computer,
   also when it changes while the app runs; *Light* and *Dark* fix one.
+- **Language**: English, German, French or Italian. *System* uses the first
+  of your computer's preferred languages the app offers, and English otherwise.
+  Messages from the engine itself (errors with W3C codes) stay in English;
+  failed XSD assertions show their `msg:message` in the chosen language when
+  the schema has one.
 - **Check for updates**: on by default, see below.
 
 ## Update check

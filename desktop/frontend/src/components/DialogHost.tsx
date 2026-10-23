@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useT } from "../i18n";
+import { shellMessages } from "../i18n/messages/shell";
 import { useAppState } from "../state/store";
 import type { DialogState } from "../state/types";
 import { Modal } from "./Modal";
@@ -29,6 +31,7 @@ export function DialogHost() {
 }
 
 function PromptBody({ dialog }: { dialog: PromptDialogState }) {
+  const t = useT(shellMessages);
   const [value, setValue] = useState(dialog.initialValue ?? "");
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -70,9 +73,9 @@ function PromptBody({ dialog }: { dialog: PromptDialogState }) {
         <div className="modal-error">{error ?? ""}</div>
       </div>
       <div className="modal-actions">
-        <button onClick={() => dialog.onCancel?.()}>Cancel</button>
+        <button onClick={() => dialog.onCancel?.()}>{t("cancel")}</button>
         <button className="primary" onClick={submit} disabled={value.trim() === ""}>
-          {dialog.confirmLabel ?? "OK"}
+          {dialog.confirmLabel ?? t("ok")}
         </button>
       </div>
     </>
@@ -80,14 +83,15 @@ function PromptBody({ dialog }: { dialog: PromptDialogState }) {
 }
 
 function ConfirmBody({ dialog }: { dialog: ConfirmDialogState }) {
+  const t = useT(shellMessages);
   return (
     <>
       <div className="modal-title">{dialog.title}</div>
       <div className="modal-message">{dialog.message}</div>
       <div className="modal-actions">
-        <button onClick={() => dialog.onCancel?.()}>Cancel</button>
+        <button onClick={() => dialog.onCancel?.()}>{t("cancel")}</button>
         <button className={dialog.danger ? "danger" : "primary"} autoFocus onClick={dialog.onConfirm}>
-          {dialog.confirmLabel ?? "OK"}
+          {dialog.confirmLabel ?? t("ok")}
         </button>
       </div>
     </>

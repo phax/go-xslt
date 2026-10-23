@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { createProject, listProjects, openProject } from "../lib/api";
+import { useT } from "../i18n";
+import { shellMessages } from "../i18n/messages/shell";
 import { useAppDispatch, useAppState } from "../state/store";
 import { ContextMenuHost } from "./ContextMenuHost";
 import { DialogHost } from "./DialogHost";
@@ -47,6 +49,7 @@ function useBootstrap() {
 export function AppShell() {
   useBootstrap();
   const state = useAppState();
+  const t = useT(shellMessages);
 
   const activeProject = state.activeProjectId ? state.projects[state.activeProjectId] : null;
   const activeTab = state.activeTabId ? state.tabs[state.activeTabId] : null;
@@ -78,17 +81,17 @@ export function AppShell() {
               <div className="main-content">
                 {!activeProject && (
                   <div className="empty-state">
-                    <div className="empty-state-title">No project open</div>
-                    <div>Create or open one from the sidebar.</div>
+                    <div className="empty-state-title">{t("noProjectTitle")}</div>
+                    <div>{t("noProjectHint")}</div>
                   </div>
                 )}
                 {activeProject && !activeTab && (
                   <div className="empty-state">
-                    <div className="empty-state-title">Nothing open</div>
-                    <div>Pick a file or a saved run from the sidebar.</div>
+                    <div className="empty-state-title">{t("nothingOpenTitle")}</div>
+                    <div>{t("nothingOpenHint")}</div>
                   </div>
                 )}
-                <Suspense fallback={<div className="empty-state"><div>Loading…</div></div>}>
+                <Suspense fallback={<div className="empty-state"><div>{t("loading")}</div></div>}>
                 {activeProject && activeTab?.kind === "file" && <FileEditorView key={activeTab.id} tab={activeTab} />}
                 {activeProject && activeTab?.kind === "run" && activeRun?.kind === "transform" && (
                   <TransformRunView key={activeTab.id} tab={activeTab} run={activeRun} />
@@ -102,8 +105,8 @@ export function AppShell() {
                 </Suspense>
                 {activeProject && activeTab?.kind === "run" && !activeRun && (
                   <div className="empty-state">
-                    <div className="empty-state-title">Run not found</div>
-                    <div>It may have just been deleted.</div>
+                    <div className="empty-state-title">{t("runNotFoundTitle")}</div>
+                    <div>{t("runNotFoundHint")}</div>
                   </div>
                 )}
               </div>

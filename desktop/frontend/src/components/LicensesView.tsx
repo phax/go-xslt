@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Browser } from "@wailsio/runtime";
 import { listLicenses, type License } from "../lib/api";
 import { Modal } from "./Modal";
+import { useT } from "../i18n";
+import { viewsMessages } from "../i18n/messages/views";
 
 /** Toolbar entry point + the modal it opens: this project's own license and
  * every bundled third-party dependency's, fetched from the Go side (see
@@ -9,26 +11,28 @@ import { Modal } from "./Modal";
  * binary actually embeds. */
 export function LicensesButton() {
   const [open, setOpen] = useState(false);
+  const t = useT(viewsMessages);
   return (
     <>
       <button className="licenses-button" onClick={() => setOpen(true)}>
-        Licenses
+        {t("licenses")}
       </button>
       {open && <LicensesModal onDismiss={() => setOpen(false)} />}
     </>
   );
 }
 
-const KIND_LABEL: Record<string, string> = {
-  project: "This app",
-  go: "Go dependency",
-  npm: "Frontend dependency",
-  font: "Bundled font",
+const KIND_LABEL: Record<string, "kindProject" | "kindGo" | "kindNpm" | "kindFont"> = {
+  project: "kindProject",
+  go: "kindGo",
+  npm: "kindNpm",
+  font: "kindFont",
 };
 
 function LicensesModal({ onDismiss }: { onDismiss: () => void }) {
   const [entries, setEntries] = useState<License[] | null>(null);
   const [selected, setSelected] = useState(0);
+  const t = useT(viewsMessages);
 
   useEffect(() => {
     void (async () => {
@@ -42,12 +46,12 @@ function LicensesModal({ onDismiss }: { onDismiss: () => void }) {
   return (
     <Modal onDismiss={onDismiss} className="licenses-modal">
       <div className="licenses-modal-header">
-        <span className="modal-title">Licenses</span>
-        <button className="licenses-close" onClick={onDismiss} aria-label="Close">
+        <span className="modal-title">{t("licenses")}</span>
+        <button className="licenses-close" onClick={onDismiss} aria-label={t("close")}>
           ✕
         </button>
       </div>
-      {!entries && <div className="licenses-loading">Loading…</div>}
+      {!entries && <div className="licenses-loading">{t("loading")}</div>}
       {entries && (
         <div className="licenses-body">
           <div className="licenses-list">
@@ -59,7 +63,7 @@ function LicensesModal({ onDismiss }: { onDismiss: () => void }) {
               >
                 <span className="licenses-list-name">{e.Name}</span>
                 <span className="licenses-list-meta">
-                  {KIND_LABEL[e.Kind] ?? e.Kind} · {e.License}
+                  {KIND_LABEL[e.Kind] ? t(KIND_LABEL[e.Kind]) : e.Kind} · {e.License}
                   {e.Version ? ` · ${e.Version}` : ""}
                 </span>
               </button>
