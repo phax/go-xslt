@@ -122,6 +122,9 @@ func lookupFunction(ctx *Context, ns, local string, arity int) (*Function, bool)
 			return nil, false
 		}
 		captured := ctx
+		if ctx != nil {
+			ctx.captured = true
+		}
 		return sigApply(&Function{Arity: arity, NS: ns, Name: local, Call: func(args []Object) (Object, error) {
 			if !registryHas(ns, local) {
 				return nil, fmt.Errorf("err:FOXX0001: function %s#%d is not implemented", local, arity)
@@ -138,6 +141,7 @@ func lookupFunction(ctx *Context, ns, local string, arity int) (*Function, bool)
 			if hc, ok := ctx.Funcs.(HostFuncCatalog); ok {
 				if lo, hi, known := hc.HostFuncArity(ns, local); known && arity >= lo && arity <= hi {
 					captured, hostLocal := ctx, local
+					ctx.captured = true
 					return &Function{Arity: arity, NS: ns, Name: local, Call: func(args []Object) (Object, error) {
 						v, ok, err := captured.Funcs.ResolveFunc("", hostLocal, args, captured)
 						if err != nil {
@@ -154,6 +158,9 @@ func lookupFunction(ctx *Context, ns, local string, arity int) (*Function, bool)
 		return nil, false
 	}
 	captured := ctx
+	if ctx != nil {
+		ctx.captured = true
+	}
 	return sigApply(&Function{Arity: arity, NS: ns, Name: local, Call: func(args []Object) (Object, error) {
 		return dispatchFunc(token, local, args, captured)
 	}}), true

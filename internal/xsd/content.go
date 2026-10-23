@@ -295,6 +295,19 @@ func (s *Schema) contentMatches(p *particle, kids []*xmltree.Node) (matched, ok 
 	if len(kids) > 600 {
 		return s.countMatch(p, kids)
 	}
+	// A name-deterministic model goes to the linear counting matcher first.
+	// Only its POSITIVE verdict is taken — that is a witness parse, so the
+	// exact NFA below would agree — while a negative one still runs the NFA
+	// exactly as before (its verdict, budget behavior and the explainer that
+	// follows a mismatch are untouched). The NFA allocates several maps per
+	// particle per element; for the common valid, deterministic case this
+	// skips all of it.
+	if s.particleDeterministic(p) {
+		r := &bigRun{s: s, kids: kids}
+		if pos, ok := r.particle(p, 0); ok && pos == len(kids) {
+			return true, true
+		}
+	}
 	m := &matcher{s: s, ch: kids, memo: map[mkey]map[int]bool{}, active: map[mkey]bool{}, budget: 120_000, noOpenAt: -1}
 	res := m.particle(p, 0)[len(kids)]
 	if abMatch && !m.exhausted {

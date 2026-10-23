@@ -179,6 +179,10 @@ type particle struct {
 	min, max int
 	term     term
 	docs     *[]Documentation // an xs:element particle's own annotation (CompileWithDocs only)
+	// det memoizes bigDeterministic(p): 0 not yet computed, 1 deterministic,
+	// 2 not. Accessed atomically — a compiled particle is shared by every
+	// concurrent validation of its schema.
+	det int32
 }
 
 const unbounded = -1
@@ -321,6 +325,11 @@ type Schema struct {
 	// typeCache memoises the type governing each element of the instance being
 	// validated (see declaredTypeOf); per-call, like ids.
 	typeCache map[*xmltree.Node]Type
+	// childModels memoises the static part of validateChildren per complex
+	// type (effective particle, open content, declared names, fixed values,
+	// wildcards by processContents) — per-call, like ids; nil means "do not
+	// cache" (the information is then computed per element, as before).
+	childModels map[*ComplexType]*childModel
 	// unparsed holds the instance DTD's unparsed (NDATA) entity names — the
 	// xs:ENTITY value space (1.1 enforcement; per-call, like ids).
 	// anon is the registry of synthetic identities for ANONYMOUS types (see

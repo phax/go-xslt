@@ -65,6 +65,7 @@ func (s *Schema) ValidateOptsCtx(ctx context.Context, instance, lang string, max
 	// Validate against a shallow copy so the ID/IDREF binding of this instance
 	// stays private to this call (the component maps are read-only here).
 	local := *s
+	local.childModels = map[*ComplexType]*childModel{}
 	local.ids = &idTable{bound: map[string]idBinding{}}
 	local.typeCache = map[*xmltree.Node]Type{}
 	local.unparsed = xmltree.UnparsedEntities(xmltree.DecodeBOM(instance))
@@ -1047,9 +1048,52 @@ func (s *Schema) baseChainContextType(ct *ComplexType, nn xname) Type {
 	return nil
 }
 
+// childModel is the static, per-complex-type part of validateChildren: what
+// it used to recompute (five maps and three walks of the particle tree) for
+// every element of the instance.
+type childModel struct {
+	p                       *particle
+	oc                      *openContent
+	decls                   map[xname]*ElementDecl
+	fixedsByName            map[xname][]string
+	skipWc, laxWc, strictWc []*wildcard
+}
+
+// childModelOf returns ct's childModel, from the per-call cache when there is
+// one.
+func (s *Schema) childModelOf(ct *ComplexType) *childModel {
+	if cm, ok := s.childModels[ct]; ok {
+		return cm
+	}
+	cm := &childModel{p: s.effectiveParticle(ct), oc: s.effectiveOpenContent(ct)}
+	cm.decls = map[xname]*ElementDecl{}
+	s.contentDecls(cm.p, cm.decls)
+	cm.fixedsByName = map[xname][]string{}
+	collectFixedsByName(cm.p, cm.fixedsByName, map[*modelGroup]bool{})
+	collectWildcards(cm.p, "skip", &cm.skipWc)
+	collectWildcards(cm.p, "lax", &cm.laxWc)
+	collectWildcards(cm.p, "strict", &cm.strictWc)
+	if oc := cm.oc; oc != nil && oc.wc != nil {
+		// Children admitted by the open-content wildcard are assessed per its
+		// processContents, exactly like model wildcards.
+		switch oc.wc.process {
+		case "skip":
+			cm.skipWc = append(cm.skipWc, oc.wc)
+		case "lax":
+			cm.laxWc = append(cm.laxWc, oc.wc)
+		default:
+			cm.strictWc = append(cm.strictWc, oc.wc)
+		}
+	}
+	if s.childModels != nil {
+		s.childModels[ct] = cm
+	}
+	return cm
+}
+
 func (s *Schema) validateChildren(ct *ComplexType, el *xmltree.Node, kids []*xmltree.Node, scopes map[xname]*keyTable) error {
-	p := s.effectiveParticle(ct)
-	oc := s.effectiveOpenContent(ct)
+	cm := s.childModelOf(ct)
+	p, oc := cm.p, cm.oc
 	matched, ok := s.contentMatchesOpen(p, kids, oc)
 	if !ok {
 		return ErrUnsupported // pathological content model — no verdict
@@ -1079,28 +1123,10 @@ func (s *Schema) validateChildren(ct *ComplexType, el *xmltree.Node, kids []*xml
 		}
 		return errModelMismatch
 	}
-	decls := map[xname]*ElementDecl{}
-	s.contentDecls(p, decls)
-	fixedsByName := map[xname][]string{}
-	collectFixedsByName(p, fixedsByName, map[*modelGroup]bool{})
-	var skipWc, laxWc, strictWc []*wildcard
-	collectWildcards(p, "skip", &skipWc)
-	collectWildcards(p, "lax", &laxWc)
-	collectWildcards(p, "strict", &strictWc)
-	if oc != nil && oc.wc != nil {
-		// Children admitted by the open-content wildcard are assessed per its
-		// processContents, exactly like model wildcards.
-		switch oc.wc.process {
-		case "skip":
-			skipWc = append(skipWc, oc.wc)
-		case "lax":
-			laxWc = append(laxWc, oc.wc)
-		default:
-			strictWc = append(strictWc, oc.wc)
-		}
-	}
-	elemUsed := map[xname]int{}
-	pinned := kids // lazily copied; wildcard-attributed children get probed out
+	decls, fixedsByName := cm.decls, cm.fixedsByName
+	skipWc, laxWc, strictWc := cm.skipWc, cm.laxWc, cm.strictWc
+	var elemUsed map[xname]int // allocated on first use (1.1 EDC only)
+	pinned := kids             // lazily copied; wildcard-attributed children get probed out
 	for i, kid := range kids {
 		nn := nameOf(kid)
 		if d, ok := decls[nn]; ok {
@@ -1129,7 +1155,12 @@ func (s *Schema) validateChildren(ct *ComplexType, el *xmltree.Node, kids []*xml
 					continue
 				}
 			}
-			elemUsed[nn]++
+			if s.version == Version11 {
+				if elemUsed == nil {
+					elemUsed = map[xname]int{}
+				}
+				elemUsed[nn]++
+			}
 			snap := s.collected()
 			err := s.validateElementAgainst(d, kid, scopes, fixedsByName[nn]...)
 			if err != nil || s.collected() > snap {

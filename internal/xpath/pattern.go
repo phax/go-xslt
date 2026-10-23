@@ -18,6 +18,37 @@ type Pattern struct {
 // Src returns the original pattern text.
 func (p *Pattern) Src() string { return p.src }
 
+// MayMatchNamespaceNode reports whether the pattern could match a namespace
+// node at all. A path pattern whose last step is on the child, attribute or
+// descendant axis with no namespace-node() test never selects one (a
+// namespace node is nobody's child, attribute or descendant), and "/" matches
+// the document node only. Anything else — the namespace or self family of
+// axes, a postfix step, a rooted expression, an expression pattern (.[p],
+// $var, id(), …) — is judged conservatively as "may".
+func (p *Pattern) MayMatchNamespaceNode() bool {
+	if len(p.exprAlts) > 0 {
+		return true
+	}
+	for _, alt := range p.alts {
+		if alt.Start != nil {
+			return true
+		}
+		if len(alt.Steps) == 0 {
+			continue
+		}
+		last := alt.Steps[len(alt.Steps)-1]
+		if last.Postfix != nil || last.Test.Kind == testNamespace {
+			return true
+		}
+		switch last.Axis {
+		case "child", "attribute", "descendant":
+		default:
+			return true
+		}
+	}
+	return false
+}
+
 // ParsePattern compiles an XSLT match pattern.
 func ParsePattern(src string) (*Pattern, error) { return parsePatternWithSchema(src, nil) }
 

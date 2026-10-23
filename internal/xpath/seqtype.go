@@ -1291,6 +1291,9 @@ func parseSeqTypeStringWithSchema(s string, sn SchemaNameLookup) (*SeqType, erro
 // function. A conversion that cannot be made is XPTY0004 — raised at call time,
 // on actual values, not when the function item is merely bound.
 func coerceFunctionItem(fn *Function, want ItemType, ctx *Context) *Function {
+	if ctx != nil {
+		ctx.captured = true // the conversions below run later, against ctx
+	}
 	return &Function{
 		Arity: fn.Arity, Name: fn.Name, NS: fn.NS,
 		Typed: true, Params: want.FuncParams, Ret: want.FuncReturn,

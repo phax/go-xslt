@@ -79,11 +79,17 @@ type Context struct {
 	// calls counts the inline-function invocations in progress along this
 	// evaluation, shared by every context derived from it (see
 	// evalInlineFunc); nil until the first inline function is created.
-	calls   *callDepth
-	Node    *xmltree.Node // context node
-	Pos     int           // context position (1-based)
-	Size    int           // context size
-	CtxItem Item          // context item (non-node atomic, for simple map / "." over atomics)
+	calls *callDepth
+	// captured is set when a function item retained a POINTER to this
+	// context (an inline function, a function-lookup result): such a
+	// context may be read again later and so must never be overwritten in
+	// place. The per-item loops (applyPredicateOrdered) reuse one scratch
+	// context across items only while it is not captured.
+	captured bool
+	Node     *xmltree.Node // context node
+	Pos      int           // context position (1-based)
+	Size     int           // context size
+	CtxItem  Item          // context item (non-node atomic, for simple map / "." over atomics)
 	// NoOutputURI suppresses fn:current-output-uri(): it marks an evaluation
 	// that is NOT writing a result document — a match/grouping PATTERN, or a
 	// function item called dynamically — where XSLT 3.0 leaves the current
@@ -945,6 +951,11 @@ func evalArray(n *ArrayExpr, ctx *Context) (Object, error) {
 }
 
 // poll asks the host's Interrupt hook whether to stop.
+// Captured reports whether a function item retained a pointer to c (see the
+// captured field): a host reusing one Context across many evaluations must
+// take a fresh one once this is set.
+func (c *Context) Captured() bool { return c.captured }
+
 func (c *Context) poll() error {
 	if c == nil || c.Interrupt == nil {
 		return nil
@@ -967,6 +978,7 @@ func evalInlineFunc(n *InlineFunc, ctx *Context) *Function {
 	rtype := n.RetType
 	body := n.Body
 	captured := ctx
+	ctx.captured = true
 	// The counter travels with the function value and into the contexts its
 	// body runs in, so a recursion through it — or through the inline
 	// functions created inside it — is counted on one counter.
@@ -1412,13 +1424,33 @@ func applyPredicate(ns NodeSet, pred Expr, ctx *Context, _ bool) (NodeSet, error
 // kept for callers that pass a document-ordered set.
 func applyPredicateOrdered(ns NodeSet, pred Expr, ctx *Context, _ bool) (NodeSet, error) {
 	size := len(ns)
+	// A numeric LITERAL predicate ("[1]", "[3]") selects one position and
+	// depends on nothing in the per-item context: pick it directly instead of
+	// building a context for and evaluating the literal against every item
+	// (key('k', .)[1] over a large key group paid that for the whole group).
+	if lit, ok := pred.(*LiteralExpr); ok {
+		if num, ok := asPositionalInt(lit.Val); ok {
+			if num >= 1 && num <= size {
+				return NodeSet{ns[num-1]}, nil
+			}
+			return nil, nil
+		}
+	}
 	var out NodeSet
+	// One scratch context serves every item: it is overwritten wholesale per
+	// item, and replaced by a fresh one only when an evaluation CAPTURED it
+	// (Context.captured — a function item holding the pointer could otherwise
+	// observe a later item's focus).
+	sub := new(Context)
 	for i, node := range ns {
 		if err := ctx.poll(); err != nil {
 			return nil, err
 		}
 		pos := i + 1
-		sub := &Context{SchemaTypes: ctx.SchemaTypes, Node: node, Pos: pos, Size: size, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, Interrupt: ctx.Interrupt, locals: ctx.locals, BC10: ctx.BC10}
+		if sub.captured {
+			sub = new(Context)
+		}
+		*sub = Context{SchemaTypes: ctx.SchemaTypes, Node: node, Pos: pos, Size: size, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, Interrupt: ctx.Interrupt, locals: ctx.locals, BC10: ctx.BC10}
 		v, err := evalExpr(pred, sub)
 		if err != nil {
 			return nil, err
@@ -1756,6 +1788,7 @@ func evalArrow(n *ArrowExpr, ctx *Context) (Object, error) {
 		// first bound argument is the arrow operand: "$" => concat(?) is
 		// concat("$", ?) (ArrowPostfix-108).
 		template, holeAt := args, isHole
+		ctx.captured = true // call may keep ctx (its focus)
 		cur = &Function{Arity: holes, Call: func(supplied []Object) (Object, error) {
 			filled := make([]Object, len(template))
 			si := 0

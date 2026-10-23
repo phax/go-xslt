@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1482,7 +1483,7 @@ type engine struct {
 	// mode / template-rule chaining / tunnel params:
 	curMode    string
 	tunnel     map[string]xpath.Object // active tunnel parameters
-	applyStack []*applyFrame           // for next-match / apply-imports
+	applyStack []applyFrame            // for next-match / apply-imports (values: one frame per template invocation, no per-call allocation)
 	depth      int                     // template/rule invocation depth (stack-overflow guard)
 	budget     *budget                 // the run's limits and steps spent (runtime budget guard)
 	// funcDepth > 0 while evaluating a called xsl:function's body: current-
@@ -1836,14 +1837,20 @@ func (eng *engine) evalGlobal(key string, vd *VarDef) (xpath.Object, error) {
 
 // --- variable scope ---------------------------------------------------------
 
-func (eng *engine) pushScope() { eng.scopes = append(eng.scopes, map[string]xpath.Object{}) }
+// pushScope opens a frame; its map is allocated by the first bindVar into it
+// (most template invocations bind nothing, and paid a map each).
+func (eng *engine) pushScope() { eng.scopes = append(eng.scopes, nil) }
 func (eng *engine) popScope()  { eng.scopes = eng.scopes[:len(eng.scopes)-1] }
 
 func (eng *engine) bindVar(name xmltree.Name, v xpath.Object) {
 	if len(eng.scopes) == 0 {
 		eng.pushScope()
 	}
-	eng.scopes[len(eng.scopes)-1][clark(name.Space, name.Local)] = v
+	top := len(eng.scopes) - 1
+	if eng.scopes[top] == nil {
+		eng.scopes[top] = map[string]xpath.Object{}
+	}
+	eng.scopes[top][clark(name.Space, name.Local)] = v
 }
 
 func (eng *engine) lookupVar(key string) (xpath.Object, bool) {
@@ -3163,7 +3170,7 @@ func (eng *engine) applyToNodes(nodes xpath.NodeSet, mode string, out *xmltree.N
 func (eng *engine) invokeRule(cands []*Template, idx int, node *xmltree.Node, mode string, r rt, out *xmltree.Node, callerParams []*VarDef, tunnelIn map[string]xpath.Object, callerR rt) error {
 	prevMode := eng.curMode
 	eng.curMode = mode
-	eng.applyStack = append(eng.applyStack, &applyFrame{node: node, mode: mode, cands: cands, idx: idx})
+	eng.applyStack = append(eng.applyStack, applyFrame{node: node, mode: mode, cands: cands, idx: idx})
 	defer func() {
 		eng.applyStack = eng.applyStack[:len(eng.applyStack)-1]
 		eng.curMode = prevMode
@@ -4898,13 +4905,26 @@ func (eng *engine) keyIndexOn(name string, root *xmltree.Node) (map[string][]*xm
 		if kd.name != name {
 			continue
 		}
-		eng.walkAll(root, func(node *xmltree.Node) {
+		// One evalEnv and one Context serve every node of the walk (the same
+		// reuse matchingTemplates does): Match keeps no reference to either
+		// unless an evaluation captured the context (then a fresh one is
+		// taken), and both were being allocated per node of the whole tree.
+		var sc matchScratch
+		env, mctx := &sc.env, &sc.ctx
+		dns, st := xpathDefaultNS(kd.el), schemaTypesFor(kd.el)
+		withNS := kd.match.MayMatchNamespaceNode()
+		eng.walkAllNS(root, func(node *xmltree.Node) {
 			if walkErr != nil {
 				return
 			}
-			env := &evalEnv{eng: eng, el: kd.el, current: node}
+			if mctx.Captured() {
+				// The context points at env, so both are replaced.
+				env, mctx = new(evalEnv), new(xpath.Context)
+			}
+			*env = evalEnv{eng: eng, el: kd.el, current: node}
+			*mctx = xpath.Context{Node: node, CtxItem: realItemOf(node), Pos: 1, Size: 1, Vars: env, NS: env, Funcs: env, Resolver: eng.resolver, NoOutputURI: true, DefaultElemNS: dns, Now: eng.now, SchemaTypes: st}
 			eng.patternDepth++
-			ok, err := kd.match.Match(node, &xpath.Context{Node: node, CtxItem: realItemOf(node), Pos: 1, Size: 1, Vars: env, NS: env, Funcs: env, Resolver: eng.resolver, NoOutputURI: true, DefaultElemNS: xpathDefaultNS(env.el), Now: eng.now, SchemaTypes: schemaTypesFor(env.el)})
+			ok, err := kd.match.Match(node, mctx)
 			eng.patternDepth--
 			if err != nil {
 				// A circular key definition surfaces here (XTDE0640).
@@ -4959,7 +4979,7 @@ func (eng *engine) keyIndexOn(name string, root *xmltree.Node) (map[string][]*xm
 					idx[k] = append(idx[k], node)
 				}
 			}
-		})
+		}, withNS)
 	}
 	eng.keyIndex[ck] = idx
 	if walkErr == nil && eng.pendingErr != nil {
@@ -4976,17 +4996,25 @@ func (eng *engine) keyIndexOn(name string, root *xmltree.Node) (map[string][]*xm
 // attribute nodes, its NAMESPACE nodes (XSLT 3.0 lets an xsl:key match pattern
 // select namespace nodes — key-087/090), then its children.
 func (eng *engine) walkAll(n *xmltree.Node, fn func(*xmltree.Node)) {
+	eng.walkAllNS(n, fn, true)
+}
+
+// walkAllNS is walkAll with the namespace nodes optional: a caller whose
+// pattern cannot match a namespace node (Pattern.MayMatchNamespaceNode) skips
+// building the in-scope namespace node of every element — one fresh node per
+// element per walk, for nothing.
+func (eng *engine) walkAllNS(n *xmltree.Node, fn func(*xmltree.Node), withNS bool) {
 	fn(n)
 	for _, a := range n.Attrs {
 		fn(a)
 	}
-	if n.Kind == xmltree.KindElement {
+	if withNS && n.Kind == xmltree.KindElement {
 		for _, ns := range xpath.InScopeNamespaceNodes(n) {
 			fn(ns)
 		}
 	}
 	for _, c := range n.Children {
-		eng.walkAll(c, fn)
+		eng.walkAllNS(c, fn, withNS)
 	}
 }
 
@@ -5341,6 +5369,7 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 		node *xmltree.Node
 		keys []string
 		vals []xpath.Object
+		nums []float64 // keys[ki] as a number, for the data-type="number" columns
 	}
 	dataTypes := make([]string, len(sorts))
 	orders := make([]string, len(sorts))
@@ -5463,29 +5492,74 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 			dataTypes[si] = sortValueDataType
 		}
 	}
-	sort.SliceStable(items, func(a, b int) bool {
+	// A numeric column is converted ONCE per item here; compareKey used to
+	// re-parse both strings on every comparison (n log n conversions).
+	anyNumber := false
+	for ki := range sorts {
+		if dataTypes[ki] == "number" {
+			anyNumber = true
+		}
+	}
+	if anyNumber {
+		for i := range items {
+			items[i].nums = make([]float64, len(sorts))
+			for ki := range sorts {
+				if dataTypes[ki] == "number" {
+					items[i].nums[ki] = xpath.ToNumber(items[i].keys[ki])
+				}
+			}
+		}
+	}
+	slices.SortStableFunc(items, func(a, b keyed) int {
 		for ki := range sorts {
 			var cmp int
-			if dataTypes[ki] == sortValueDataType {
-				cmp = compareAtomicKey(items[a].vals[ki], items[b].vals[ki])
-			} else {
-				cmp = compareKey(items[a].keys[ki], items[b].keys[ki], dataTypes[ki], caseOrders[ki], colls[ki])
+			switch dataTypes[ki] {
+			case sortValueDataType:
+				cmp = compareAtomicKey(a.vals[ki], b.vals[ki])
+			case "number":
+				cmp = compareNumberKey(a.nums[ki], b.nums[ki])
+			default:
+				cmp = compareKey(a.keys[ki], b.keys[ki], dataTypes[ki], caseOrders[ki], colls[ki])
 			}
 			if cmp == 0 {
 				continue
 			}
 			if orders[ki] == "descending" {
-				return cmp > 0
+				return -cmp
 			}
-			return cmp < 0
+			return cmp
 		}
-		return false
+		return 0
 	})
 	out := make([]*xmltree.Node, len(items))
 	for i, it := range items {
 		out[i] = it.node
 	}
 	return out, nil
+}
+
+// compareNumberKey orders two data-type="number" sort keys.
+func compareNumberKey(na, nb float64) int {
+	aNaN, bNaN := math.IsNaN(na), math.IsNaN(nb)
+	switch {
+	case aNaN && bNaN:
+		return 0
+	case aNaN:
+		// A sort key that doesn't convert to a number sorts before every
+		// numeric key, in both ascending and descending order (sort-001/
+		// 050): Go's NaN comparisons are all false, so without this the
+		// key compared "equal" to everything and the stable sort just
+		// left it in its original position instead of moving it.
+		return -1
+	case bNaN:
+		return 1
+	case na < nb:
+		return -1
+	case na > nb:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // compareKey compares two sort keys per @data-type, and for text keys, per an
@@ -5495,27 +5569,7 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 // case-insensitive alphabetic order).
 func compareKey(a, b, dataType, caseOrder string, coll func(a, b string) int) int {
 	if dataType == "number" {
-		na, nb := xpath.ToNumber(a), xpath.ToNumber(b)
-		aNaN, bNaN := math.IsNaN(na), math.IsNaN(nb)
-		switch {
-		case aNaN && bNaN:
-			return 0
-		case aNaN:
-			// A sort key that doesn't convert to a number sorts before every
-			// numeric key, in both ascending and descending order (sort-001/
-			// 050): Go's NaN comparisons are all false, so without this the
-			// key compared "equal" to everything and sort.SliceStable just
-			// left it in its original position instead of moving it.
-			return -1
-		case bNaN:
-			return 1
-		case na < nb:
-			return -1
-		case na > nb:
-			return 1
-		default:
-			return 0
-		}
+		return compareNumberKey(xpath.ToNumber(a), xpath.ToNumber(b))
 	}
 	if caseOrder == "upper-first" || caseOrder == "lower-first" {
 		// Case-insensitive alphabetic order is primary; case-order only

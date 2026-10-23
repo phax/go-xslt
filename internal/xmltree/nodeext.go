@@ -354,7 +354,12 @@ func (n *Node) NSBarrier() bool {
 	}
 	return n.extPtr.NSBarrier
 }
-func (n *Node) SetNSBarrier(v bool) { n.ext().NSBarrier = v }
+func (n *Node) SetNSBarrier(v bool) {
+	if !v && n.extPtr == nil {
+		return // the zero value needs no ext (every copied element passed here)
+	}
+	n.ext().NSBarrier = v
+}
 
 func (n *Node) IDKind() uint8 {
 	if n.extPtr == nil {

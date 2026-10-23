@@ -468,6 +468,9 @@ func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Templat
 		sc = new(matchScratch)
 	}
 	defer func() {
+		if sc.ctx.Captured() {
+			return // a function item kept the pair: never reuse it
+		}
 		*sc = matchScratch{} // drop node/stylesheet references while pooled
 		eng.matchPool = append(eng.matchPool, sc)
 	}()
@@ -486,6 +489,9 @@ func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Templat
 			continue
 		}
 		cands = append(cands, t)
+	}
+	if len(cands) < 2 {
+		return cands // nothing to order (and no sort closure to allocate)
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		a, b := cands[i], cands[j]

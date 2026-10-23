@@ -334,6 +334,38 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 		doc.SetUnparsed(u)
 	}
 	stack := []*Node{doc}
+	// Nodes are carved from slabs rather than allocated one by one: a parsed
+	// tree lives and dies as a whole, so individual collectability buys
+	// nothing, while one allocation per node was ~a third of the parser's
+	// malloc count. 186 nodes fill a 32 KB allocator size class exactly.
+	var slab []Node
+	newNode := func() *Node {
+		if len(slab) == 0 {
+			slab = make([]Node, 186)
+		}
+		n := &slab[0]
+		slab = slab[1:]
+		return n
+	}
+	// Children are collected on one shared stack (childBuf; marks[i] is where
+	// stack[i]'s children start) and copied into an exact-size slice when the
+	// element closes — one allocation per element instead of the 1-2-4-8
+	// regrowth of append, and no slack capacity retained.
+	var childBuf []*Node
+	marks := []int{0}
+	addChild := func(parent, child *Node) {
+		child.Parent = parent
+		childBuf = append(childBuf, child)
+	}
+	closeChildren := func(parent *Node) {
+		m := marks[len(marks)-1]
+		marks = marks[:len(marks)-1]
+		if n := len(childBuf) - m; n > 0 {
+			parent.Children = make([]*Node, n)
+			copy(parent.Children, childBuf[m:])
+			childBuf = childBuf[:m]
+		}
+	}
 	// namespace scope stack: each frame maps prefix -> uri (default prefix "").
 	nsStack := []map[string]string{{
 		"xml": "http://www.w3.org/XML/1998/namespace",
@@ -419,7 +451,9 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				return
 			}
 		}
-		top.Append(&Node{Kind: KindText, Value: s, Line: int32(pendingLine), Col: int32(pendingCol)})
+		tn := newNode()
+		*tn = Node{Kind: KindText, Value: s, Line: int32(pendingLine), Col: int32(pendingCol)}
+		addChild(top, tn)
 	}
 
 	for {
@@ -494,7 +528,8 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				frame[local] = a.Value
 				decls = append(decls, &Node{Kind: KindNamespace, Name: Name{Local: local}, Value: a.Value})
 			}
-			el := &Node{
+			el := newNode()
+			*el = Node{
 				Kind: KindElement,
 				Name: resolveRawName(frame, t.Name, false),
 				Line: int32(line), Col: int32(col),
@@ -503,11 +538,19 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 			for _, d := range decls {
 				d.Parent = el
 			}
+			if n := len(t.Attr) - len(decls); n > 0 {
+				el.Attrs = make([]*Node, 0, n)
+			}
 			for _, a := range t.Attr {
 				if a.Name.Space == "xmlns" || (a.Name.Space == "" && a.Name.Local == "xmlns") {
 					continue
 				}
-				an := &Node{
+				// Attribute names repeat across the document exactly like
+				// element names do; intern them the same way.
+				a.Name.Local = intern(nameIntern, a.Name.Local)
+				a.Name.Space = intern(nameIntern, a.Name.Space)
+				an := newNode()
+				*an = Node{
 					Kind:  KindAttribute,
 					Name:  resolveRawName(frame, a.Name, true),
 					Value: a.Value,
@@ -550,8 +593,9 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 					})
 				}
 			}
-			top.Append(el)
+			addChild(top, el)
 			stack = append(stack, el)
+			marks = append(marks, len(childBuf))
 			nsStack = append(nsStack, frame)
 			if len(stack) > MaxDepth+1 { // stack[0] is the document node
 				return nil, errTooDeep
@@ -583,6 +627,7 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				return nil, &ParseError{Line: line, Col: col, Msg: "element <" + rawQName(open) + "> closed by </" + rawQName(t.Name) + ">"}
 			}
 			rawNames = rawNames[:len(rawNames)-1]
+			closeChildren(top)
 			stack = stack[:len(stack)-1]
 			nsStack = nsStack[:len(nsStack)-1]
 			preserveSpace = preserveSpace[:len(preserveSpace)-1]
@@ -600,14 +645,14 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 
 		case xml.Comment:
 			flushPending()
-			top.Append(&Node{Kind: KindComment, Value: string(t), Line: int32(line), Col: int32(col)})
+			addChild(top, &Node{Kind: KindComment, Value: string(t), Line: int32(line), Col: int32(col)})
 
 		case xml.ProcInst:
 			flushPending()
 			if t.Target == "xml" {
 				continue // XML declaration, not a PI node
 			}
-			top.Append(&Node{Kind: KindPI, Name: Name{Local: t.Target}, Value: string(t.Inst), Line: int32(line), Col: int32(col)})
+			addChild(top, &Node{Kind: KindPI, Name: Name{Local: t.Target}, Value: string(t.Inst), Line: int32(line), Col: int32(col)})
 		}
 	}
 	flushPending()
@@ -615,6 +660,7 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	if len(stack) != 1 {
 		return nil, &ParseError{Msg: "unexpected end of document: unclosed elements"}
 	}
+	closeChildren(doc)
 	assignOrder(doc)
 	if len(entSpans) > 0 {
 		// Only an external-parsed-entity document needs the reverse (line,col)

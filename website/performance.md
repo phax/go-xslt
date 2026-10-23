@@ -11,18 +11,18 @@ Apple M4, macOS, libxml2 2.9.13 / libxslt 1.1.35; input 200,000 records,
 
 | Workload | go-xslt | libxslt / libxml2 | ratio | peak memory go-xslt | peak memory libxml2 |
 |---|---|---|---|---|---|
-| copy the whole document | 1.30 s | 0.68 s | 1.9× | 1,436 MB | 1,067 MB |
-| recursive apply-templates, rebuilding every node | 2.71 s | 1.25 s | 2.2× | 1,765 MB | 1,074 MB |
-| sort all records by two keys | 1.73 s | 18.92 s | 0.09× | 1,104 MB | 587 MB |
-| Muenchian grouping with `xsl:key` | 2.55 s | 0.84 s | 3.0× | 1,213 MB | 538 MB |
-| predicates, string and number functions | 1.21 s | 0.82 s | 1.5× | 960 MB | 590 MB |
-| XSD 1.0 validation | 2.24 s | 0.50 s | 4.5× | 1,222 MB | 539 MB |
+| copy the whole document | 1.16 s | 0.68 s | 1.7× | 1,250 MB | 1,067 MB |
+| recursive apply-templates, rebuilding every node | 2.42 s | 1.27 s | 1.9× | 1,709 MB | 1,074 MB |
+| sort all records by two keys | 1.53 s | 18.99 s | 0.08× | 970 MB | 587 MB |
+| Muenchian grouping with `xsl:key` | 1.41 s | 0.90 s | 1.6× | 926 MB | 538 MB |
+| predicates, string and number functions | 1.15 s | 0.85 s | 1.4× | 864 MB | 590 MB |
+| XSD 1.0 validation | 1.47 s | 0.51 s | 2.9× | 912 MB | 539 MB |
 
 ## Reading the numbers
 
-- On most workloads go-xslt takes 1.5 to 4.5 times as long as the C
+- On most workloads go-xslt takes 1.4 to 2.9 times as long as the C
   libraries and needs more memory for the document tree. Sorting is the
-  exception: libxslt's sort is about ten times slower here.
+  exception: libxslt's sort is more than ten times slower here.
 - The comparison is limited to what both can do. go-xslt also implements
   XSLT 3.0, XPath 3.1 and XSD 1.1, which libxslt and libxml2 do not.
 - For documents too large for memory, XSLT 3.0
@@ -40,7 +40,10 @@ of the time goes to obtaining memory for the document tree — 35% in the
 operating system's memory calls while the heap grows past 1 GB — and to the
 garbage collector scanning it, which runs on other cores and hardly adds wall
 time (switching it off saves under 10%). The lever is therefore the memory
-each node takes, not the XML tokenizer.
+a run allocates, not the XML tokenizer: allocating less (one reused
+evaluation context per predicate and key walk instead of one per node, nodes
+carved from blocks, content models matched without per-element maps) is what
+brought grouping from 2.6 to 1.4 s and validation from 2.2 to 1.5 s.
 
 ## Same results
 

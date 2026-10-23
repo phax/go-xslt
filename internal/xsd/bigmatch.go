@@ -3,6 +3,7 @@ package xsd
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 )
@@ -179,6 +180,25 @@ func (s *Schema) firstAcceptsTerm(t term, nn xname) bool {
 // bigNullableTerm reports whether one iteration of t can match ε.
 func bigNullableTerm(t term) bool {
 	return upaNullable(&particle{min: 1, max: 1, term: t})
+}
+
+// particleDeterministic is bigDeterministic memoized on the particle (its
+// answer depends only on the particle tree and the compiled schema's
+// substitution groups, both immutable after Compile).
+func (s *Schema) particleDeterministic(p *particle) bool {
+	switch atomic.LoadInt32(&p.det) {
+	case 1:
+		return true
+	case 2:
+		return false
+	}
+	d := s.bigDeterministic(p)
+	v := int32(2)
+	if d {
+		v = 1
+	}
+	atomic.StoreInt32(&p.det, v)
+	return d
 }
 
 // bigDeterministic is the static pre-scan: it accepts only models the greedy

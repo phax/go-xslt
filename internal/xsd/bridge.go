@@ -450,6 +450,7 @@ func (s *Schema) ValidateNode(n *xmltree.Node, opts NodeValidateOptions) error {
 	// episode rooted at an ELEMENT does not enforce uniqueness — see
 	// idTable.elementScope.
 	local.ids = &idTable{bound: map[string]idBinding{}, elementScope: !opts.Document}
+	local.childModels = map[*ComplexType]*childModel{}
 	local.typeCache = map[*xmltree.Node]Type{}
 	local.unassessed = map[*xmltree.Node]bool{}
 	local.assertTypes = map[*xmltree.Node]xpath.AtomType{}

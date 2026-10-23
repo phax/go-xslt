@@ -111,6 +111,49 @@ func TestCompiledStylesheetIsConcurrencySafe(t *testing.T) {
 	}
 }
 
+// TestCompiledSchemaValidationIsConcurrencySafe: the imported schema of one
+// compiled stylesheet validates from many goroutines at once (its particles
+// memoize what the content-model matcher learns). Run it with -race.
+func TestCompiledSchemaValidationIsConcurrencySafe(t *testing.T) {
+	const ss = `<xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:import-schema><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+    <xs:element name="r"><xs:complexType><xs:sequence>
+      <xs:element name="a" type="xs:integer" maxOccurs="unbounded"/>
+      <xs:choice minOccurs="0"><xs:element name="b"/><xs:element name="c"/></xs:choice>
+    </xs:sequence></xs:complexType></xs:element>
+  </xs:schema></xsl:import-schema>
+  <xsl:template match="/"><xsl:copy-of select="." validation="strict"/></xsl:template>
+</xsl:stylesheet>`
+	sheet, diags := engine.Compile(engine.Request{Stylesheet: ss, Features: engine.Features{SchemaAware: true}})
+	if sheet == nil {
+		t.Fatalf("compile: %v", diags)
+	}
+	valid, invalid := `<r><a>1</a><a>2</a><c/></r>`, `<r><a>1</a><b/><c/></r>`
+	var wg sync.WaitGroup
+	errs := make(chan string, 100)
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := 0; n < 20; n++ {
+				if r := sheet.Transform(engine.TransformRequest{Source: valid}); r.HasErrors() {
+					errs <- fmt.Sprintf("valid source rejected: %v", r.Diagnostics)
+					return
+				}
+				if r := sheet.Transform(engine.TransformRequest{Source: invalid}); !r.HasErrors() {
+					errs <- "invalid source accepted"
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
+	}
+}
+
 func TestCompileReportsErrorsWithPosition(t *testing.T) {
 	sheet, diags := engine.Compile(engine.Request{Stylesheet: "<xsl:stylesheet version=\"3.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">\n  <xsl:template match=\"/\">\n    <xsl:value-of select=\"1 +\"/>\n  </xsl:template>\n</xsl:stylesheet>"})
 	if sheet != nil || len(diags) == 0 || diags[0].Line == 0 {
