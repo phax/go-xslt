@@ -794,7 +794,7 @@ var mathFuncs = map[string]coreFunc{
 	"sqrt":  math1(math.Sqrt),
 	"sin":   math1(math.Sin),
 	"cos":   math1(math.Cos),
-	"exp":   math1(math.Exp),
+	"exp":   math1(exactExp),
 	"log":   math1(math.Log),
 	"log10": math1(math.Log10),
 	"pow": func(c *Context, a []Object) (Object, error) {

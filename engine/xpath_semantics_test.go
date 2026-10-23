@@ -30,6 +30,18 @@ func TestXPathSemantics(t *testing.T) {
 		{`1000000000000000020001 = 1000000000000000000000 to 1000000000000010000003`, `true`},
 		{`1e21 = 1000000000000000000000 to 1000000000000010000003`, `true`},
 		{`2.5 = 1 to 3`, `false`},
+		// substring() with NaN, infinite or huge bounds (F&O 3.1 §5.4.3), the
+		// same on every platform: Go's float-to-int conversion is not.
+		{`substring("12345", 1, 0 div 0E0)`, ``},
+		{`substring("12345", 0 div 0E0, 3)`, ``},
+		{`substring("12345", -1 div 0E0, 1 div 0E0)`, ``},
+		{`substring("12345", -42, 1 div 0E0)`, `12345`},
+		{`substring("12345", 1e300)`, ``},
+		{`substring("12345", 1, 1e300)`, `12345`},
+		{`substring("12345", 1.5, 2.6)`, `234`},
+		// math:exp is bit-exact everywhere (math-exp-006): amd64's math.Exp
+		// is one ulp off on CPUs without FMA.
+		{`math:exp(math:pi()) eq 23.140692632779267e0`, `true`},
 	} {
 		r := engine.EvalXPath(engine.XPathRequest{Expression: c.expr, Source: src})
 		if len(r.Diagnostics) > 0 || r.Value != c.want {

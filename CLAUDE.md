@@ -281,6 +281,15 @@ Desktop GUI (**run from `desktop/`**):
   `Limits.MaxOutputBytes` is checked in the facade (`limitWriter` for
   TransformTo). Profiling (website/performance.md): the gap to libxslt is
   memory acquisition (`runtime.madvise` ~35%) and GC, NOT parsing (~12%).
+- **Results must not depend on the platform.** The nightly job runs on
+  linux/amd64, the maintainer's Mac is darwin/arm64, and two classes of
+  difference have bitten: converting a NaN/huge float64 to int is
+  implementation-defined (0 on arm64, MinInt64 on amd64 — `fnSubstring`
+  clamps as float first), and `math.Exp` is assembly on amd64 whose result
+  depends on CPU FMA support (`exactExp` in `internal/xpath/exp.go`, a copy of
+  Go's portable code with products wrapped in `float64()` against fusing).
+  Check a numeric change with a `GOARCH=amd64` build too (runs under
+  Rosetta, which lacks FMA — the worst case).
 - `cmd/go-xslt` is the CLI (`transform|validate|xpath|version`) in the
   LIBRARY module; it may read the directories of the files on its command
   line, more only via `-allow-*` flags. Flags are uniform across commands:

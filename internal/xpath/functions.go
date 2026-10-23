@@ -848,25 +848,24 @@ func fnSubstringAfter(c *Context, a []Object) (Object, error) {
 func fnSubstring(c *Context, a []Object) (Object, error) {
 	s := []rune(ToString(arg(a, 0)))
 	start := roundHalfUp(ToNumber(arg(a, 1)))
-	var end float64 = math.Inf(1)
+	end := math.Inf(1)
 	if len(a) >= 3 {
 		end = start + roundHalfUp(ToNumber(arg(a, 2)))
 	}
-	// positions are 1-based; clamp
-	from := int(math.Max(1, start)) - 1
-	var to int
-	if math.IsInf(end, 1) {
-		to = len(s)
-	} else {
-		to = int(end) - 1
+	// F&O 3.1 §5.4.3: the characters at the 1-based positions p with
+	// start <= p < end. A NaN bound (and -INF + INF) compares false with
+	// every p, so nothing is selected. The bounds are clamped to the string
+	// while still floating-point: converting NaN or a huge value to int is
+	// platform-dependent in Go (0 on arm64, MinInt64 on amd64 — string-018
+	// passed on one and failed on the other).
+	if math.IsNaN(start) || math.IsNaN(end) {
+		return "", nil
 	}
-	if from < 0 {
-		from = 0
-	}
-	if to > len(s) {
-		to = len(s)
-	}
-	if from >= to || from >= len(s) {
+	n := float64(len(s))
+	lo := math.Min(math.Max(start, 1), n+1)
+	hi := math.Min(math.Max(end, 1), n+1)
+	from, to := int(lo)-1, int(hi)-1
+	if from >= to {
 		return "", nil
 	}
 	return string(s[from:to]), nil
