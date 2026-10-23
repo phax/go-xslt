@@ -329,9 +329,14 @@ jobs:
           done
           ls -la release
 
-      - name: Create/update the GitHub release for this tag
+      # A DRAFT: the Windows executables are signed afterwards on a maintainer's
+      # machine (scripts/sign-windows.sh, Certum SimplySign), which then
+      # publishes the release. Drafts are invisible to users and to the
+      # desktop app's update check.
+      - name: Create/update the GitHub release for this tag (draft)
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           files: release/*
           generate_release_notes: true
+          draft: true

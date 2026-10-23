@@ -195,7 +195,14 @@ Desktop GUI (**run from `desktop/`**):
   5 desktop binaries (macOS arm64+amd64 and Windows amd64+arm64 natively on
   one `macos-latest` runner; Linux amd64 natively on `ubuntu-latest` with
   GTK/WebKitGTK installed, avoiding the `wails-cross` Docker image) and
-  publishes them as assets on a GitHub release named after the tag. The
+  attaches them to a **draft** GitHub release named after the tag. The macOS
+  apps are signed and notarized in CI (Developer ID). The Windows .exe files
+  are signed afterwards on the maintainer's Mac with `scripts/sign-windows.sh
+  <tag>` (Certum Open Source Code Signing, SimplySign cloud, through ssign
+  0.1.8 — reviewed: talks only to Certum's cloudsign/time servers; the 6-digit
+  code is typed per run, the TOTP seed never leaves the phone), which
+  verifies the signatures, replaces the draft's .exe files and publishes the
+  release. Nothing is visible to users (or the update check) before that. The
   `wails3` CLI version is pinned there to match `desktop/go.mod`'s
   `wails/v3` require line exactly.
 

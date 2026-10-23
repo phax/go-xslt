@@ -10,7 +10,9 @@ offline; its only network request is the optional update check.
 
 Builds for macOS (Apple Silicon and Intel), Windows (x64 and ARM64) and Linux
 (x64) are attached to every
-[release on GitHub](https://github.com/tim-riep/go-xslt/releases).
+[release on GitHub](https://github.com/tim-riep/go-xslt/releases). The macOS
+apps are signed with an Apple Developer ID and notarized; the Windows
+executables are signed with a Certum Open Source Code Signing certificate.
 
 ## Projects
 
