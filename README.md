@@ -13,6 +13,7 @@
   <a href="https://pkg.go.dev/github.com/tim-riep/go-xslt"><img src="https://pkg.go.dev/badge/github.com/tim-riep/go-xslt.svg" alt="Go Reference"></a>
   <a href="https://github.com/tim-riep/go-xslt/actions/workflows/ci.yml"><img src="https://github.com/tim-riep/go-xslt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/tim-riep/go-xslt/actions/workflows/conformance.yml"><img src="https://github.com/tim-riep/go-xslt/actions/workflows/conformance.yml/badge.svg" alt="W3C conformance"></a>
+  <a href="https://codecov.io/gh/tim-riep/go-xslt"><img src="https://codecov.io/gh/tim-riep/go-xslt/graph/badge.svg" alt="Coverage"></a>
   <a href="https://github.com/tim-riep/go-xslt/releases/latest"><img src="https://img.shields.io/github/v/release/tim-riep/go-xslt" alt="Release"></a>
 </p>
 

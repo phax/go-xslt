@@ -5,7 +5,8 @@ name: W3C conformance
 # XSLT 3.0 basic, XSLT 3.0 with all optional features, QT3, XSD 1.0/1.1 —
 # exactly as `make conformance` does locally. The run fails when a case fails
 # that docs/accepted-failures/ does not list with a reason, so the badge in
-# the README says: the published numbers still hold.
+# the README says: the published numbers still hold. The same run measures
+# the library's code coverage (suites plus unit tests) for Codecov.
 on:
   schedule:
     - cron: '17 2 * * *'
@@ -33,12 +34,23 @@ jobs:
           go-version-file: go.mod
 
       - name: Run the W3C suites
-        run: scripts/conformance.sh --strict
+        run: scripts/conformance.sh --strict --cover
+
+      - name: Upload coverage to Codecov
+        if: always() && hashFiles('conformance-results/coverage.txt') != ''
+        uses: codecov/codecov-action@v5
+        with:
+          files: conformance-results/coverage.txt
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
       - name: Keep the logs and fail lists
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: conformance-results
-          path: conformance-results/
+          path: |
+            conformance-results/
+            !conformance-results/coverdata/
+            !conformance-results/conformance.test
           retention-days: 30

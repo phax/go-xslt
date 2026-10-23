@@ -14,6 +14,9 @@
 #   scripts/conformance.sh --out DIR        # results dir (conformance-results/)
 #   scripts/conformance.sh --strict         # also fail when a number differs
 #                                           # from the published one (CI)
+#   scripts/conformance.sh --cover          # also measure code coverage of the
+#                                           # library (suites + unit tests)
+#                                           # into DIR/coverage.txt
 #
 # Needs: git, go, and network access for the first run.
 set -uo pipefail
@@ -30,7 +33,7 @@ PUB_XSD10="39396/39401"; PUB_XSD11="41549/41553"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT="$ROOT/conformance-results"
 ONLY="xslt,xslt-full,qt3,xsd"
-LATEST=0; UPDATE=0; STRICT=0; MISMATCHED=0
+LATEST=0; UPDATE=0; STRICT=0; COVER=0; MISMATCHED=0
 # (no associative arrays: macOS ships bash 3.2)
 
 while [ $# -gt 0 ]; do
@@ -38,9 +41,10 @@ while [ $# -gt 0 ]; do
     --latest) LATEST=1 ;;
     --update) UPDATE=1 ;;
     --strict) STRICT=1 ;;
+    --cover)  COVER=1 ;;
     --only)   ONLY="${2:?--only needs a list}"; shift ;;
     --out)    OUT="${2:?--out needs a directory}"; shift ;;
-    -h|--help) sed -n 2,18p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n 2,21p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -104,8 +108,16 @@ if want xsd; then fetch_suite xsdtests "$XSD_REPO" "$XSD_PIN" || exit 1; fi
 # ---- build the test binary once ---------------------------------------------
 mkdir -p "$OUT"
 BIN="$OUT/conformance.test"
+# Coverage counts the library's own packages, whichever test reaches them.
+COVERPKG="./engine/...,./internal/...,./xsd/...,./cmd/..."
+COVERDIR="$OUT/coverdata"
+COVERFLAGS=()
+if [ "$COVER" = 1 ]; then
+  rm -rf "$COVERDIR"; mkdir -p "$COVERDIR"
+  COVERFLAGS=(-cover -coverpkg="$COVERPKG")
+fi
 echo "== building test binary =="
-(cd "$ROOT" && go test -c -o "$BIN" ./test/conformance/) || { echo "build failed" >&2; exit 1; }
+(cd "$ROOT" && go test -c ${COVERFLAGS[@]+"${COVERFLAGS[@]}"} -o "$BIN" ./test/conformance/) || { echo "build failed" >&2; exit 1; }
 
 # ---- run --------------------------------------------------------------------
 # The binary must run from test/conformance/ (the harness resolves ../..).
@@ -116,7 +128,9 @@ run() { # NAME TESTNAME LOGBASE [ENV=VAL...]
   local name=$1 test=$2 base=$3; shift 3
   local log="$OUT/$base.log" t0=$SECONDS rc
   echo "== running $name =="
-  (cd "$ROOT/test/conformance" && env "$@" "$BIN" -test.run "^$test\$" -test.v -test.timeout 60m) >"$log" 2>&1
+  local cov=()
+  if [ "$COVER" = 1 ]; then cov=(-test.gocoverdir="$COVERDIR"); fi
+  (cd "$ROOT/test/conformance" && env "$@" "$BIN" -test.run "^$test\$" -test.v -test.timeout 60m ${cov[@]+"${cov[@]}"}) >"$log" 2>&1
   rc=$?
   eval "T_${name//-/_}=$((SECONDS - t0)); RC_${name//-/_}=$rc"
   # unanchored on purpose: t.Log lines carry a "file:line:" prefix
@@ -129,6 +143,17 @@ if want xslt;      then run xslt      TestXSLT30 xslt30      XSLT30_FAILS=1; fi
 if want xslt-full; then run xslt-full TestXSLT30 xslt30-full XSLT30_FAILS=1 XSLT30_FULL=1; fi
 if want qt3;       then run qt3       TestQT3    qt3         QT3_FAILDUMP=1; fi
 if want xsd;       then run xsd       TestXSD    xsd; fi
+
+# ---- coverage ---------------------------------------------------------------
+# The unit tests of every package add to the suites' counters; the merged
+# profile is the one go tool cover and Codecov read.
+if [ "$COVER" = 1 ]; then
+  echo "== measuring unit-test coverage =="
+  (cd "$ROOT" && go test -cover -coverpkg="$COVERPKG" $(go list ./... | grep -v /test/conformance) \
+      -args -test.gocoverdir="$COVERDIR") >"$OUT/unit.log" 2>&1 || { echo "unit tests failed (see unit.log)" >&2; FAILED=1; }
+  go tool covdata textfmt -i="$COVERDIR" -o "$OUT/coverage.txt" &&
+    COVERAGE=$(go tool cover -func="$OUT/coverage.txt" | awk '/^total:/ {print $NF}')
+fi
 
 # ---- summary ----------------------------------------------------------------
 # "XSLT30 results: ... ran N (pass P, ..." / "QT3 results: ..." -> P/N
@@ -163,6 +188,7 @@ for d in xslt30-test qt3tests xsdtests; do
 done
 if [ "$LATEST" = 1 ]; then echo "(--latest: numbers may differ from the published ones by a case or two.)"; fi
 echo "Logs and fail-name lists: $OUT"
+if [ "$COVER" = 1 ]; then echo "Coverage: ${COVERAGE:-unknown} ($OUT/coverage.txt)"; fi
 
 for n in xslt xslt-full qt3 xsd; do
   v="RC_${n//-/_}"; rc=${!v:-0}
