@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,7 +18,7 @@ func toString(v any) string {
 }
 
 // run compiles the stylesheet and executes the transformation.
-func run(req Request) Result {
+func run(ctx context.Context, req Request) Result {
 	opts := compileOptions(req.Security, req.Features, req.BaseDir)
 	files := opts.Files
 	if d, ok := useEmbeddedStylesheet(&req, opts); !ok {
@@ -28,7 +29,7 @@ func run(req Request) Result {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "compile")}}
 	}
 
-	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params, Fetcher: req.Security.fetcher(), Files: files, Limits: req.Limits.internal()}
+	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params, Fetcher: req.Security.fetcher(), Files: files, Limits: req.Limits.internal(), Context: ctx}
 	rr, terr := ss.TransformEntry(req.Source, entry, req.BaseDir)
 	if terr != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(terr, "run")}}
@@ -36,6 +37,9 @@ func run(req Request) Result {
 	res := Result{Output: rr.Output, Method: rr.Method, Messages: rr.Messages}
 	for _, s := range rr.Secondary {
 		res.SecondaryOutputs = append(res.SecondaryOutputs, SecondaryOutput{Href: s.Href, Content: s.Content, Method: s.Method})
+	}
+	if err := req.Limits.checkOutputSize(0, res); err != nil {
+		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}
 	}
 	return res
 }

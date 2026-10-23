@@ -1,0 +1,39 @@
+name: W3C conformance
+
+# Every night (and on demand), clone the three W3C suites at the commits the
+# published numbers were measured against and run all four measurements —
+# XSLT 3.0 basic, XSLT 3.0 with all optional features, QT3, XSD 1.0/1.1 —
+# exactly as `make conformance` does locally. The run fails when a case fails
+# that docs/accepted-failures/ does not list with a reason, so the badge in
+# the README says: the published numbers still hold.
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: conformance
+  cancel-in-progress: false
+
+jobs:
+  conformance:
+    name: XSLT 3.0, QT3, XSD
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run the W3C suites
+        run: scripts/conformance.sh --strict
+
+      - name: Keep the logs and fail lists
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results
+          path: conformance-results/
+          retention-days: 30

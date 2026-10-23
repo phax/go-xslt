@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"io"
 	"strings"
 	"time"
@@ -42,5 +43,5 @@ func TransformFromReader(src io.Reader, req Request) (res Result) {
 		}}}
 	}
 	req.Source = sb.String()
-	return run(req)
+	return run(context.Background(), req)
 }

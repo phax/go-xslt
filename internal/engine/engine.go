@@ -6,6 +6,9 @@
 package engine
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"time"
 
 	"github.com/tim-riep/go-xslt/internal/fsaccess"
@@ -102,9 +105,52 @@ type Limits struct {
 	// default: deeper recursion could overflow the Go stack, which ends the
 	// whole process.
 	MaxDepth int `json:"maxDepth"`
+	// MaxOutputBytes, when positive, bounds the serialized results: the
+	// principal result and the xsl:result-document outputs together. With
+	// TransformTo the writer receives no more than that.
+	MaxOutputBytes int64 `json:"maxOutputBytes"`
 }
 
-func (l Limits) internal() xslt.Limits { return xslt.Limits{MaxSteps: l.MaxSteps, MaxDepth: l.MaxDepth} }
+// errOutputLimit is the error of a run whose results exceed MaxOutputBytes.
+func errOutputLimit(max int64) error {
+	return fmt.Errorf("err:XPDY0130: the results are larger than the limit of %d bytes", max)
+}
+
+// checkOutputSize reports a result over l.MaxOutputBytes; written is what
+// already went to a TransformTo writer.
+func (l Limits) checkOutputSize(written int64, res Result) error {
+	if l.MaxOutputBytes <= 0 {
+		return nil
+	}
+	n := written + int64(len(res.Output))
+	for _, s := range res.SecondaryOutputs {
+		n += int64(len(s.Content))
+	}
+	if n > l.MaxOutputBytes {
+		return errOutputLimit(l.MaxOutputBytes)
+	}
+	return nil
+}
+
+// limitWriter passes at most max bytes on to w and fails the write that
+// would exceed them.
+type limitWriter struct {
+	w      io.Writer
+	max, n int64
+}
+
+func (lw *limitWriter) Write(p []byte) (int, error) {
+	if lw.n+int64(len(p)) > lw.max {
+		return 0, errOutputLimit(lw.max)
+	}
+	n, err := lw.w.Write(p)
+	lw.n += int64(n)
+	return n, err
+}
+
+func (l Limits) internal() xslt.Limits {
+	return xslt.Limits{MaxSteps: l.MaxSteps, MaxDepth: l.MaxDepth}
+}
 
 // Features are the optional XSLT 3.0 capabilities (XSLT 3.0 §26) a
 // stylesheet is compiled with. Each is off by default and applies only to the
@@ -209,7 +255,13 @@ func (r Result) HasErrors() bool {
 // Transform runs req and returns the result. It never panics: any internal
 // panic is recovered and surfaced as an error diagnostic, so a partially
 // implemented engine can never crash the host application.
-func Transform(req Request) (res Result) {
+func Transform(req Request) Result { return TransformContext(context.Background(), req) }
+
+// TransformContext is Transform that stops when ctx is done — a deadline, a
+// cancelled request: the run ends with an error diagnostic whose message
+// names ctx.Err(). The check is made every 1024 instructions and inside long
+// XPath evaluations, so a run stops within moments of the cancellation.
+func TransformContext(ctx context.Context, req Request) (res Result) {
 	start := time.Now()
 	defer func() {
 		if r := recover(); r != nil {
@@ -223,5 +275,5 @@ func Transform(req Request) (res Result) {
 		res.DurationMs = time.Since(start).Milliseconds()
 	}()
 
-	return run(req)
+	return run(ctx, req)
 }

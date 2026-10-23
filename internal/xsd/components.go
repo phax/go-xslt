@@ -348,6 +348,9 @@ type Schema struct {
 	assertTypes map[*xmltree.Node]xpath.AtomType
 	// coll collects every error of a Validate call (nil on ValidateNode).
 	coll *collector
+	// interrupt, set for one ValidateOptsCtx call, is polled for every
+	// element validated; a non-nil error cancels the validation.
+	interrupt func() error
 	// assertLists is assertTypes for a LIST-varietied simple type, whose typed
 	// value is a SEQUENCE and so cannot be described by one primitive alone —
 	// the same {item primitive, item type name} pair xmltree.Node.TypeAnno +

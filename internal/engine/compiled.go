@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"context"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -65,10 +67,16 @@ func Compile(req Request) (sheet *Stylesheet, diags []Diagnostic) {
 // Transform runs the compiled stylesheet. It never panics: errors, including
 // runtime errors with the position of the stylesheet instruction that raised
 // them where known, are reported as Diagnostics.
-func (s *Stylesheet) Transform(tr TransformRequest) (res Result) {
+func (s *Stylesheet) Transform(tr TransformRequest) Result {
+	return s.TransformContext(context.Background(), tr)
+}
+
+// TransformContext is Transform that stops when ctx is done, like the
+// package-level TransformContext.
+func (s *Stylesheet) TransformContext(ctx context.Context, tr TransformRequest) (res Result) {
 	start := time.Now()
 	defer s.finish(&res, start)
-	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal()}
+	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal(), Context: ctx}
 	rr, err := s.ss.TransformEntry(tr.Source, entry, s.baseDir)
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}
@@ -77,22 +85,37 @@ func (s *Stylesheet) Transform(tr TransformRequest) (res Result) {
 	for _, sec := range rr.Secondary {
 		res.SecondaryOutputs = append(res.SecondaryOutputs, SecondaryOutput{Href: sec.Href, Content: sec.Content, Method: sec.Method})
 	}
+	if err := tr.Limits.checkOutputSize(0, res); err != nil {
+		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}
+	}
 	return res
 }
 
 // TransformTo is Transform writing the principal result to w (Output stays
 // empty); see the package-level TransformTo.
-func (s *Stylesheet) TransformTo(w io.Writer, tr TransformRequest) (res Result) {
+func (s *Stylesheet) TransformTo(w io.Writer, tr TransformRequest) Result {
+	return s.TransformToContext(context.Background(), w, tr)
+}
+
+// TransformToContext is TransformTo that stops when ctx is done.
+func (s *Stylesheet) TransformToContext(ctx context.Context, w io.Writer, tr TransformRequest) (res Result) {
 	start := time.Now()
 	defer s.finish(&res, start)
-	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal()}
-	rr, err := s.ss.TransformEntryTo(w, tr.Source, entry, s.baseDir, chunkableStylesheet(s.src))
+	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal(), Context: ctx}
+	lw := &limitWriter{w: w, max: math.MaxInt64}
+	if tr.Limits.MaxOutputBytes > 0 {
+		lw.max = tr.Limits.MaxOutputBytes
+	}
+	rr, err := s.ss.TransformEntryTo(lw, tr.Source, entry, s.baseDir, chunkableStylesheet(s.src))
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}
 	}
 	res = Result{Method: rr.Method, Messages: rr.Messages}
 	for _, sec := range rr.Secondary {
 		res.SecondaryOutputs = append(res.SecondaryOutputs, SecondaryOutput{Href: sec.Href, Content: sec.Content, Method: sec.Method})
+	}
+	if err := tr.Limits.checkOutputSize(lw.n, res); err != nil {
+		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}
 	}
 	return res
 }

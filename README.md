@@ -10,6 +10,13 @@
 </p>
 
 <p align="center">
+  <a href="https://pkg.go.dev/github.com/tim-riep/go-xslt"><img src="https://pkg.go.dev/badge/github.com/tim-riep/go-xslt.svg" alt="Go Reference"></a>
+  <a href="https://github.com/tim-riep/go-xslt/actions/workflows/ci.yml"><img src="https://github.com/tim-riep/go-xslt/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/tim-riep/go-xslt/actions/workflows/conformance.yml"><img src="https://github.com/tim-riep/go-xslt/actions/workflows/conformance.yml/badge.svg" alt="W3C conformance"></a>
+  <a href="https://github.com/tim-riep/go-xslt/releases/latest"><img src="https://img.shields.io/github/v/release/tim-riep/go-xslt" alt="Release"></a>
+</p>
+
+<p align="center">
   <a href="https://tim-riep.github.io/go-xslt/"><b>Documentation</b></a> ·
   <a href="https://tim-riep.github.io/go-xslt/conformance">Conformance</a> ·
   <a href="https://tim-riep.github.io/go-xslt/performance">Performance</a> ·
@@ -54,6 +61,11 @@ The engine is measured against the official W3C test suites — together about
 | XSD 1.0 ([xsdtests](https://github.com/w3c/xsdtests)) | **99.99%** (39,396 of 39,401) |
 | XSD 1.1 (same) | **99.99%** (41,549 of 41,553) |
 
+Measured on 2026-10-23 (after v0.2.2) against the pinned suite commits; a
+[nightly job](https://github.com/tim-riep/go-xslt/actions/workflows/conformance.yml)
+reruns all four measurements and fails as soon as a number differs or a case
+fails that is not documented.
+
 - **Every failing case is listed with its reason** in
   [`docs/accepted-failures/`](docs/accepted-failures/README.md). The test run
   itself fails on any failure that is not listed there, so a regression cannot
@@ -65,8 +77,9 @@ The engine is measured against the official W3C test suites — together about
 - **Anyone can check the numbers**: `make conformance` clones the suites at
   the pinned commits, runs everything and compares the result with the table
   above.
-- CI runs the library's own tests on every push. The memory bound of
-  streaming is measured in tests, not just claimed.
+- CI runs the library's own tests on every push, and the W3C suites every
+  night. The memory bound of streaming is measured in tests, not just
+  claimed.
 
 [Conformance details →](https://tim-riep.github.io/go-xslt/conformance)
 
@@ -94,8 +107,21 @@ if res.HasErrors() {
 	for _, d := range res.Diagnostics {
 		fmt.Printf("%d:%d %s %s\n", d.Line, d.Col, d.Code, d.Message)
 	}
+	return
 }
 fmt.Println(res.Output)
+```
+
+Optional XSLT 3.0 features, resource limits and cancellation are part of the
+request:
+
+```go
+res := engine.TransformContext(ctx, engine.Request{
+	Stylesheet: xsl,
+	Source:     xml,
+	Features:   engine.Features{SchemaAware: true, BackwardsCompatible: true, StrictStreaming: true},
+	Limits:     engine.Limits{MaxSteps: 1_000_000, MaxOutputBytes: 10 << 20},
+})
 ```
 
 Compile once and run many times, concurrently:
@@ -117,7 +143,7 @@ From the command line:
 ```bash
 go-xslt transform -s style.xsl -o out.html input.xml
 go-xslt validate -x order.xsd order.xml
-go-xslt xpath -s order.xml 'sum(//item/@price)'
+go-xslt xpath 'sum(//item/@price)' order.xml
 ```
 
 [Library guide →](https://tim-riep.github.io/go-xslt/guide/getting-started) ·
@@ -138,12 +164,14 @@ widen that, never the input.
 | Writing files | never: `xsl:result-document` output is returned in `Result.SecondaryOutputs` | — |
 | `xsl:evaluate`, `fn:transform` | same rules and budget as the calling stylesheet | — |
 | Endless loops and recursion | stopped after 20 M instructions / 10,000 levels | `Limits.MaxSteps`, `MaxDepth` |
+| Time | cancelled with a `context.Context` | `TransformContext`, `ValidateContext`, `EvalXPathContext` |
+| Output size | not limited | `Limits.MaxOutputBytes` |
 
 Input that would overflow the Go stack (documents nested over 10,000 levels,
 absurdly nested expressions, endless recursion of inline functions) is
-refused with an error instead of crashing the process. Memory and wall-clock
-time are not limited by the library; for untrusted input run it in a separate
-process with operating-system limits.
+refused with an error instead of crashing the process. The memory of the
+trees a run builds is not limited by the library; for a hard memory limit on
+untrusted input, run it in a separate process.
 [Security guide →](https://tim-riep.github.io/go-xslt/guide/security)
 
 ## Performance

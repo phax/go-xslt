@@ -94,6 +94,7 @@ A stylesheet can loop or recurse without end. `Limits` (a field of
 |---|---|---|
 | `MaxSteps` | 20,000,000 instructions | endless loops, e.g. an unbounded `xsl:iterate` |
 | `MaxDepth` | 10,000 levels | endless recursion of templates and functions; it can only be lowered |
+| `MaxOutputBytes` | no limit | the size of the results: the principal result and all `xsl:result-document` outputs together |
 
 ```go
 res := engine.Transform(engine.Request{
@@ -107,6 +108,22 @@ A run that exceeds a limit stops with `XPDY0130` ("implementation limit
 exceeded"). Nested `fn:transform` runs spend from the caller's budget, so they
 cannot multiply it.
 
+### Time: cancel with a context
+
+`TransformContext`, `TransformToContext`, `Stylesheet.TransformContext`,
+`EvalXPathContext` and `ValidateContext` stop when their `context.Context` is
+done, the usual Go way to give a request a deadline:
+
+```go
+ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+defer cancel()
+res := engine.TransformContext(ctx, req)
+```
+
+The context is checked every 1024 instructions, inside long XPath
+evaluations and for every element validated, so a run stops shortly after the
+deadline. The run then ends with an error diagnostic naming `ctx.Err()`.
+
 Some limits always apply, because the input would otherwise crash the Go
 process (a stack overflow is a fatal error that no `recover` catches):
 
@@ -116,10 +133,9 @@ process (a stack overflow is a fatal error that no `recover` catches):
 | nesting of an XPath expression | 5,000 levels | `XPDY0130` |
 | inline functions calling each other | 10,000 levels | `XPDY0130` |
 
-Not limited by go-xslt: memory, and time other than through `MaxSteps`. A
-single XPath expression such as `count(1 to 10000000)` is one step. To bound
-memory and wall-clock time for input you do not trust, run the
-transformation in a separate process (for example the
+Not limited by go-xslt: the memory a run uses for its trees. `MaxOutputBytes`
+bounds the results, and the input is as large as you pass in; for a hard
+memory limit, run the transformation in a separate process (for example the
 [command-line tool](/guide/cli)) under the operating system's limits.
 
 ## Checklist for untrusted input
@@ -127,10 +143,11 @@ transformation in a separate process (for example the
 - Give each run its own `BaseDir` holding only what it may read, and no
   `AllowedDirs` beyond that.
 - Leave `AllowNetwork` off, or restrict it with `AllowedHosts`.
-- Set `Limits` to what your workload needs.
+- Set `Limits` to what your workload needs, and give every run a context
+  with a deadline.
 - Treat `SecondaryOutputs[].Href` as untrusted too before using it as a file
   name.
-- For hard memory and time limits, run in a separate process.
+- For a hard memory limit, run in a separate process.
 
 ## Trusted input
 

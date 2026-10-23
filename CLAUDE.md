@@ -269,9 +269,24 @@ Desktop GUI (**run from `desktop/`**):
   which means "no such initial template"). `engine/limits_test.go`'s
   `TestNoStackOverflow` pins the crash inputs. A new recursive walk over
   input-controlled structure needs the same treatment.
+- **Cancellation**: `TransformContext`/`TransformToContext`/
+  `Stylesheet.TransformContext`/`EvalXPathContext`/`ValidateContext`. The
+  run's `budget` holds the ctx (checked every 1024 steps) and hands XPath an
+  `Interrupt` hook (set on the main eval context in `transform.go`); XPath
+  polls it in for/some/every/`!`/predicate loops, range building and inline
+  calls — the four explicit sub-context literals in `eval.go` copy it, so a
+  NEW literal `&Context{…}` must copy `Interrupt` too. XSD polls per element
+  (`validateAgainstType`) and leaves by `panic(canceled{…})`, so the
+  collector never books a cancellation as a validation error.
+  `Limits.MaxOutputBytes` is checked in the facade (`limitWriter` for
+  TransformTo). Profiling (website/performance.md): the gap to libxslt is
+  memory acquisition (`runtime.madvise` ~35%) and GC, NOT parsing (~12%).
 - `cmd/go-xslt` is the CLI (`transform|validate|xpath|version`) in the
   LIBRARY module; it may read the directories of the files on its command
-  line, more only via `-allow-*` flags. `scripts/bench/main.go` benchmarks it
+  line, more only via `-allow-*` flags. Flags are uniform across commands:
+  `-s/--stylesheet`, `-x/--schema`, the document is always the last argument.
+  `.github/workflows/conformance.yml` runs `scripts/conformance.sh --strict`
+  nightly (fails on any number differing from the published one). `scripts/bench/main.go` benchmarks it
   against xsltproc/xmllint (`go run scripts/bench/main.go`).
 - **Tests are deterministic — no verdict may depend on wall-clock time or on how
   busy the machine is.** No per-case timeouts in the harnesses (a case that

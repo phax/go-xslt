@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -63,7 +65,13 @@ func (r XPathResult) HasErrors() bool {
 
 // EvalXPath parses and evaluates req.Expression. It never panics: any internal
 // panic is recovered and surfaced as an error diagnostic.
-func EvalXPath(req XPathRequest) (res XPathResult) {
+func EvalXPath(req XPathRequest) XPathResult {
+	return EvalXPathContext(context.Background(), req)
+}
+
+// EvalXPathContext is EvalXPath that stops when ctx is done, like
+// TransformContext.
+func EvalXPathContext(ctx context.Context, req XPathRequest) (res XPathResult) {
 	start := time.Now()
 	defer func() {
 		if r := recover(); r != nil {
@@ -76,10 +84,10 @@ func EvalXPath(req XPathRequest) (res XPathResult) {
 		}
 		res.DurationMs = time.Since(start).Milliseconds()
 	}()
-	return runXPath(req)
+	return runXPath(ctx, req)
 }
 
-func runXPath(req XPathRequest) XPathResult {
+func runXPath(cctx context.Context, req XPathRequest) XPathResult {
 	parsed, err := xpath.Parse(req.Expression)
 	if err != nil {
 		d := xpathDiag("parse", err)
@@ -89,6 +97,16 @@ func runXPath(req XPathRequest) XPathResult {
 		return XPathResult{Diagnostics: []Diagnostic{d}}
 	}
 	ctx := &xpath.Context{Pos: 1, Size: 1}
+	if cctx.Done() != nil {
+		polls := 0
+		ctx.Interrupt = func() error {
+			polls++
+			if polls&1023 == 0 && cctx.Err() != nil {
+				return fmt.Errorf("evaluation stopped: %w", cctx.Err())
+			}
+			return nil
+		}
+	}
 	if strings.TrimSpace(req.Source) != "" {
 		// ParseLenient11WithBase (not the plain Parse EvalXPath used before)
 		// so a DOCTYPE's external SYSTEM subset resolves against BaseDir too,

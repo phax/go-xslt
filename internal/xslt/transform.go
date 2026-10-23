@@ -1,6 +1,7 @@
 package xslt
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -723,6 +724,9 @@ type Entry struct {
 	// Limits bounds the run (instruction steps, nesting depth); zero fields
 	// take the defaults.
 	Limits Limits
+	// Context, when set, cancels the run once it is done (a deadline, a
+	// closed request); the run then ends with an error wrapping ctx.Err().
+	Context context.Context
 	// budget, when set, is a caller's budget this run spends from instead of
 	// a fresh one built from Limits (fn:transform's nested runs), and
 	// startDepth the caller's nesting depth it continues from.
@@ -834,7 +838,7 @@ func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string,
 	eng := &engine{sheet: ss, doc: doc, globals: map[string]xpath.Object{}, baseDir: baseDir, resolver: res, now: time.Now().UTC(), principalSealedAt: -1, paramSelects: e.ParamSelects, outURI: e.BaseOutputURI, srcSchemas: e.SourceSchemas}
 	eng.budget, eng.depth = e.budget, e.startDepth
 	if eng.budget == nil {
-		eng.budget = newBudget(e.Limits)
+		eng.budget = newBudget(e.Limits, e.Context)
 	}
 	runEng = eng
 	if doc != nil && e.SourceStreamed {
@@ -1597,10 +1601,32 @@ type Limits struct {
 type budget struct {
 	steps, maxSteps int64
 	maxDepth        int
+	// ctx, when set, cancels the run: checked every 1024 instructions and,
+	// through interrupt, inside long XPath evaluations.
+	ctx       context.Context
+	polls     int
+	interrupt func() error // nil without ctx: XPath then never polls
 }
 
-func newBudget(l Limits) *budget {
-	b := &budget{maxSteps: maxSteps, maxDepth: maxTemplateDepth}
+// stopped is the error a cancelled run ends with; errors.Is finds the
+// context's own error in it.
+func stopped(ctx context.Context) error {
+	return fmt.Errorf("transformation stopped: %w", ctx.Err())
+}
+
+func newBudget(l Limits, ctx context.Context) *budget {
+	b := &budget{maxSteps: maxSteps, maxDepth: maxTemplateDepth, ctx: ctx}
+	if ctx != nil && ctx.Done() != nil {
+		b.interrupt = func() error {
+			b.polls++
+			if b.polls&1023 == 0 && ctx.Err() != nil {
+				return stopped(ctx)
+			}
+			return nil
+		}
+	} else {
+		b.ctx = nil // a context that can never be cancelled costs nothing
+	}
 	if l.MaxSteps > 0 {
 		b.maxSteps = l.MaxSteps
 	}
@@ -1608,6 +1634,15 @@ func newBudget(l Limits) *budget {
 		b.maxDepth = l.MaxDepth
 	}
 	return b
+}
+
+// interrupt is the XPath Interrupt hook of the run: nil unless it can be
+// cancelled.
+func (eng *engine) interrupt() func() error {
+	if eng.budget == nil {
+		return nil
+	}
+	return eng.budget.interrupt
 }
 
 // tooDeep reports whether the engine has passed its depth limit.
@@ -2096,7 +2131,7 @@ func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOver
 	if eng.sheet.hasBackwardsCompat && eng.sheet.feat.BackwardsCompatible {
 		bc10 = inBackwardsCompatScope(el)
 	}
-	v, err := p.Eval(&xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: eng.resolveNamedFunction(env), ResolveLookupFunction: eng.resolveLookupFunction(env), Resolver: eng.resolver, DecimalFormats: eng.sheet.decimalFormatsFor(el), DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10})
+	v, err := p.Eval(&xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: eng.resolveNamedFunction(env), ResolveLookupFunction: eng.resolveLookupFunction(env), Resolver: eng.resolver, DecimalFormats: eng.sheet.decimalFormatsFor(el), DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10, Interrupt: eng.interrupt()})
 	if err != nil && eng.errEl == nil {
 		eng.errEl = el
 	}
@@ -2565,9 +2600,12 @@ func (eng *engine) execInstrRaw(in instruction, r rt, out *xmltree.Node) error {
 	// Step budget: bounds a single transform's runtime so a non-terminating-but-
 	// non-deepening loop (e.g. unbounded xsl:iterate) errors instead of hanging.
 	if eng.budget == nil {
-		eng.budget = newBudget(Limits{})
+		eng.budget = newBudget(Limits{}, nil)
 	}
 	eng.budget.steps++
+	if eng.budget.ctx != nil && eng.budget.steps&1023 == 0 && eng.budget.ctx.Err() != nil {
+		return stopped(eng.budget.ctx)
+	}
 	if stepProbe != nil && stepProbeEvery > 0 && eng.budget.steps%stepProbeEvery == 0 {
 		stepProbe()
 	}

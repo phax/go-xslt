@@ -32,6 +32,18 @@ Apple M4, macOS, libxml2 2.9.13 / libxslt 1.1.35; input 200,000 records,
   [compile it once](/guide/compiled-stylesheets); the numbers above include
   compiling the stylesheet on every run.
 
+## Where the time goes
+
+A CPU profile of the copy workload shows that parsing is not the bottleneck:
+the parser takes about 12% of the CPU time, `encoding/xml` within it 4%. Most
+of the time goes to obtaining memory for the document tree — 35% in the
+operating system's memory calls while the heap grows past 1 GB — and to the
+garbage collector scanning it, which runs on other cores and hardly adds wall
+time (switching it off saves under 10%). The lever is therefore the memory
+each node takes, not the XML tokenizer.
+
+## Same results
+
 Both processors produce the same results. In two workloads the text differs
 in the last digits of sums: XPath 1.0 writes a number with as many digits as
 are needed to identify it exactly (`17251.089999999997`), libxslt rounds to 15

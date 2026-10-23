@@ -36,6 +36,9 @@ func TestCLI(t *testing.T) {
 <d xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:stylesheet id="s" version="3.0"><xsl:output method="text"/>
 <xsl:template match="/">embedded</xsl:template></xsl:stylesheet></d>`)
 	out := filepath.Join(dir, "out")
+	slow := write("slow.xsl", `<xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:template name="xsl:initial-template"><xsl:iterate select="1 to 9000000"><xsl:value-of select="."/></xsl:iterate></xsl:template>
+</xsl:stylesheet>`)
 
 	for _, c := range []struct {
 		name   string
@@ -52,7 +55,11 @@ func TestCLI(t *testing.T) {
 		{"valid", []string{"validate", "-x", schema, good}, 0, "valid", ""},
 		{"invalid", []string{"validate", "-x", schema, invalid}, 1, "invalid", "error"},
 		{"hints", []string{"validate", hinted}, 1, "invalid", ""},
-		{"xpath", []string{"xpath", "-s", src, "count(//i), 'x'"}, 0, "2\nx\n", ""},
+		{"xpath", []string{"xpath", "count(//i), 'x'", src}, 0, "2\nx\n", ""},
+		{"xpath stdin", []string{"xpath", "count(//i)", "-"}, 0, "1\n", ""},
+		{"long flags", []string{"transform", "--stylesheet", style, "--param", "who=all", "--output-dir", out, src}, 0, "hello all (2)", ""},
+		{"timeout", []string{"transform", "-s", slow, "--timeout", "1ns"}, 1, "", "stopped"},
+		{"max output", []string{"transform", "-s", style, "--max-output", "3", src}, 1, "", "XPDY0130"},
 		{"xpath typed", []string{"xpath", "-t", "1 + 1"}, 0, "xs:integer\t2", ""},
 		{"xpath error", []string{"xpath", "1 +"}, 1, "", "XPST0003"},
 		{"usage", []string{"frobnicate"}, 2, "", "unknown command"},

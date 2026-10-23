@@ -70,6 +70,12 @@ type FuncResolver interface {
 
 // Context is the evaluation context for an XPath expression.
 type Context struct {
+	// Interrupt, when set, is polled throughout a long evaluation — every
+	// iteration of for/some/every/"!"/predicates, while a range is built, and
+	// on every inline-function call — and a non-nil error stops it there.
+	// The host keeps it cheap (it checks its context.Context only every so
+	// many polls); nil, the default, costs one comparison.
+	Interrupt func() error
 	// calls counts the inline-function invocations in progress along this
 	// evaluation, shared by every context derived from it (see
 	// evalInlineFunc); nil until the first inline function is created.
@@ -678,6 +684,11 @@ func evalExpr(e Expr, ctx *Context) (Object, error) {
 		if from.IsInt64() && to.IsInt64() {
 			lo := from.Int64()
 			for k := int64(0); k <= count; k++ { // by offset: lo+k never overflows past to
+				if k&4095 == 0 {
+					if err := ctx.poll(); err != nil {
+						return nil, err
+					}
+				}
 				items = append(items, NewInteger(lo+k))
 			}
 		} else {
@@ -863,6 +874,9 @@ func evalFor(binds []VarBind, i int, ctx *Context, body Expr) (Object, error) {
 	key := varKey(ctx, binds[i].Prefix, binds[i].Local)
 	var out []Item
 	for _, it := range Items(seqV) {
+		if err := ctx.poll(); err != nil {
+			return nil, err
+		}
 		child := withLocal(ctx, key, FromItems([]Item{it}))
 		r, err := evalFor(binds, i+1, child, body)
 		if err != nil {
@@ -887,6 +901,9 @@ func evalQuant(every bool, binds []VarBind, i int, ctx *Context, test Expr) (boo
 	}
 	key := varKey(ctx, binds[i].Prefix, binds[i].Local)
 	for _, it := range Items(seqV) {
+		if err := ctx.poll(); err != nil {
+			return false, err
+		}
 		child := withLocal(ctx, key, FromItems([]Item{it}))
 		ok, err := evalQuant(every, binds, i+1, child, test)
 		if err != nil {
@@ -927,6 +944,14 @@ func evalArray(n *ArrayExpr, ctx *Context) (Object, error) {
 	return NewArray(members), nil
 }
 
+// poll asks the host's Interrupt hook whether to stop.
+func (c *Context) poll() error {
+	if c == nil || c.Interrupt == nil {
+		return nil
+	}
+	return c.Interrupt()
+}
+
 // maxCallDepth bounds how deeply inline functions may call each other. An
 // unbounded recursion of one (let $f := function($f) { $f($f) } …) would
 // otherwise overflow the Go stack, a fatal error no recover() catches; the
@@ -965,6 +990,9 @@ func evalInlineFunc(n *InlineFunc, ctx *Context) *Function {
 			// invoked dynamically (current-output-uri-017).
 			focusless.NoOutputURI = true
 			focusless.calls = calls
+			if err := captured.poll(); err != nil {
+				return nil, err
+			}
 			calls.n++
 			defer func() { calls.n-- }()
 			if calls.n > maxCallDepth {
@@ -1105,8 +1133,11 @@ func applyPredicateToItems(items []Item, pred Expr, ctx *Context) ([]Item, error
 	size := len(items)
 	var out []Item
 	for i, it := range items {
+		if err := ctx.poll(); err != nil {
+			return nil, err
+		}
 		pos := i + 1
-		sub := &Context{SchemaTypes: ctx.SchemaTypes, Pos: pos, Size: size, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, locals: ctx.locals, BC10: ctx.BC10}
+		sub := &Context{SchemaTypes: ctx.SchemaTypes, Pos: pos, Size: size, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, Interrupt: ctx.Interrupt, locals: ctx.locals, BC10: ctx.BC10}
 		switch it.(type) {
 		case *xmltree.Node:
 			sub.Node = it.(*xmltree.Node)
@@ -1243,7 +1274,7 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 			var items []Item
 			size := len(current)
 			for idx, cn := range current {
-				sub := &Context{SchemaTypes: ctx.SchemaTypes, Node: cn, Pos: idx + 1, Size: size, CtxItem: cn, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, locals: ctx.locals, BC10: ctx.BC10}
+				sub := &Context{SchemaTypes: ctx.SchemaTypes, Node: cn, Pos: idx + 1, Size: size, CtxItem: cn, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, Interrupt: ctx.Interrupt, locals: ctx.locals, BC10: ctx.BC10}
 				v, err := evalExpr(step.Postfix, sub)
 				if err != nil {
 					return nil, err
@@ -1383,8 +1414,11 @@ func applyPredicateOrdered(ns NodeSet, pred Expr, ctx *Context, _ bool) (NodeSet
 	size := len(ns)
 	var out NodeSet
 	for i, node := range ns {
+		if err := ctx.poll(); err != nil {
+			return nil, err
+		}
 		pos := i + 1
-		sub := &Context{SchemaTypes: ctx.SchemaTypes, Node: node, Pos: pos, Size: size, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, locals: ctx.locals, BC10: ctx.BC10}
+		sub := &Context{SchemaTypes: ctx.SchemaTypes, Node: node, Pos: pos, Size: size, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, Interrupt: ctx.Interrupt, locals: ctx.locals, BC10: ctx.BC10}
 		v, err := evalExpr(pred, sub)
 		if err != nil {
 			return nil, err
@@ -1750,7 +1784,10 @@ func evalSimpleMap(n *SimpleMapExpr, ctx *Context) (Object, error) {
 		items := Items(cur)
 		var out []Item
 		for i, it := range items {
-			sub := &Context{SchemaTypes: ctx.SchemaTypes, Pos: i + 1, Size: len(items), CtxItem: it, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, locals: ctx.locals, BC10: ctx.BC10}
+			if err := ctx.poll(); err != nil {
+				return nil, err
+			}
+			sub := &Context{SchemaTypes: ctx.SchemaTypes, Pos: i + 1, Size: len(items), CtxItem: it, Vars: ctx.Vars, NS: ctx.NS, Funcs: ctx.Funcs, Resolver: ctx.Resolver, BaseURI: ctx.BaseURI, DecimalFormats: ctx.DecimalFormats, DefaultElemNS: ctx.DefaultElemNS, DefaultCollation: ctx.DefaultCollation, RootlessTree: ctx.RootlessTree, nowCache: ctx.nowCache, Interrupt: ctx.Interrupt, locals: ctx.locals, BC10: ctx.BC10}
 			if nd, ok := it.(*xmltree.Node); ok {
 				sub.Node = nd
 			}

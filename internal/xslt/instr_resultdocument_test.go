@@ -75,14 +75,31 @@ func TestResultDocumentSecondary(t *testing.T) {
 		want       string
 	}{
 		{
-			// A secondary document's own serialization defaults follow the
-			// spec (an XML declaration is included unless explicitly
-			// omitted) — not the principal xsl:output's @method="text",
-			// which doesn't apply to it at all.
-			name: "default method is xml with declaration included",
+			// Without @format, a secondary document is serialized by the
+			// unnamed output definition, as the principal result is (XSLT
+			// 3.0 §25.1: "The unnamed output definition is used when an
+			// xsl:result-document element omits the format attribute").
+			name: "unnamed xsl:output applies",
 			sheet: `<?xml version="1.0"?>
 <xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
   <xsl:output method="text"/>
+  <xsl:template match="/r">
+    <xsl:result-document href="out.xml">
+      <doc><v>1</v></doc>
+    </xsl:result-document>
+  </xsl:template>
+</xsl:stylesheet>`,
+			src:        `<r/>`,
+			wantHref:   "out.xml",
+			wantMethod: "text",
+			want:       `1`,
+		},
+		{
+			// With no xsl:output at all, the unnamed output definition is
+			// the default one: xml, with an XML declaration.
+			name: "default method is xml with declaration included",
+			sheet: `<?xml version="1.0"?>
+<xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
   <xsl:template match="/r">
     <xsl:result-document href="out.xml">
       <doc><v>1</v></doc>
@@ -112,7 +129,6 @@ func TestResultDocumentSecondary(t *testing.T) {
 			name: "href is an AVT",
 			sheet: `<?xml version="1.0"?>
 <xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
-  <xsl:output method="text"/>
   <xsl:template match="/r">
     <xsl:result-document href="{@name}.xml"><n/></xsl:result-document>
   </xsl:template>
@@ -140,7 +156,6 @@ func TestResultDocumentSecondary(t *testing.T) {
 			name: "value-of inside body computes content",
 			sheet: `<?xml version="1.0"?>
 <xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
-  <xsl:output method="text"/>
   <xsl:template match="/r">
     <xsl:result-document href="c.xml">
       <total><xsl:value-of select="sum(item)"/></total>

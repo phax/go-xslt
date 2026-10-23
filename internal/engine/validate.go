@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"time"
 
 	"github.com/tim-riep/go-xslt/internal/xsd"
@@ -58,7 +59,13 @@ type ValidateResult struct {
 // Validate compiles req.Schemas and validates req.Instance against them. It
 // never panics: any internal panic is recovered and surfaced as an error
 // diagnostic with Valid=false.
-func Validate(req ValidateRequest) (res ValidateResult) {
+func Validate(req ValidateRequest) ValidateResult {
+	return ValidateContext(context.Background(), req)
+}
+
+// ValidateContext is Validate that stops when ctx is done, like
+// TransformContext.
+func ValidateContext(ctx context.Context, req ValidateRequest) (res ValidateResult) {
 	start := time.Now()
 	defer func() {
 		if r := recover(); r != nil {
@@ -72,10 +79,10 @@ func Validate(req ValidateRequest) (res ValidateResult) {
 		}
 		res.DurationMs = time.Since(start).Milliseconds()
 	}()
-	return runValidate(req)
+	return runValidate(ctx, req)
 }
 
-func runValidate(req ValidateRequest) ValidateResult {
+func runValidate(ctx context.Context, req ValidateRequest) ValidateResult {
 	v := xsd.Version10
 	if req.Version == XSD11 {
 		v = xsd.Version11
@@ -83,7 +90,7 @@ func runValidate(req ValidateRequest) ValidateResult {
 	sch, err := xsd.CompileFS(req.Schemas, req.BaseDir, v, FileGuard(req.Security, req.BaseDir))
 	var r *xsd.Result
 	if err == nil {
-		r, err = sch.ValidateOpts(req.Instance, req.Language, req.MaxErrors)
+		r, err = sch.ValidateOptsCtx(ctx, req.Instance, req.Language, req.MaxErrors)
 	}
 	if err != nil {
 		return ValidateResult{Valid: false, Diagnostics: []Diagnostic{{

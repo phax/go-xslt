@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"context"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -24,7 +26,13 @@ import (
 // Like Transform it never panics: an internal panic becomes an error
 // diagnostic. Bytes already written to w before a mid-run failure are the
 // caller's to discard.
-func TransformTo(w io.Writer, req Request) (res Result) {
+func TransformTo(w io.Writer, req Request) Result {
+	return TransformToContext(context.Background(), w, req)
+}
+
+// TransformToContext is TransformTo that stops when ctx is done, like
+// TransformContext.
+func TransformToContext(ctx context.Context, w io.Writer, req Request) (res Result) {
 	start := time.Now()
 	defer func() {
 		if r := recover(); r != nil {
@@ -38,10 +46,10 @@ func TransformTo(w io.Writer, req Request) (res Result) {
 		res.DurationMs = time.Since(start).Milliseconds()
 	}()
 
-	return runTo(w, req)
+	return runTo(ctx, w, req)
 }
 
-func runTo(w io.Writer, req Request) Result {
+func runTo(ctx context.Context, w io.Writer, req Request) Result {
 	opts := compileOptions(req.Security, req.Features, req.BaseDir)
 	files := opts.Files
 	if d, ok := useEmbeddedStylesheet(&req, opts); !ok {
@@ -52,14 +60,21 @@ func runTo(w io.Writer, req Request) Result {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "compile")}}
 	}
 
-	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params, Fetcher: req.Security.fetcher(), Files: files, Limits: req.Limits.internal()}
-	rr, terr := ss.TransformEntryTo(w, req.Source, entry, req.BaseDir, chunkableStylesheet(req.Stylesheet))
+	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params, Fetcher: req.Security.fetcher(), Files: files, Limits: req.Limits.internal(), Context: ctx}
+	lw := &limitWriter{w: w, max: math.MaxInt64}
+	if req.Limits.MaxOutputBytes > 0 {
+		lw.max = req.Limits.MaxOutputBytes
+	}
+	rr, terr := ss.TransformEntryTo(lw, req.Source, entry, req.BaseDir, chunkableStylesheet(req.Stylesheet))
 	if terr != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(terr, "run")}}
 	}
 	res := Result{Method: rr.Method, Messages: rr.Messages}
 	for _, s := range rr.Secondary {
 		res.SecondaryOutputs = append(res.SecondaryOutputs, SecondaryOutput{Href: s.Href, Content: s.Content, Method: s.Method})
+	}
+	if err := req.Limits.checkOutputSize(lw.n, res); err != nil {
+		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}
 	}
 	return res
 }

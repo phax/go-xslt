@@ -1,6 +1,7 @@
 package xsd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -31,6 +32,16 @@ func (s *Schema) ValidateLang(instance, lang string) (*Result, error) {
 // ValidateOpts is ValidateLang that stops after maxErrors errors (0 = no
 // limit). Result.Errors lists every error found, in document order.
 func (s *Schema) ValidateOpts(instance, lang string, maxErrors int) (res *Result, rerr error) {
+	return s.ValidateOptsCtx(context.Background(), instance, lang, maxErrors)
+}
+
+// canceled carries a cancellation out of the validation walk as a panic, so
+// that it ends the call instead of being collected as one more error.
+type canceled struct{ err error }
+
+// ValidateOptsCtx is ValidateOpts that stops when ctx is done, returning an
+// error that wraps ctx.Err().
+func (s *Schema) ValidateOptsCtx(ctx context.Context, instance, lang string, maxErrors int) (res *Result, rerr error) {
 	doc, err := xmltree.ParseLenient11(instance)
 	if err != nil {
 		return &Result{Valid: false, Errors: []Error{{Message: "instance not well-formed: " + err.Error()}}}, nil
@@ -67,6 +78,16 @@ func (s *Schema) ValidateOpts(instance, lang string, maxErrors int) (res *Result
 	// TestValidateNodeMatchesValidate pins across 51,245 instances.
 	local.nodeDefaults = map[*xmltree.Node][]defaultAttr{}
 	local.coll = &collector{max: maxErrors}
+	if ctx.Done() != nil {
+		polls := 0
+		local.interrupt = func() error {
+			polls++
+			if polls&255 == 0 && ctx.Err() != nil {
+				return fmt.Errorf("validation stopped: %w", ctx.Err())
+			}
+			return nil
+		}
+	}
 	s = &local
 	finish := func() *Result {
 		for _, e := range s.coll.errs {
@@ -83,6 +104,17 @@ func (s *Schema) ValidateOpts(instance, lang string, maxErrors int) (res *Result
 				panic(r)
 			}
 			res, rerr = finish(), nil
+		}
+	}()
+	// Registered after the recover above, so it runs first and a
+	// cancellation is never mistaken for one more validation error.
+	defer func() {
+		if r := recover(); r != nil {
+			c, ok := r.(canceled)
+			if !ok {
+				panic(r)
+			}
+			res, rerr = nil, c.err
 		}
 	}()
 	if verr := s.validateElement(root); verr != nil && verr != errStopped {
@@ -701,6 +733,11 @@ func (s *Schema) assessNilledElement(typ Type, el *xmltree.Node) error {
 }
 
 func (s *Schema) validateAgainstType(typ Type, el *xmltree.Node, scopes map[xname]*keyTable, decl *ElementDecl) error {
+	if s.interrupt != nil {
+		if err := s.interrupt(); err != nil {
+			panic(canceled{err})
+		}
+	}
 	// Every element reaches its governing type here, with xsi:type,
 	// conditional type assignment and substitution already resolved — the one
 	// place ValidateNode's annotation can learn what a node was ACTUALLY

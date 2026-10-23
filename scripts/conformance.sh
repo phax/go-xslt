@@ -12,6 +12,8 @@
 #   scripts/conformance.sh --update         # move existing clones to the
 #                                           # pinned commit (or HEAD, --latest)
 #   scripts/conformance.sh --out DIR        # results dir (conformance-results/)
+#   scripts/conformance.sh --strict         # also fail when a number differs
+#                                           # from the published one (CI)
 #
 # Needs: git, go, and network access for the first run.
 set -uo pipefail
@@ -28,16 +30,17 @@ PUB_XSD10="39396/39401"; PUB_XSD11="41549/41553"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT="$ROOT/conformance-results"
 ONLY="xslt,xslt-full,qt3,xsd"
-LATEST=0; UPDATE=0
+LATEST=0; UPDATE=0; STRICT=0; MISMATCHED=0
 # (no associative arrays: macOS ships bash 3.2)
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --latest) LATEST=1 ;;
     --update) UPDATE=1 ;;
+    --strict) STRICT=1 ;;
     --only)   ONLY="${2:?--only needs a list}"; shift ;;
     --out)    OUT="${2:?--out needs a directory}"; shift ;;
-    -h|--help) sed -n 2,16p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n 2,18p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -136,6 +139,7 @@ row() { # LABEL GOT PUBLISHED TIME
   local mark="MISMATCH"
   if [ -z "$2" ]; then mark="NO RESULT"; set -- "$1" "-" "$3" "$4"
   elif [ "$2" = "$3" ]; then mark="match"; fi
+  if [ "$mark" != "match" ]; then MISMATCHED=1; fi
   printf '%-27s %-14s %-14s %-10s %s\n' "$1" "$2" "$3" "$mark" "$4"
 }
 tm() { local v="T_${1//-/_}"; local s=${!v:-0}; printf '%dm%02ds' $((s / 60)) $((s % 60)); }
@@ -169,4 +173,8 @@ for n in xslt xslt-full qt3 xsd; do
     fi
   fi
 done
+if [ "$STRICT" = 1 ] && [ "$MISMATCHED" = 1 ]; then
+  echo "--strict: a number differs from the published one."
+  exit 1
+fi
 exit $FAILED

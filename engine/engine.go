@@ -5,6 +5,7 @@
 package engine
 
 import (
+	"context"
 	"io"
 
 	"github.com/tim-riep/go-xslt/internal/engine"
@@ -49,6 +50,14 @@ const (
 // reported as Diagnostics on the Result.
 func Transform(req Request) Result { return engine.Transform(req) }
 
+// TransformContext is Transform that stops when ctx is done — a deadline, a
+// cancelled request. The run then ends with an error diagnostic that names
+// ctx.Err(). Cancellation is checked every 1024 instructions and inside long
+// XPath evaluations, so a run stops shortly after ctx is done.
+func TransformContext(ctx context.Context, req Request) Result {
+	return engine.TransformContext(ctx, req)
+}
+
 // TransformTo runs req and writes the principal result to w rather than
 // returning it in Result.Output, which stays empty; every other field is
 // populated exactly as Transform populates it. A result large enough to matter
@@ -57,6 +66,12 @@ func Transform(req Request) Result { return engine.Transform(req) }
 // streams a large xsl:source-document through to its output runs in bounded
 // memory on both sides. It never panics; errors are reported as Diagnostics.
 func TransformTo(w io.Writer, req Request) Result { return engine.TransformTo(w, req) }
+
+// TransformToContext is TransformTo that stops when ctx is done, like
+// TransformContext.
+func TransformToContext(ctx context.Context, w io.Writer, req Request) Result {
+	return engine.TransformToContext(ctx, w, req)
+}
 
 // TransformFromReader is Transform with the source document read from src
 // instead of req.Source (ignored), avoiding the extra copy a caller would
@@ -71,10 +86,22 @@ func TransformFromReader(src io.Reader, req Request) Result {
 // panics; errors are reported as Diagnostics with Valid=false.
 func Validate(req ValidateRequest) ValidateResult { return engine.Validate(req) }
 
+// ValidateContext is Validate that stops when ctx is done, like
+// TransformContext.
+func ValidateContext(ctx context.Context, req ValidateRequest) ValidateResult {
+	return engine.ValidateContext(ctx, req)
+}
+
 // EvalXPath evaluates a standalone XPath 3.1 expression, optionally against an
 // XML context document (req.Source). It never panics; errors are reported as
 // Diagnostics.
 func EvalXPath(req XPathRequest) XPathResult { return engine.EvalXPath(req) }
+
+// EvalXPathContext is EvalXPath that stops when ctx is done, like
+// TransformContext.
+func EvalXPathContext(ctx context.Context, req XPathRequest) XPathResult {
+	return engine.EvalXPathContext(ctx, req)
+}
 
 // Compile compiles req.Stylesheet (imports and includes resolved against
 // req.BaseDir) without running it, so the same stylesheet can then be run many

@@ -21,6 +21,7 @@ Full generated documentation:
 | `Compile(Request) (*Stylesheet, []Diagnostic)` | Compiles a stylesheet for repeated use. |
 | `EvalXPath(XPathRequest) XPathResult` | Evaluates a standalone XPath 3.1 expression. |
 | `Validate(ValidateRequest) ValidateResult` | Validates an XML document against XSD schemas. |
+| `TransformContext`, `TransformToContext`, `EvalXPathContext`, `ValidateContext` | The same, taking a `context.Context` first: the run stops when it is done. See [Time](/guide/security#time-cancel-with-a-context). |
 
 ## Stylesheet
 
@@ -31,6 +32,7 @@ A compiled stylesheet. Immutable and safe for concurrent use.
 | `(*Stylesheet) Transform(TransformRequest) Result` | Runs the stylesheet. |
 | `(*Stylesheet) TransformTo(io.Writer, TransformRequest) Result` | Runs it and writes the principal result to the writer. |
 | `(*Stylesheet) TransformFromReader(io.Reader, TransformRequest) Result` | Runs it with the source read from the reader. |
+| `(*Stylesheet) TransformContext`, `TransformToContext` | The same with a `context.Context` that cancels the run. |
 
 ## Request
 
@@ -187,8 +189,9 @@ time. See [Optional features](/guide/xslt#optional-features).
 
 ```go
 type Limits struct {
-	MaxSteps int64 // instructions per run; default 20,000,000
-	MaxDepth int   // nesting of instructions, templates, functions; default and maximum 10,000
+	MaxSteps       int64 // instructions per run; default 20,000,000
+	MaxDepth       int   // nesting of instructions, templates, functions; default and maximum 10,000
+	MaxOutputBytes int64 // principal and secondary results together; 0 = no limit
 }
 ```
 
