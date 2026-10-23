@@ -80,11 +80,45 @@ export interface Features {
 }
 
 /**
+ * Limits bounds one transformation, including the transformations it starts
+ * itself with fn:transform, which spend from the same budget. A run that
+ * exceeds a limit stops with the error XPDY0130 ("implementation limit
+ * exceeded"). A zero field takes the default.
+ */
+export interface Limits {
+    /**
+     * MaxSteps is the number of instructions the run may execute (default
+     * 20,000,000), which bounds an endless loop such as an unbounded
+     * xsl:iterate.
+     */
+    "maxSteps": number;
+
+    /**
+     * MaxDepth is how deeply instructions, templates and functions may nest
+     * (default 10,000), which bounds endless recursion. It can only lower the
+     * default: deeper recursion could overflow the Go stack, which ends the
+     * whole process.
+     */
+    "maxDepth": number;
+
+    /**
+     * MaxOutputBytes, when positive, bounds the serialized results: the
+     * principal result and the xsl:result-document outputs together. With
+     * TransformTo the writer receives no more than that.
+     */
+    "maxOutputBytes": number;
+}
+
+/**
  * Request is a single transformation request.
  */
 export interface Request {
     /**
-     * Stylesheet is the XSLT source text.
+     * Stylesheet is the XSLT source text. When it is empty, Transform and
+     * TransformTo use the stylesheet the Source embeds and names in an
+     * <?xml-stylesheet type="text/xsl" href="#id"?> processing instruction
+     * (XSLT 3.0 §3.13): the element with that ID, compiled as a module of its
+     * own.
      */
     "stylesheet": string;
 
@@ -97,6 +131,14 @@ export interface Request {
      * Params are top-level stylesheet parameters (string-typed for now).
      */
     "params": { [_ in string]?: string } | null;
+
+    /**
+     * ParamExprs sets global parameters to the value of an XPath expression,
+     * so they can be typed: "5", "xs:date('2026-01-31')", "map{'a': 1}",
+     * "parse-xml('<x/>')". The expression is evaluated without a context
+     * item; a name here wins over the same name in Params.
+     */
+    "paramExprs"?: { [_ in string]?: string } | null;
 
     /**
      * InitialTemplate optionally names an xsl:template to invoke first
@@ -122,6 +164,12 @@ export interface Request {
      * the zero value is a basic XSLT 3.0 processor.
      */
     "features": Features;
+
+    /**
+     * Limits bounds what the run may execute; the zero value takes the
+     * defaults.
+     */
+    "limits": Limits;
 }
 
 /**
@@ -212,6 +260,9 @@ export interface ValidateRequest {
     /**
      * Schemas holds the schema document source texts. The first is the entry
      * schema; the rest are additional documents available to xs:import/include.
+     * With none, the instance is validated by the schema documents its own
+     * xsi:schemaLocation / xsi:noNamespaceSchemaLocation name (read under
+     * BaseDir and Security) and the built-in types its xsi:type names.
      */
     "schemas": string[] | null;
 
@@ -311,6 +362,36 @@ export interface XPathRequest {
      * read; the zero value allows files under BaseDir only, and no network.
      */
     "security": Security;
+
+    /**
+     * Namespaces binds prefixes for the expression (prefix → namespace URI),
+     * e.g. {"inv": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"}.
+     * Bound as well, unless an entry here says otherwise: the prefixes the
+     * document element of Source declares, and xml, xs, xsi, fn, math, map,
+     * array and err. A prefix bound nowhere is the error XPST0081. Without a
+     * prefix, Q{uri}local names any namespace.
+     */
+    "namespaces"?: { [_ in string]?: string } | null;
+
+    /**
+     * DefaultElementNamespace is the namespace of element names written
+     * without a prefix; empty, the default, means no namespace.
+     */
+    "defaultElementNamespace"?: string;
+
+    /**
+     * Variables binds $name to a string. A name may have a prefix bound in
+     * Namespaces ("p:name").
+     */
+    "variables"?: { [_ in string]?: string } | null;
+
+    /**
+     * VariableExprs binds $name to the value of an XPath expression, so it
+     * can be typed or a node: "42", "xs:date('2026-01-31')", "//item[1]".
+     * It is evaluated like Expression, against Source, but cannot refer to
+     * other variables. A name here wins over the same name in Variables.
+     */
+    "variableExprs"?: { [_ in string]?: string } | null;
 }
 
 /**

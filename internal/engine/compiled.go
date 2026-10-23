@@ -29,6 +29,9 @@ type TransformRequest struct {
 	Source string `json:"source"`
 	// Params are top-level stylesheet parameters (string-typed).
 	Params map[string]string `json:"params"`
+	// ParamExprs sets parameters to the value of an XPath expression; see
+	// Request.ParamExprs.
+	ParamExprs map[string]string `json:"paramExprs,omitempty"`
 	// InitialTemplate optionally names an xsl:template to invoke first.
 	InitialTemplate string `json:"initialTemplate"`
 	// Security limits which files (under the Stylesheet's BaseDir) and
@@ -76,7 +79,10 @@ func (s *Stylesheet) Transform(tr TransformRequest) Result {
 func (s *Stylesheet) TransformContext(ctx context.Context, tr TransformRequest) (res Result) {
 	start := time.Now()
 	defer s.finish(&res, start)
-	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal(), Context: ctx}
+	if d := checkParamExprs(tr.ParamExprs); len(d) > 0 {
+		return Result{Diagnostics: d}
+	}
+	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, ParamSelects: tr.ParamExprs, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal(), Context: ctx}
 	rr, err := s.ss.TransformEntry(tr.Source, entry, s.baseDir)
 	if err != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "run")}}
@@ -101,7 +107,10 @@ func (s *Stylesheet) TransformTo(w io.Writer, tr TransformRequest) Result {
 func (s *Stylesheet) TransformToContext(ctx context.Context, w io.Writer, tr TransformRequest) (res Result) {
 	start := time.Now()
 	defer s.finish(&res, start)
-	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal(), Context: ctx}
+	if d := checkParamExprs(tr.ParamExprs); len(d) > 0 {
+		return Result{Diagnostics: d}
+	}
+	entry := xslt.Entry{Template: tr.InitialTemplate, Params: tr.Params, ParamSelects: tr.ParamExprs, Fetcher: tr.Security.fetcher(), Files: FileGuard(tr.Security, s.baseDir), Limits: tr.Limits.internal(), Context: ctx}
 	lw := &limitWriter{w: w, max: math.MaxInt64}
 	if tr.Limits.MaxOutputBytes > 0 {
 		lw.max = tr.Limits.MaxOutputBytes

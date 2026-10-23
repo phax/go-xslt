@@ -808,7 +808,7 @@ func jsDecodeString(raw, decoded string, opts jsOptions) (string, error) {
 		if len(s) < 4 {
 			return 0, false
 		}
-		v, err := strconv.ParseUint(s[:4], 16, 32)
+		v, err := strconv.ParseUint(s[:4], 16, 16) // four hex digits: at most 0xFFFF
 		return rune(v), err == nil
 	}
 	for i := 0; i < len(raw); {
@@ -1695,14 +1695,14 @@ func jsUnescape(s string) (string, error) {
 			if i+6 > len(s) {
 				return "", fmt.Errorf("err:FOJS0007: truncated \\u escape")
 			}
-			v, err := strconv.ParseUint(s[i+2:i+6], 16, 32)
+			v, err := strconv.ParseUint(s[i+2:i+6], 16, 16) // four hex digits: at most 0xFFFF
 			if err != nil {
 				return "", fmt.Errorf("err:FOJS0007: invalid \\u escape %q", s[i:i+6])
 			}
 			r := rune(v)
 			// Combine a valid surrogate pair into one code point.
 			if r >= 0xD800 && r <= 0xDBFF && i+12 <= len(s) && s[i+6] == '\\' && s[i+7] == 'u' {
-				if lo, err2 := strconv.ParseUint(s[i+8:i+12], 16, 32); err2 == nil && lo >= 0xDC00 && lo <= 0xDFFF {
+				if lo, err2 := strconv.ParseUint(s[i+8:i+12], 16, 16); err2 == nil && lo >= 0xDC00 && lo <= 0xDFFF {
 					b.WriteRune(0x10000 + (r-0xD800)<<10 + (rune(lo) - 0xDC00))
 					i += 12
 					continue
@@ -1736,7 +1736,7 @@ func jsValidateEscaped(s string) (string, error) {
 				if i+6 > len(s) {
 					return "", fmt.Errorf("err:FOJS0007: truncated \\u escape")
 				}
-				if _, err := strconv.ParseUint(s[i+2:i+6], 16, 32); err != nil {
+				if _, err := strconv.ParseUint(s[i+2:i+6], 16, 16); err != nil {
 					return "", fmt.Errorf("err:FOJS0007: invalid \\u escape %q", s[i:i+6])
 				}
 				b.WriteString(s[i : i+6])

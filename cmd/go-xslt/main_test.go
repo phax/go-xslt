@@ -36,6 +36,7 @@ func TestCLI(t *testing.T) {
 <d xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:stylesheet id="s" version="3.0"><xsl:output method="text"/>
 <xsl:template match="/">embedded</xsl:template></xsl:stylesheet></d>`)
 	out := filepath.Join(dir, "out")
+	nsDoc := write("ns.xml", `<r xmlns="urn:q"/>`)
 	slow := write("slow.xsl", `<xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
   <xsl:template name="xsl:initial-template"><xsl:iterate select="1 to 9000000"><xsl:value-of select="."/></xsl:iterate></xsl:template>
 </xsl:stylesheet>`)
@@ -61,6 +62,8 @@ func TestCLI(t *testing.T) {
 		{"timeout", []string{"transform", "-s", slow, "--timeout", "1ns"}, 1, "", "stopped"},
 		{"max output", []string{"transform", "-s", style, "--max-output", "3", src}, 1, "", "XPDY0130"},
 		{"xpath typed", []string{"xpath", "-t", "1 + 1"}, 0, "xs:integer\t2", ""},
+		{"xpath ns", []string{"xpath", "--ns", "q=urn:q", "--var", "s=x", "--var-expr", "n=2", "concat($s, $n, count(/q:r))", nsDoc}, 0, "x21\n", ""},
+		{"param-expr", []string{"transform", "-s", style, "--param-expr", "who=1+1", src}, 0, "hello 2 (2)", ""},
 		{"xpath error", []string{"xpath", "1 +"}, 1, "", "XPST0003"},
 		{"usage", []string{"frobnicate"}, 2, "", "unknown command"},
 	} {

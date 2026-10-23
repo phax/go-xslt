@@ -13,6 +13,7 @@ import (
 
 	"github.com/tim-riep/go-xslt/internal/fsaccess"
 	"github.com/tim-riep/go-xslt/internal/netfetch"
+	"github.com/tim-riep/go-xslt/internal/xpath"
 	"github.com/tim-riep/go-xslt/internal/xslt"
 )
 
@@ -73,6 +74,11 @@ type Request struct {
 	Source string `json:"source"`
 	// Params are top-level stylesheet parameters (string-typed for now).
 	Params map[string]string `json:"params"`
+	// ParamExprs sets global parameters to the value of an XPath expression,
+	// so they can be typed: "5", "xs:date('2026-01-31')", "map{'a': 1}",
+	// "parse-xml('<x/>')". The expression is evaluated without a context
+	// item; a name here wins over the same name in Params.
+	ParamExprs map[string]string `json:"paramExprs,omitempty"`
 	// InitialTemplate optionally names an xsl:template to invoke first
 	// (xsl:initial-template) instead of matching against the source root.
 	InitialTemplate string `json:"initialTemplate"`
@@ -146,6 +152,28 @@ func (lw *limitWriter) Write(p []byte) (int, error) {
 	n, err := lw.w.Write(p)
 	lw.n += int64(n)
 	return n, err
+}
+
+// checkParamExprs reports an expression of ParamExprs that does not
+// evaluate. The engine would otherwise fall back to the Params text for it
+// without a word; it evaluates them the same way, without a context item.
+func checkParamExprs(exprs map[string]string) []Diagnostic {
+	var diags []Diagnostic
+	for name, expr := range exprs {
+		p, err := xpath.Parse(expr)
+		if err == nil {
+			_, err = p.Eval(&xpath.Context{NoFocus: true})
+		}
+		if err != nil {
+			d := xpathDiag("parse", err)
+			if d.Code == "" {
+				d.Code = "XPST0003"
+			}
+			d.Message = fmt.Sprintf("parameter $%s: %s", name, d.Message)
+			diags = append(diags, d)
+		}
+	}
+	return diags
 }
 
 func (l Limits) internal() xslt.Limits {

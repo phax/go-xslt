@@ -61,6 +61,8 @@ export function TransformRunView({ tab, run }: { tab: RunTab; run: SavedRun }) {
           backwardsCompatible: !!run.backwardsCompatible,
           strictStreaming: !!run.strictStreaming,
         },
+        // The engine's defaults: 20 million instructions, nesting 10,000.
+        limits: { maxSteps: 0, maxDepth: 0, maxOutputBytes: 0 },
       }),
     [stylesheetBuf.text, sourceBuf.text, params, run.initialTemplate, tab.projectId, run.schemaAware, run.backwardsCompatible, run.strictStreaming],
   );

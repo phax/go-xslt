@@ -157,6 +157,8 @@ func transform(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	it := stringFlag(fs, "it", "initial-template", "start with this named `template` (xsl:initial-template for the default)")
 	var params listFlag
 	listFlags(fs, &params, "p", "param", "set a stylesheet parameter: `name=value` (repeatable)")
+	var paramExprs listFlag
+	fs.Var(&paramExprs, "param-expr", "set a stylesheet parameter to an XPath expression's value: `name=expr` (repeatable), e.g. n=5")
 	schemaAware := fs.Bool("schema-aware", false, "enable schema awareness (xsl:import-schema, validation)")
 	backwards := fs.Bool("backwards-compatible", false, "process version=\"1.0\" stylesheet parts in XSLT 1.0 compatibility mode")
 	strict := fs.Bool("strict-streaming", false, "reject streamable=\"yes\" constructs that are not guaranteed streamable")
@@ -187,6 +189,17 @@ func transform(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return 2
 		}
 		req.Params[name] = value
+	}
+	if len(paramExprs) > 0 {
+		req.ParamExprs = map[string]string{}
+		for _, p := range paramExprs {
+			name, expr, ok := strings.Cut(p, "=")
+			if !ok || name == "" {
+				fmt.Fprintf(stderr, "go-xslt: --param-expr %q: want name=expr\n", p)
+				return 2
+			}
+			req.ParamExprs[name] = expr
+		}
 	}
 
 	sourceName, sourceDir := "", ""
@@ -339,6 +352,11 @@ func validate(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 func xpath(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := newFlagSet("xpath", "xpath [options] expression [source.xml | -]", stderr)
 	typed := fs.Bool("t", false, "print each item's type before its value")
+	var nsFlags, vars, varExprs listFlag
+	listFlags(fs, &nsFlags, "n", "ns", "bind a namespace prefix: `prefix=uri` (repeatable); the document element's prefixes are bound already")
+	fs.Var(&vars, "var", "bind $name to a string: `name=value` (repeatable)")
+	fs.Var(&varExprs, "var-expr", "bind $name to an XPath expression's value: `name=expr` (repeatable)")
+	defaultNS := fs.String("default-ns", "", "the namespace `uri` of unprefixed element names")
 	timeout := timeoutFlag(fs)
 	var acc accessFlags
 	acc.register(fs)
@@ -367,6 +385,24 @@ func xpath(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	req.BaseDir = srcDir
 	req.Security = acc.security()
+	req.DefaultElementNamespace = *defaultNS
+	for _, kv := range []struct {
+		flag string
+		list listFlag
+		dst  *map[string]string
+	}{{"--ns", nsFlags, &req.Namespaces}, {"--var", vars, &req.Variables}, {"--var-expr", varExprs, &req.VariableExprs}} {
+		for _, p := range kv.list {
+			k, v, ok := strings.Cut(p, "=")
+			if !ok || k == "" {
+				fmt.Fprintf(stderr, "go-xslt: %s %q: want name=value\n", kv.flag, p)
+				return 2
+			}
+			if *kv.dst == nil {
+				*kv.dst = map[string]string{}
+			}
+			(*kv.dst)[k] = v
+		}
+	}
 	ctx, cancel := withTimeout(*timeout)
 	defer cancel()
 	res := engine.EvalXPathContext(ctx, req)

@@ -27,6 +27,57 @@ type XPathRequest struct {
 	// Security limits which files and network resources the expression may
 	// read; the zero value allows files under BaseDir only, and no network.
 	Security Security `json:"security"`
+	// Namespaces binds prefixes for the expression (prefix → namespace URI),
+	// e.g. {"inv": "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"}.
+	// Bound as well, unless an entry here says otherwise: the prefixes the
+	// document element of Source declares, and xml, xs, xsi, fn, math, map,
+	// array and err. A prefix bound nowhere is the error XPST0081. Without a
+	// prefix, Q{uri}local names any namespace.
+	Namespaces map[string]string `json:"namespaces,omitempty"`
+	// DefaultElementNamespace is the namespace of element names written
+	// without a prefix; empty, the default, means no namespace.
+	DefaultElementNamespace string `json:"defaultElementNamespace,omitempty"`
+	// Variables binds $name to a string. A name may have a prefix bound in
+	// Namespaces ("p:name").
+	Variables map[string]string `json:"variables,omitempty"`
+	// VariableExprs binds $name to the value of an XPath expression, so it
+	// can be typed or a node: "42", "xs:date('2026-01-31')", "//item[1]".
+	// It is evaluated like Expression, against Source, but cannot refer to
+	// other variables. A name here wins over the same name in Variables.
+	VariableExprs map[string]string `json:"variableExprs,omitempty"`
+}
+
+// predeclaredNS are the prefixes every standalone expression may use.
+var predeclaredNS = map[string]string{
+	"xml":   "http://www.w3.org/XML/1998/namespace",
+	"xs":    "http://www.w3.org/2001/XMLSchema",
+	"xsi":   "http://www.w3.org/2001/XMLSchema-instance",
+	"fn":    "http://www.w3.org/2005/xpath-functions",
+	"math":  "http://www.w3.org/2005/xpath-functions/math",
+	"map":   "http://www.w3.org/2005/xpath-functions/map",
+	"array": "http://www.w3.org/2005/xpath-functions/array",
+	"err":   "http://www.w3.org/2005/xqt-errors",
+}
+
+// nsBindings is the static namespace context of a standalone expression.
+type nsBindings map[string]string
+
+func (m nsBindings) ResolveNS(prefix string) (string, bool) {
+	uri, ok := m[prefix]
+	return uri, ok
+}
+
+// varBindings holds the variables of a standalone expression, by name as
+// written ("local" or "prefix:local").
+type varBindings map[string]xpath.Object
+
+func (m varBindings) ResolveVar(prefix, local string) (xpath.Object, bool) {
+	name := local
+	if prefix != "" {
+		name = prefix + ":" + local
+	}
+	v, ok := m[name]
+	return v, ok
 }
 
 // XPathItem is one item of the result sequence.
@@ -117,6 +168,24 @@ func runXPath(cctx context.Context, req XPathRequest) XPathResult {
 		}
 		ctx.Node = doc
 	}
+	ns := nsBindings{}
+	for p, uri := range predeclaredNS {
+		ns[p] = uri
+	}
+	if ctx.Node != nil {
+		if root := xmltree.RootElement(ctx.Node); root != nil {
+			for _, d := range root.NSDecls() {
+				if d.Name.Local != "" && d.Value != "" {
+					ns[d.Name.Local] = d.Value
+				}
+			}
+		}
+	}
+	for p, uri := range req.Namespaces {
+		ns[p] = uri
+	}
+	ctx.NS = ns
+	ctx.DefaultElemNS = req.DefaultElementNamespace
 	if strings.TrimSpace(req.BaseDir) != "" {
 		r := newStandaloneResolver(req.BaseDir)
 		r.net = req.Security.fetcher()
@@ -127,6 +196,29 @@ func runXPath(cctx context.Context, req XPathRequest) XPathResult {
 		// No directory, but the network is allowed: absolute http(s) URIs
 		// still resolve, and nothing is ever read from disk.
 		ctx.Resolver = &standaloneResolver{net: f, noDisk: true}
+	}
+	if len(req.Variables) > 0 || len(req.VariableExprs) > 0 {
+		vars := varBindings{}
+		for name, val := range req.Variables {
+			vars[name] = xpath.NewString(val)
+		}
+		for name, expr := range req.VariableExprs {
+			p, err := xpath.Parse(expr)
+			var val xpath.Object
+			if err == nil {
+				val, err = p.Eval(ctx)
+			}
+			if err != nil {
+				d := xpathDiag("parse", err)
+				if d.Code == "" {
+					d.Code = "XPST0003"
+				}
+				d.Message = fmt.Sprintf("variable $%s: %s", name, d.Message)
+				return XPathResult{Diagnostics: []Diagnostic{d}}
+			}
+			vars[name] = val
+		}
+		ctx.Vars = vars
 	}
 	v, eerr := parsed.Eval(ctx)
 	if eerr != nil {

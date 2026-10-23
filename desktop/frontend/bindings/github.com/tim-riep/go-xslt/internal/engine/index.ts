@@ -8,6 +8,7 @@ export {
 export type {
     Diagnostic,
     Features,
+    Limits,
     Request,
     Result,
     SecondaryOutput,

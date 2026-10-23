@@ -20,6 +20,7 @@ res := engine.Transform(engine.Request{
 | `Stylesheet` | The XSLT source text. A top-level `xsl:package` is accepted as well as `xsl:stylesheet`. |
 | `Source` | The source document as text. It may be empty when `InitialTemplate` is set. |
 | `Params` | Values for global `xsl:param`s, by name. Values are strings. |
+| `ParamExprs` | Values for global `xsl:param`s as XPath expressions, so they can be typed: `"5"`, `"xs:date('2026-01-31')"`, `"map{'a': 1}"`, `"parse-xml('<x/>')"`. Evaluated without a context item; an expression that does not evaluate is reported as an error. A name here wins over `Params`. |
 | `InitialTemplate` | The name of a template to start with, instead of applying templates to the source document. |
 | `BaseDir` | The directory against which relative URIs are resolved: `xsl:import`, `xsl:include`, `document()`, `fn:doc`, `fn:unparsed-text`, collections and `xsl:result-document`. Empty means no file is read. |
 | `Security` | Which files and network resources the run may read. See [Security](/guide/security). |

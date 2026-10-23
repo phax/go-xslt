@@ -19,6 +19,9 @@ func toString(v any) string {
 
 // run compiles the stylesheet and executes the transformation.
 func run(ctx context.Context, req Request) Result {
+	if d := checkParamExprs(req.ParamExprs); len(d) > 0 {
+		return Result{Diagnostics: d}
+	}
 	opts := compileOptions(req.Security, req.Features, req.BaseDir)
 	files := opts.Files
 	if d, ok := useEmbeddedStylesheet(&req, opts); !ok {
@@ -29,7 +32,7 @@ func run(ctx context.Context, req Request) Result {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(err, "compile")}}
 	}
 
-	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params, Fetcher: req.Security.fetcher(), Files: files, Limits: req.Limits.internal(), Context: ctx}
+	entry := xslt.Entry{Template: req.InitialTemplate, Params: req.Params, ParamSelects: req.ParamExprs, Fetcher: req.Security.fetcher(), Files: files, Limits: req.Limits.internal(), Context: ctx}
 	rr, terr := ss.TransformEntry(req.Source, entry, req.BaseDir)
 	if terr != nil {
 		return Result{Diagnostics: []Diagnostic{diagFromErr(terr, "run")}}

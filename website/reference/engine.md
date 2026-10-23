@@ -40,7 +40,8 @@ A compiled stylesheet. Immutable and safe for concurrent use.
 type Request struct {
 	Stylesheet      string            // XSLT source text; empty = the one the Source embeds
 	Source          string            // source document; may be empty with InitialTemplate
-	Params          map[string]string // global stylesheet parameters
+	Params          map[string]string // global stylesheet parameters, as strings
+	ParamExprs      map[string]string // … or as the value of an XPath expression
 	InitialTemplate string            // named template to start with
 	BaseDir         string            // resolves relative URIs; empty = no file reads
 	Security        Security
@@ -84,6 +85,7 @@ One run of a compiled `Stylesheet`. The stylesheet, its `BaseDir` and its
 type TransformRequest struct {
 	Source          string
 	Params          map[string]string
+	ParamExprs      map[string]string
 	InitialTemplate string
 	Security        Security
 	Limits          Limits
@@ -115,10 +117,14 @@ type SecondaryOutput struct {
 
 ```go
 type XPathRequest struct {
-	Expression string
-	Source     string // optional context document
-	BaseDir    string
-	Security   Security
+	Expression              string
+	Source                  string            // optional context document
+	BaseDir                 string
+	Security                Security
+	Namespaces              map[string]string // prefix → URI; plus the document element's and the standard ones
+	DefaultElementNamespace string            // namespace of unprefixed element names
+	Variables               map[string]string // $name → string
+	VariableExprs           map[string]string // $name → value of an XPath expression
 }
 
 type XPathResult struct {

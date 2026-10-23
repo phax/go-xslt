@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tim-riep/go-xslt/engine"
@@ -59,16 +60,57 @@ func TestNumberWordsGerman(t *testing.T) {
   <xsl:template name="xsl:initial-template"><r><xsl:number value="134" format="W" lang="de"/>|<xsl:number value="3" format="w" lang="de" ordinal="-e"/>|<xsl:number value="2" format="w" lang="it" ordinal="%spellout-ordinal-feminine"/></r></xsl:template>
 </xsl:stylesheet>`
 	res := engine.Transform(engine.Request{Stylesheet: xsl, InitialTemplate: "xsl:initial-template"})
-	if want := "<r>EINHUNDERTVIERUNDDREISSIG|dritte|seconda</r>"; res.HasErrors() || !contains(res.Output, want) {
+	if want := "<r>EINHUNDERTVIERUNDDREISSIG|dritte|seconda</r>"; res.HasErrors() || !strings.Contains(res.Output, want) {
 		t.Fatalf("got %q %+v, want %q", res.Output, res.Diagnostics, want)
 	}
 }
 
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
+// A standalone expression sees the prefixes of the document element, the
+// standard prefixes and the request's own bindings; an unbound prefix is an
+// error rather than a silent "no namespace".
+func TestXPathNamespacesAndVariables(t *testing.T) {
+	const inv = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+	ubl := `<Invoice xmlns="` + inv + `" xmlns:cbc="urn:cbc"><cbc:ID>R-1</cbc:ID><cbc:Note>a</cbc:Note><cbc:Note>b</cbc:Note></Invoice>`
+	for _, c := range []struct {
+		req  engine.XPathRequest
+		want string
+	}{
+		{engine.XPathRequest{Expression: "string(/*/cbc:ID)", Source: ubl}, "R-1"},
+		{engine.XPathRequest{Expression: "count(/i:Invoice/cbc:Note)", Source: ubl, Namespaces: map[string]string{"i": inv}}, "2"},
+		{engine.XPathRequest{Expression: "count(/Invoice/cbc:Note)", Source: ubl, DefaultElementNamespace: inv}, "2"},
+		{engine.XPathRequest{Expression: "count(/Q{" + inv + "}Invoice)", Source: ubl}, "1"},
+		{engine.XPathRequest{Expression: "$n + count($notes)", Source: ubl, VariableExprs: map[string]string{"n": "10", "notes": "//cbc:Note"}}, "12"},
+		{engine.XPathRequest{Expression: "concat($a, '!')", Variables: map[string]string{"a": "hi"}}, "hi!"},
+		{engine.XPathRequest{Expression: "math:pi() > 3 and map:size(map{1: 2}) = 1 and xs:integer('1') = 1"}, "true"},
+	} {
+		r := engine.EvalXPath(c.req)
+		if r.HasErrors() || r.Value != c.want {
+			t.Errorf("%s: got %q %+v, want %q", c.req.Expression, r.Value, r.Diagnostics, c.want)
 		}
 	}
-	return false
+	if r := engine.EvalXPath(engine.XPathRequest{Expression: "/nope:x", Source: ubl}); !r.HasErrors() || r.Diagnostics[0].Code != "XPST0081" {
+		t.Errorf("unbound prefix: want XPST0081, got %+v", r.Diagnostics)
+	}
+	if r := engine.EvalXPath(engine.XPathRequest{Expression: "$x", VariableExprs: map[string]string{"x": "1 +"}}); !r.HasErrors() || r.Diagnostics[0].Code != "XPST0003" {
+		t.Errorf("bad variable expression: want XPST0003, got %+v", r.Diagnostics)
+	}
+}
+
+// ParamExprs hands a stylesheet typed values; a broken expression is
+// reported instead of silently becoming the string in Params.
+func TestParamExprs(t *testing.T) {
+	xsl := `<xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:param name="n"/><xsl:param name="d"/><xsl:param name="m"/><xsl:param name="doc"/>
+  <xsl:template name="xsl:initial-template"><r><xsl:value-of select="$n + 1, $d instance of xs:date, $m?a, count($doc//x)" xmlns:xs="http://www.w3.org/2001/XMLSchema"/></r></xsl:template>
+</xsl:stylesheet>`
+	req := engine.Request{Stylesheet: xsl, InitialTemplate: "xsl:initial-template", ParamExprs: map[string]string{
+		"n": "41", "d": "xs:date('2026-01-31')", "m": "map{'a': 'x'}", "doc": "parse-xml('<r><x/><x/></r>')",
+	}}
+	if res := engine.Transform(req); res.HasErrors() || !strings.Contains(res.Output, "<r>42 true x 2</r>") {
+		t.Errorf("got %q %+v", res.Output, res.Diagnostics)
+	}
+	req.ParamExprs = map[string]string{"n": "41 +"}
+	if res := engine.Transform(req); !res.HasErrors() || !strings.Contains(res.Diagnostics[0].Message, "parameter $n") {
+		t.Errorf("broken expression: %+v", res.Diagnostics)
+	}
 }
