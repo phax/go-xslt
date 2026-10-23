@@ -11,18 +11,18 @@ Apple M4, macOS, libxml2 2.9.13 / libxslt 1.1.35; input 200,000 records,
 
 | Workload | go-xslt | libxslt / libxml2 | ratio | peak memory go-xslt | peak memory libxml2 |
 |---|---|---|---|---|---|
-| copy the whole document | 1.51 s | 0.80 s | 1.9× | 1,452 MB | 1,067 MB |
-| recursive apply-templates, rebuilding every node | 3.20 s | 1.45 s | 2.2× | 1,785 MB | 1,074 MB |
-| sort all records by two keys | 2.17 s | 22.16 s | 0.1× | 1,098 MB | 587 MB |
-| Muenchian grouping with `xsl:key` | 3.29 s | 1.01 s | 3.3× | 1,240 MB | 538 MB |
-| predicates, string and number functions | 1.48 s | 0.93 s | 1.6× | 961 MB | 590 MB |
-| XSD 1.0 validation | 2.64 s | 0.59 s | 4.5× | 1,228 MB | 539 MB |
+| copy the whole document | 1.30 s | 0.68 s | 1.9× | 1,436 MB | 1,067 MB |
+| recursive apply-templates, rebuilding every node | 2.71 s | 1.25 s | 2.2× | 1,765 MB | 1,074 MB |
+| sort all records by two keys | 1.73 s | 18.92 s | 0.09× | 1,104 MB | 587 MB |
+| Muenchian grouping with `xsl:key` | 2.55 s | 0.84 s | 3.0× | 1,213 MB | 538 MB |
+| predicates, string and number functions | 1.21 s | 0.82 s | 1.5× | 960 MB | 590 MB |
+| XSD 1.0 validation | 2.24 s | 0.50 s | 4.5× | 1,222 MB | 539 MB |
 
 ## Reading the numbers
 
 - On most workloads go-xslt takes 1.5 to 4.5 times as long as the C
   libraries and needs more memory for the document tree. Sorting is the
-  exception: libxslt's sort is ten times slower here.
+  exception: libxslt's sort is about ten times slower here.
 - The comparison is limited to what both can do. go-xslt also implements
   XSLT 3.0, XPath 3.1 and XSD 1.1, which libxslt and libxml2 do not.
 - For documents too large for memory, XSLT 3.0

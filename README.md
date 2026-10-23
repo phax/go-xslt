@@ -141,12 +141,12 @@ stylesheets, 37 MB input, whole process, Apple M4:
 
 | Workload | go-xslt | libxslt / libxml2 |
 |---|---|---|
-| copy the document | 1.5 s | 0.8 s |
-| recursive apply-templates | 3.2 s | 1.5 s |
-| sort by two keys | 2.2 s | 22.2 s |
-| Muenchian grouping | 3.3 s | 1.0 s |
-| XPath predicates and functions | 1.5 s | 0.9 s |
-| XSD 1.0 validation | 2.6 s | 0.6 s |
+| copy the document | 1.3 s | 0.7 s |
+| recursive apply-templates | 2.7 s | 1.2 s |
+| sort by two keys | 1.7 s | 18.9 s |
+| Muenchian grouping | 2.5 s | 0.8 s |
+| XPath predicates and functions | 1.2 s | 0.8 s |
+| XSD 1.0 validation | 2.2 s | 0.5 s |
 
 So go-xslt is typically 1.5–4.5× slower than the C libraries and uses more
 memory, with streaming available when memory matters. It implements XSLT 3.0,
