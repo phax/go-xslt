@@ -11,22 +11,29 @@ Apple M4, macOS, libxml2 2.9.13 / libxslt 1.1.35; input 200,000 records,
 
 | Workload | go-xslt | libxslt / libxml2 | ratio | peak memory go-xslt | peak memory libxml2 |
 |---|---|---|---|---|---|
-| copy the whole document | 0.80 s | 0.89 s | 0.90× | 1,142 MB | 1,067 MB |
-| recursive apply-templates, rebuilding every node | 2.00 s | 1.79 s | 1.11× | 1,179 MB | 1,074 MB |
-| sort all records by two keys | 1.09 s | 24.06 s | 0.05× | 822 MB | 587 MB |
-| Muenchian grouping with `xsl:key` | 0.91 s | 0.95 s | 0.96× | 845 MB | 538 MB |
-| predicates, string and number functions | 0.65 s | 0.91 s | 0.71× | 776 MB | 590 MB |
-| XSD 1.0 validation | 0.73 s | 0.54 s | 1.34× | 620 MB | 539 MB |
+| copy the whole document | 0.60 s | 0.74 s | 0.81× | 1,108 MB | 1,067 MB |
+| recursive apply-templates, rebuilding every node | 1.13 s | 1.33 s | 0.85× | 1,180 MB | 1,074 MB |
+| sort all records by two keys, text output | 0.77 s | 20.89 s * | — | 822 MB | 587 MB |
+| Muenchian grouping with `xsl:key` | 0.71 s | 0.91 s | 0.78× | 845 MB | 538 MB |
+| predicates, string and number functions | 0.62 s | 0.87 s | 0.72× | 778 MB | 590 MB |
+| XSD 1.0 validation | 0.60 s | 0.53 s | 1.13× | 622 MB | 539 MB |
+
+\* Not a sorting measurement. Almost all of libxslt's time here goes into
+building the 5.6 MB text output: the libxslt 1.1.35 that macOS ships appends
+each piece to one text node and measures that node's whole length again
+every time, which grows quadratically. The same stylesheet without
+`xsl:sort` takes it just as long; the sorting itself costs libxslt about
+1.5 s. Current libxslt releases avoid this, so the row is left out of the
+comparison.
 
 The machine was not idle during this run, which slows both tools alike; the
 ratios are what carries over.
 
 ## Reading the numbers
 
-- go-xslt is about as fast as the C libraries: faster at copying the
-  document, at XPath and especially at sorting (libxslt's sort is about
-  twenty times slower here), up to 1.3 times slower at template rules and
-  validation. It needs somewhat more memory for the document tree.
+- go-xslt is faster than the C libraries at copying, template rules,
+  grouping and XPath, and about 1.1 times slower at validation. It needs
+  somewhat more memory for the document tree.
 - The comparison is limited to what both can do. go-xslt also implements
   XSLT 3.0, XPath 3.1 and XSD 1.1, which libxslt and libxml2 do not.
 - For documents too large for memory, XSLT 3.0
@@ -38,12 +45,8 @@ ratios are what carries over.
 
 ## Where the time goes
 
-Profiles showed early on that most of the time went to obtaining memory —
-about 35% in the operating system's memory calls while the heap grows past
-1 GB, roughly half a second per gigabyte allocated — and to the garbage
-collector scanning it. The lever was therefore the memory a run allocates.
-Three steps brought go-xslt from 1.5–4.5 times libxslt's time to where it is
-now:
+Four rounds of profiling and measurement brought go-xslt from 1.5–4.5 times
+libxslt's time to where it is now:
 
 - reusing evaluation contexts (per predicate, key walk, template match and
   XPath evaluation) instead of allocating one per node, carving parsed
@@ -54,8 +57,15 @@ now:
   `encoding/xml` did, which differential fuzzing and the W3C XML
   Conformance Test Suite check — about 260 MB less per 37 MB document;
 - skipping the DTD passes for documents without a DOCTYPE, fewer
-  allocations per template call, and serializing without building strings.
+  allocations per template call, and serializing without building strings;
+- matching simple patterns such as `node()` and `@*` without a full
+  evaluation context, keeping `defer` out of the hottest functions, and a
+  faster sort where the result is provably the same.
 
+An earlier version of this page put a third of the time into the operating
+system's memory calls. That came from the CPU profiler on macOS, which books
+kernel time to the wrong system call; measured directly, those calls take a
+few milliseconds. The garbage collector is the largest real share now.
 What remains is mostly the document and result trees themselves.
 
 ## Same results

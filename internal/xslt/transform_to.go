@@ -46,23 +46,7 @@ var strmChunkedRuns atomic.Int64
 func (ss *Stylesheet) TransformFullTo(w io.Writer, srcXML string, params map[string]string, baseDir string, allowChunked bool) (*RunResult, error) {
 	tgt := &outTarget{w: w}
 	if allowChunked {
-		if so, ok := ss.chunkedOptions(); ok {
-			cw := xmltree.NewChunkWriter(w, so)
-			// checkSerializationErrors' SERE0006 scan cannot run at the end any
-			// more — by then the tree has been written and released — so the
-			// same check travels with the writer, node by node. Its condition is
-			// the same one there: the xml method below version 1.1.
-			if so.Method == "xml" && strings.TrimSpace(so.XMLVersion) != "1.1" {
-				cw.Validate = func(n *xmltree.Node) error {
-					if c, bad := firstIllegalXML10Char(n); bad {
-						return fmt.Errorf("err:SERE0006: character #x%X cannot be serialized as XML 1.0", c)
-					}
-					return nil
-				}
-			}
-			tgt.sink = cw
-			strmChunkedRuns.Add(1)
-		}
+		tgt.sink = ss.outSink(w)
 	}
 	eng, root, err := ss.transformInto(srcXML, params, baseDir, tgt)
 	if err != nil {
@@ -78,25 +62,40 @@ func (ss *Stylesheet) TransformFullTo(w io.Writer, srcXML string, params map[str
 func (ss *Stylesheet) TransformEntryTo(w io.Writer, srcXML string, e Entry, baseDir string, allowChunked bool) (*RunResult, error) {
 	tgt := &outTarget{w: w}
 	if allowChunked {
-		if so, ok := ss.chunkedOptions(); ok {
-			cw := xmltree.NewChunkWriter(w, so)
-			if so.Method == "xml" && strings.TrimSpace(so.XMLVersion) != "1.1" {
-				cw.Validate = func(n *xmltree.Node) error {
-					if c, bad := firstIllegalXML10Char(n); bad {
-						return fmt.Errorf("err:SERE0006: character #x%X cannot be serialized as XML 1.0", c)
-					}
-					return nil
-				}
-			}
-			tgt.sink = cw
-			strmChunkedRuns.Add(1)
-		}
+		tgt.sink = ss.outSink(w)
 	}
 	eng, root, err := ss.transformEntryInto(srcXML, e, baseDir, tgt)
 	if err != nil {
 		return nil, err
 	}
 	return ss.finishRun(eng, root)
+}
+
+// outSink returns the incremental writer for a run whose caller allows one,
+// or nil when the output definition rules it out. A stylesheet that names no
+// output method gets none: its method is only known from the finished result
+// (autoMethod), and writing before that would leave partial output behind on
+// an error in a run that never asked for incremental output.
+func (ss *Stylesheet) outSink(w io.Writer) *xmltree.ChunkWriter {
+	so, ok := ss.chunkedOptions()
+	if !ok {
+		return nil
+	}
+	cw := xmltree.NewChunkWriter(w, so)
+	strmChunkedRuns.Add(1)
+	// checkSerializationErrors' SERE0006 scan cannot run at the end any more —
+	// by then the tree has been written and released — so the same check
+	// travels with the writer, node by node. Its condition is the same one
+	// there: the xml method below version 1.1.
+	if so.Method == "xml" && strings.TrimSpace(so.XMLVersion) != "1.1" {
+		cw.Validate = func(n *xmltree.Node) error {
+			if c, bad := firstIllegalXML10Char(n); bad {
+				return fmt.Errorf("err:SERE0006: character #x%X cannot be serialized as XML 1.0", c)
+			}
+			return nil
+		}
+	}
+	return cw
 }
 
 // chunkedOptions returns the serialization options for an incrementally

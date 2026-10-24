@@ -253,13 +253,27 @@ type Template struct {
 	// once at the end of the compile (finishTemplates), read-only afterwards;
 	// its capacity is 1, so an append by any holder copies.
 	alone []*Template
+	// ctxFree records that the match pattern reads nothing of its Context
+	// but the default element namespace (xpath.Pattern.NeedsOnlyDefaultNS),
+	// so matchingTemplates matches it without building a full one. Set with
+	// alone, after every pattern rewrite; false (the ordinary path) for a
+	// template the finishing pass never saw.
+	ctxFree bool
+	// versionOK records that checkBackwardsCompatVersion passed for el when
+	// the compile finished. Its answer depends only on el's own @version and
+	// its module's registered features, both fixed by then, so a call need
+	// not repeat the registry lookup; false means "check at the call" (the
+	// ordinary path), also for a template the finishing pass never saw.
+	versionOK bool
 }
 
 // finishTemplates fills in each template's read-only alone list (see
-// Template.alone).
+// Template.alone) and its ctxFree and versionOK flags.
 func finishTemplates(ss *Stylesheet) {
 	for _, t := range ss.templates {
 		t.alone = []*Template{t}
+		t.ctxFree = t.pattern != nil && t.pattern.NeedsOnlyDefaultNS()
+		t.versionOK = checkBackwardsCompatVersion(t.el) == nil
 	}
 }
 

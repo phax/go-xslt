@@ -161,6 +161,8 @@ func (s *Schema) checkLateHints(root *xmltree.Node) *Error {
 	}
 	seen := map[string]bool{}      // namespaces of the elements and attributes so far
 	hinted := map[[2]string]bool{} // {namespace, location} pairs hinted so far
+	var lastSeen string            // the namespace recorded in seen last (see below)
+	haveLast := false
 	var walk func(el *xmltree.Node) *Error
 	walk = func(el *xmltree.Node) *Error {
 		var addressed [][2]string
@@ -182,9 +184,18 @@ func (s *Schema) checkLateHints(root *xmltree.Node) *Error {
 				return e
 			}
 		}
-		seen[el.Name.Space] = true
+		// Recording a namespace already recorded changes nothing, and almost
+		// every element and attribute repeats the one just recorded — so that
+		// one is remembered and only a different namespace reaches the map.
+		if !haveLast || el.Name.Space != lastSeen {
+			seen[el.Name.Space] = true
+			lastSeen, haveLast = el.Name.Space, true
+		}
 		for _, a := range el.Attrs {
-			seen[a.Name.Space] = true
+			if !haveLast || a.Name.Space != lastSeen {
+				seen[a.Name.Space] = true
+				lastSeen, haveLast = a.Name.Space, true
+			}
 		}
 		for _, c := range el.Children {
 			if c.Kind == xmltree.KindElement {

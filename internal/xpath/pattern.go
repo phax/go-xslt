@@ -423,6 +423,51 @@ func reverseNodes(ns NodeSet) {
 // xsl:next-match. A pattern with no top-level '|' yields a single entry.
 func PatternAlternatives(src string) []string { return patternAlternatives(src) }
 
+// NeedsOnlyDefaultNS reports whether matching the pattern reads nothing of
+// its Context but DefaultElemNS: every alternative is a plain location path
+// (no leading primary expression, no expression alternative) whose steps
+// carry no predicate and whose node tests resolve nothing beyond that —
+// node(), text(), comment(), processing-instruction(), and name tests with no
+// namespace prefix to resolve and no schema to consult (*, name, *:local,
+// Q{uri}local, Q{uri}*; an unprefixed element name takes DefaultElemNS). For
+// such a pattern Match(n, ctx) is exactly Match(n, &Context{DefaultElemNS:
+// ctx.DefaultElemNS}) — Match neither writes to that Context nor keeps it —
+// which lets a host skip building a full one per match. The answer reflects
+// the pattern as it is now; a later TypedModeRewrite can change it.
+func (p *Pattern) NeedsOnlyDefaultNS() bool {
+	if len(p.exprAlts) > 0 || len(p.alts) == 0 {
+		return false
+	}
+	for _, pe := range p.alts {
+		if pe.Start != nil {
+			return false
+		}
+		for _, s := range pe.Steps {
+			if len(s.Preds) > 0 || s.Postfix != nil || !testNeedsOnlyDefaultNS(s.Test) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// testNeedsOnlyDefaultNS reports whether matching node test t (matchTestC)
+// reads nothing of its Context but DefaultElemNS.
+func testNeedsOnlyDefaultNS(t NodeTest) bool {
+	switch t.Kind {
+	case testNode, testText, testComment, testPI:
+		return true
+	case testName:
+		if t.TypedElem || t.SchemaType != nil {
+			return false
+		}
+		// A prefix is resolved through ctx.NS (matchNameTestC) unless the
+		// test returns before needing it: *:local and Q{uri}….
+		return t.Prefix == "" || t.WildNS || t.Braced
+	}
+	return false
+}
+
 // Match reports whether node n is selected by the pattern, using ctx for
 // variable/namespace/function resolution within predicates.
 func (p *Pattern) Match(n *xmltree.Node, ctx *Context) (bool, error) {

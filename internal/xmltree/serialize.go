@@ -418,6 +418,19 @@ type serializer struct {
 	prefixes map[string]string // prefix -> uri currently in scope
 	suppress bool              // inside a suppress-indentation element
 	attrBuf  []byte            // startTag's scratch buffer for an element's attributes
+	// limit caches encodingLimit(opts.Encoding) once limitOK is set: opts
+	// never change after construction, and the lookup (a case-folded copy of
+	// the encoding name) was repeated for every text node and attribute.
+	limit   rune
+	limitOK bool
+}
+
+// encLimit is encodingLimit(s.opts.Encoding), computed once.
+func (s *serializer) encLimit() rune {
+	if !s.limitOK {
+		s.limit, s.limitOK = encodingLimit(s.opts.Encoding), true
+	}
+	return s.limit
 }
 
 func (s *serializer) node(n *Node, depth int) {
@@ -1087,7 +1100,7 @@ func (s *serializer) mapChars(v string, esc func(string) string) string {
 // (output-0115c); normalization (@normalization-form) does.
 func (s *serializer) writeCDATA(v string) {
 	v = s.normalize(v)
-	limit := encodingLimit(s.opts.Encoding)
+	limit := s.encLimit()
 	if limit == 0 {
 		s.b.WriteString("<![CDATA[" + strings.ReplaceAll(v, "]]>", "]]]]><![CDATA[>") + "]]>")
 		return
@@ -1146,7 +1159,7 @@ func encodingLimit(enc string) rune {
 // (character-map-010: encoding="iso-8859-1" can't carry a supplementary-plane
 // character literally, so it must fall back to &#100000;-style escaping).
 func (s *serializer) escapeRepertoire(v string) string {
-	limit := encodingLimit(s.opts.Encoding)
+	limit := s.encLimit()
 	if limit == 0 {
 		return v
 	}

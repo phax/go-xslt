@@ -9,16 +9,11 @@ import (
 // (effective) attribute uses and attribute wildcard.
 func (s *Schema) validateAttributes(ct *ComplexType, el *xmltree.Node) error {
 	uses, wc := s.effectiveAttrs(ct)
-	byName := make(map[xname]*attrUse, len(uses))
-	for _, u := range uses {
-		byName[u.decl.name] = u
-	}
-
-	present := map[xname]bool{}
+	ix := newAttrUseIndex(uses)
 	nID := 0
 	for _, a := range el.Attrs {
 		an := xname{a.Name.Space, a.Name.Local}
-		u, ok := byName[an]
+		u, ok := ix.lookup(an)
 		// xsi:* and xml:* attributes are always permitted, but when one is
 		// *explicitly* declared (e.g. ref="xml:base" use="required", or
 		// ref="xsi:type" with a fixed value) it must still be validated and
@@ -82,7 +77,7 @@ func (s *Schema) validateAttributes(ct *ComplexType, el *xmltree.Node) error {
 			}
 			continue
 		}
-		present[an] = true
+		ix.markPresent(an)
 		if u.decl.typ != nil {
 			if err := s.yearZeroOK(u.decl.typ, a.Value); err != nil {
 				return err
@@ -120,7 +115,7 @@ func (s *Schema) validateAttributes(ct *ComplexType, el *xmltree.Node) error {
 		}
 	}
 	for _, u := range uses {
-		if u.required && !present[u.decl.name] {
+		if u.required && !ix.present(u.decl.name) {
 			e := invalidf("cvc-complex-type.4", "required attribute %s is missing", u.decl.name)
 			// own wording: the xs:attribute's appinfo (the use's, else the
 			// referenced declaration's), msg:message on="missing" or unspecified
@@ -146,7 +141,7 @@ func (s *Schema) validateAttributes(ct *ComplexType, el *xmltree.Node) error {
 		// An absent attribute with a value constraint contributes that value to
 		// the instance, so an ID default still binds (and an IDREF default still
 		// has to resolve).
-		if !present[u.decl.name] && !u.prohibited && u.decl.typ != nil {
+		if !ix.present(u.decl.name) && !u.prohibited && u.decl.typ != nil {
 			switch {
 			case u.hasDefault:
 				if err := s.noteIDValues(u.decl.typ, u.def, el, el); err != nil {
@@ -162,6 +157,68 @@ func (s *Schema) validateAttributes(ct *ComplexType, el *xmltree.Node) error {
 		}
 	}
 	return nil
+}
+
+// attrUseIndex answers validateAttributes' two questions about an element's
+// attribute uses — which use a name denotes (the LAST one of that name, as a
+// map filled in order would hold) and whether an attribute of a use's name
+// was present. A complex type has a handful of uses, so for up to 64 of them
+// a linear scan and a bit set do that without the two maps the function
+// built for every element it validated; more fall back to the maps.
+type attrUseIndex struct {
+	uses    []*attrUse
+	seen    uint64 // bit i: an attribute named like uses[i] was present
+	byName  map[xname]*attrUse
+	seenMap map[xname]bool
+}
+
+func newAttrUseIndex(uses []*attrUse) attrUseIndex {
+	ix := attrUseIndex{uses: uses}
+	if len(uses) > 64 {
+		ix.byName = make(map[xname]*attrUse, len(uses))
+		for _, u := range uses {
+			ix.byName[u.decl.name] = u
+		}
+		ix.seenMap = map[xname]bool{}
+	}
+	return ix
+}
+
+func (ix *attrUseIndex) lookup(n xname) (*attrUse, bool) {
+	if ix.byName != nil {
+		u, ok := ix.byName[n]
+		return u, ok
+	}
+	for i := len(ix.uses) - 1; i >= 0; i-- {
+		if ix.uses[i].decl.name == n {
+			return ix.uses[i], true
+		}
+	}
+	return nil, false
+}
+
+func (ix *attrUseIndex) markPresent(n xname) {
+	if ix.seenMap != nil {
+		ix.seenMap[n] = true
+		return
+	}
+	for i, u := range ix.uses {
+		if u.decl.name == n {
+			ix.seen |= 1 << uint(i)
+		}
+	}
+}
+
+func (ix *attrUseIndex) present(n xname) bool {
+	if ix.seenMap != nil {
+		return ix.seenMap[n]
+	}
+	for i, u := range ix.uses {
+		if u.decl.name == n && ix.seen&(1<<uint(i)) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func lexEqualCollapsed(a, b string) bool {

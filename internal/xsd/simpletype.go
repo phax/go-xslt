@@ -510,7 +510,7 @@ func checkPrimitiveLexical(prim xpath.AtomType, v string) error {
 	case xpath.XSname:
 		return matchLexical(reName, prim, v)
 	case xpath.XSncname, xpath.XSid, xpath.XSidref, xpath.XSentity:
-		return matchLexical(reNCName, prim, v)
+		return checkLexical(isNCNameLex(v), prim, v)
 	case xpath.XSnmtoken:
 		return matchLexical(reNmtoken, prim, v)
 	case xpath.XShexBinary:
@@ -531,7 +531,7 @@ func checkPrimitiveLexical(prim xpath.AtomType, v string) error {
 		// truncates "1.5"→1 for integers and accepts big.Rat fraction syntax
 		// ("1/2") for decimals, neither of which is a valid XSD lexical.
 		if isIntegerLike(prim) {
-			if !reInteger.MatchString(v) {
+			if !isIntegerLex(v) {
 				return invalidf("cvc-datatype-valid", "%q is not a valid %s", v, atomName(prim))
 			}
 			// With the lexical shape settled, all the cast below can still
@@ -548,7 +548,7 @@ func checkPrimitiveLexical(prim xpath.AtomType, v string) error {
 			}
 		}
 		if prim == xpath.XSdecimal {
-			if !reDecimal.MatchString(v) {
+			if !isDecimalLex(v) {
 				return invalidf("cvc-datatype-valid", "%q is not a valid xs:decimal", v)
 			}
 			// Every string the regex admits is one big.Rat.SetString accepts

@@ -317,9 +317,12 @@ Desktop GUI (**run from `desktop/`**):
   (`validateAgainstType`) and leaves by `panic(canceled{…})`, so the
   collector never books a cancellation as a validation error.
   `Limits.MaxOutputBytes` is checked in the facade (`limitWriter` for
-  TransformTo). Profiling (website/performance.md): the gap to libxslt is
-  memory acquisition (`runtime.madvise` ~35%) and GC, NOT parsing (~12%) —
-  about 0.5 s per GB of fresh heap, so the lever is allocating less.
+  TransformTo). Profiling (website/performance.md): on darwin, pprof books
+  kernel time to whichever syscall a thread enters next, so its large
+  `runtime.madvise` share (~35%) was mostly a misattribution — timed
+  directly, madvise is ~13 ms a run. Profile with macOS `sample` (per-thread
+  stacks) and decide by A/B wall/CPU time in alternating processes; GC
+  (scanning pointer-heavy small objects) is now the largest real share.
 - **Reused scratch contexts** (predicates in `applyPredicateOrdered`, the
   `xsl:key` walk, `matchingTemplates`' pool, `evalWith`'s `evalPool`) are
   overwritten per use. Any code that keeps a `*xpath.Context` beyond the

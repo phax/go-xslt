@@ -135,6 +135,58 @@ func NewAttribute(name Name, value string) *Node {
 	return &Node{Kind: KindAttribute, Name: name, Value: value}
 }
 
+// NodeAlloc hands out zeroed nodes carved from shared slabs, for code that
+// builds a whole tree at once (a deep copy) and would otherwise allocate it
+// one node at a time: a node from New is exactly a new(Node), but a slab is
+// one allocation for many nodes. A slab lives as long as any node carved
+// from it, so the slabs are kept small — the first is sized by Reserve, every
+// later one holds nodeAllocSlab nodes — which bounds what one retained node
+// can keep alive.
+type NodeAlloc struct {
+	slab []Node
+	next int // size of the next slab (0: nodeAllocSlab)
+}
+
+// nodeAllocSlab is the size of a NodeAlloc slab after the first: a couple of
+// pages' worth, few enough that retention stays bounded.
+const nodeAllocSlab = 64
+
+// Reserve sizes the first slab for n nodes (at most nodeAllocSlab), so a copy
+// of a few nodes takes no more than it needs. Call it before the first New.
+func (a *NodeAlloc) Reserve(n int) {
+	a.next = min(max(n, 1), nodeAllocSlab)
+}
+
+// New returns a zeroed node.
+func (a *NodeAlloc) New() *Node {
+	if len(a.slab) == 0 {
+		n := a.next
+		if n <= 0 {
+			n = nodeAllocSlab
+		}
+		a.slab = make([]Node, n)
+		a.next = nodeAllocSlab
+	}
+	n := &a.slab[0]
+	a.slab = a.slab[1:]
+	return n
+}
+
+// SetAttrFrom is SetAttr with a new attribute node taken from a.
+func (n *Node) SetAttrFrom(a *NodeAlloc, name Name, value string) *Node {
+	for _, at := range n.Attrs {
+		if at.Name.Local == name.Local && at.Name.Space == name.Space {
+			at.Value = value
+			return at
+		}
+	}
+	at := a.New()
+	at.Kind, at.Name, at.Value = KindAttribute, name, value
+	at.Parent = n
+	n.Attrs = append(n.Attrs, at)
+	return at
+}
+
 // Append adds child to n, setting the parent link.
 func (n *Node) Append(child *Node) {
 	child.Parent = n

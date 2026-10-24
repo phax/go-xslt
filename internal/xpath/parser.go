@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 )
@@ -13,6 +14,14 @@ import (
 type Parsed struct {
 	root Expr
 	text string
+	// prefVars caches whether the tree holds a $prefix:name variable
+	// reference at all (0 = not yet known, 1 = none, 2 = some), the only
+	// thing Eval's static prefix check (checkStaticVarRefPrefixes) can fail
+	// on: with none it cannot fail, whatever the context, so the per-call
+	// walk of the whole tree is skipped. Computed on first use, after every
+	// rewrite a host applies; atomic because a Parsed is shared by
+	// concurrent runs.
+	prefVars atomic.Int32
 }
 
 // Text returns the original expression source.

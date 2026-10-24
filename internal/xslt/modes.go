@@ -451,11 +451,6 @@ func (sc *matchScratch) captured() bool { return sc.ctx.Captured() || sc.env.cap
 
 func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Template {
 	var cands []*Template
-	// XSLT §5.5: a pattern is evaluated with an empty "current captured
-	// substrings" (see fegMatches).
-	savedGroups := eng.regexGroups
-	eng.regexGroups = nil
-	defer func() { eng.regexGroups = savedGroups }()
 	// One evalEnv and one Context serve every candidate of this call: they were
 	// rebuilt per template, i.e. two allocations x every template x every
 	// matched node. Match returns only a bool and keeps no reference to either
@@ -465,28 +460,61 @@ func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Templat
 	// The pair itself comes from a per-engine free list: a matchingTemplates
 	// call checks one out and returns it on exit, so a nested call (a pattern
 	// predicate that applies templates) gets its own and never sees ours.
+	//
+	// The pair is only checked out for the first pattern that reads more of
+	// a context than its default element namespace (Template.ctxFree): one
+	// that does not — node(), @*, text(), order, … — is matched against the
+	// engine's one minimal Context (staticMatchCtx), and a call that meets
+	// only such patterns never touches the pool or the regex groups.
 	var sc *matchScratch
-	if n := len(eng.matchPool); n > 0 {
-		sc = eng.matchPool[n-1]
-		eng.matchPool = eng.matchPool[:n-1]
-	} else {
-		sc = new(matchScratch)
-	}
+	var savedGroups [][]string
 	defer func() {
+		if sc == nil {
+			return
+		}
+		eng.regexGroups = savedGroups
 		if sc.captured() {
 			return // a function item kept the pair: never reuse it
 		}
 		*sc = matchScratch{} // drop node/stylesheet references while pooled
 		eng.matchPool = append(eng.matchPool, sc)
 	}()
-	env, ctx := &sc.env, &sc.ctx
-	item := realItemOf(node)
+	var env *evalEnv
+	var ctx *xpath.Context
+	var item xpath.Item
 	var first *Template // the only match so far (cands stays nil until a second)
 	for _, t := range eng.sheet.templates {
 		if t.pattern == nil || !t.matchesMode(mode) {
 			continue
 		}
-		if sc.captured() {
+		if t.ctxFree {
+			if ok, _ := t.pattern.Match(node, eng.staticMatchCtx(eng.templateDefaultNS(t))); !ok {
+				continue
+			}
+			if first == nil {
+				first = t
+				continue
+			}
+			if cands == nil {
+				cands = append(cands, first)
+			}
+			cands = append(cands, t)
+			continue
+		}
+		if sc == nil {
+			// XSLT §5.5: a pattern is evaluated with an empty "current
+			// captured substrings" (see fegMatches).
+			savedGroups = eng.regexGroups
+			eng.regexGroups = nil
+			if n := len(eng.matchPool); n > 0 {
+				sc = eng.matchPool[n-1]
+				eng.matchPool = eng.matchPool[:n-1]
+			} else {
+				sc = new(matchScratch)
+			}
+			env, ctx = &sc.env, &sc.ctx
+			item = realItemOf(node)
+		} else if sc.captured() {
 			// A function item created while matching the previous template
 			// kept the pair (or the env, through a derived context): the
 			// rest of this call works on a fresh one.
@@ -533,6 +561,18 @@ func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Templat
 		return a.order > b.order
 	})
 	return cands
+}
+
+// staticMatchCtx returns the engine's minimal match Context, carrying only
+// the default element namespace dns: all that a pattern for which
+// xpath.Pattern.NeedsOnlyDefaultNS holds reads of a Context (and such a match
+// neither writes to it nor keeps it, so the one value serves every match).
+func (eng *engine) staticMatchCtx(dns string) *xpath.Context {
+	if eng.patCtx == nil {
+		eng.patCtx = new(xpath.Context)
+	}
+	eng.patCtx.DefaultElemNS = dns
+	return eng.patCtx
 }
 
 // matchTemplate returns the single best-matching template (or nil).

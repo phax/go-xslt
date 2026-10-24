@@ -356,10 +356,38 @@ func positionalIndex(f float64) int {
 
 // Eval evaluates the parsed expression in ctx.
 func (p *Parsed) Eval(ctx *Context) (Object, error) {
-	if err := checkStaticVarRefPrefixes(p.root, ctx); err != nil {
-		return nil, err
+	pv := p.prefVars.Load()
+	if pv == 0 {
+		pv = 1
+		if hasPrefixedVarRef(p.root) {
+			pv = 2
+		}
+		p.prefVars.Store(pv)
+	}
+	if pv == 2 {
+		if err := checkStaticVarRefPrefixes(p.root, ctx); err != nil {
+			return nil, err
+		}
 	}
 	return evalExpr(p.root, ctx)
+}
+
+// hasPrefixedVarRef reports whether the tree holds a variable reference that
+// checkStaticVarRefPrefixes would resolve — the walk and the test are that
+// function's own, so it fails only where this answers true.
+func hasPrefixedVarRef(root Expr) bool {
+	found := false
+	strmWalk(root, func(e Expr) bool {
+		if found {
+			return false
+		}
+		if v, ok := e.(*VarRef); ok && v.Prefix != "" && !strings.HasPrefix(v.Prefix, "Q{") {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 // checkStaticVarRefPrefixes performs the ONE static, lexical check XPath 3.1's
@@ -409,15 +437,27 @@ func checkStaticVarRefPrefixes(root Expr, ctx *Context) error {
 	return staticErr
 }
 
+// evalExpr evaluates e, counting the nesting depth on ctx. The counting lives
+// in this small wrapper, apart from the dispatch in evalExprNode, because a
+// defer in a function with as many returns as that switch cannot be
+// open-coded: the runtime then registers and runs it through the defer chain
+// on every single call, which was a measurable share of every evaluation.
+// Here it is open-coded and runs on the same paths (a panic included).
 func evalExpr(e Expr, ctx *Context) (Object, error) {
-	if ctx != nil {
-		ctx.evalDepth++
-		if ctx.evalDepth > maxEvalDepth {
-			ctx.evalDepth--
-			return nil, fmt.Errorf("err:XPDY0001: expression nesting too deep")
-		}
-		defer func() { ctx.evalDepth-- }()
+	if ctx == nil {
+		return evalExprNode(e, ctx)
 	}
+	ctx.evalDepth++
+	if ctx.evalDepth > maxEvalDepth {
+		ctx.evalDepth--
+		return nil, fmt.Errorf("err:XPDY0001: expression nesting too deep")
+	}
+	defer func() { ctx.evalDepth-- }()
+	return evalExprNode(e, ctx)
+}
+
+// evalExprNode is evalExpr's dispatch on the expression's kind.
+func evalExprNode(e Expr, ctx *Context) (Object, error) {
 	switch n := e.(type) {
 	case *LiteralExpr:
 		return n.Val, nil
@@ -1448,6 +1488,44 @@ func evalStepUnion(ls, rs *Step, ctx *Context) (Object, error) {
 	r := u[mid:].normalize()
 	u = append(u[:mid], r...) // r is u[mid:] itself or its in-place prefix, or a fresh slice
 	return u.normalize(), nil
+}
+
+// staticStepUnion returns the two steps of e when it is exactly L|R of two
+// unionStep operands whose node tests read nothing of a Context but
+// DefaultElemNS — "@*|node()", the select of every identity-style template,
+// being the one evaluated most.
+func staticStepUnion(e Expr) (ls, rs *Step, ok bool) {
+	u, isUnion := e.(*UnionExpr)
+	if !isUnion {
+		return nil, nil, false
+	}
+	ls, rs = unionStep(u.L), unionStep(u.R)
+	if ls == nil || rs == nil || !testNeedsOnlyDefaultNS(ls.Test) || !testNeedsOnlyDefaultNS(rs.Test) {
+		return nil, nil, false
+	}
+	return ls, rs, true
+}
+
+// EvalStaticStepUnion evaluates p with context node n without a full Context,
+// when p is a union of two plain steps that need none (staticStepUnion) and
+// n is a real node: the result is the value Eval returns for any Context
+// whose Node is n and whose DefaultElemNS is scratch's — Eval takes its union
+// fast path then (evalExprNode), which reads nothing else. scratch must hold
+// nothing but that DefaultElemNS; its Node is set for the call and cleared
+// again. ok is false, and nothing evaluated, when p is not of that shape.
+func (p *Parsed) EvalStaticStepUnion(n *xmltree.Node, scratch *Context) (NodeSet, bool) {
+	ls, rs, ok := staticStepUnion(p.root)
+	if !ok || n == nil || n.SynthCtx() {
+		return nil, false
+	}
+	scratch.Node = n
+	v, err := evalStepUnion(ls, rs, scratch)
+	scratch.Node = nil
+	if err != nil {
+		return nil, false
+	}
+	ns, isNS := v.(NodeSet)
+	return ns, isNS
 }
 
 // appendMatches appends the candidates that satisfy step's node test to dst.

@@ -201,10 +201,11 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 		}
 		if len(values) == 1 && scope == nil {
 			// The common lookup — one search value, no scoping: the index's
-			// entry list, copied once (Unique copies before it normalizes).
-			// The general path below copies it into out and then once more
-			// in dedupNodes, for the same result.
-			return xpath.NodeSet(idx[values[0]]).Unique(), true, nil
+			// entry list, copied once. keyIndexOn stored it normalized
+			// already, so the copy is what Unique would return. The general
+			// path below copies it into out and then once more in
+			// dedupNodes, for the same result.
+			return append(xpath.NodeSet{}, idx[values[0]]...), true, nil
 		}
 		var out xpath.NodeSet
 		for _, v := range values {

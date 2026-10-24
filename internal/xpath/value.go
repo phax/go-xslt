@@ -189,6 +189,12 @@ func ToNodeSet(o Object) (NodeSet, bool) {
 // Unique returns the node set in document order with duplicates removed.
 func (ns NodeSet) Unique() NodeSet { return append(NodeSet{}, ns...).normalize() }
 
+// NormalizeNodes puts ns in document order without duplicates, IN PLACE on
+// its own array where it can (the result may be ns itself or a prefix of it):
+// for a caller that owns ns and wants to normalize it once, ahead of handing
+// out copies.
+func NormalizeNodes(ns []*xmltree.Node) []*xmltree.Node { return NodeSet(ns).normalize() }
+
 // first returns the node first in document order.
 func (ns NodeSet) first() *xmltree.Node {
 	if len(ns) == 0 {

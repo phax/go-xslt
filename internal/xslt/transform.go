@@ -1545,6 +1545,11 @@ type engine struct {
 	// homeDocs caches, per stylesheet module, the tree document('')/doc('')
 	// hands back for it — see homeDoc.
 	homeDocs map[*xmltree.Node]*xmltree.Node
+	// bcScopes memoizes inBackwardsCompatScope per stylesheet element (see
+	// bcScope).
+	bcScopes map[*xmltree.Node]bool
+	// patCtx is the minimal match Context of staticMatchCtx.
+	patCtx *xpath.Context
 	// accApplicable restricts, per document root, the accumulators
 	// applicable to that tree (XSLT 3.0 §18.2.4): the Clark names listed by
 	// the xsl:source-document / xsl:merge-source use-accumulators attribute
@@ -2237,7 +2242,11 @@ func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOver
 	}
 	var bc10 bool
 	if eng.sheet.hasBackwardsCompat && eng.sheet.feat.BackwardsCompatible {
-		bc10 = inBackwardsCompatScope(el)
+		if ov == (evalOverride{}) {
+			bc10 = eng.bcScope(el)
+		} else {
+			bc10 = inBackwardsCompatScope(el)
+		}
 	}
 	ctx := &sc.ctx
 	*ctx = xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: sc.named, ResolveLookupFunction: sc.lookup, Resolver: eng.resolver, DecimalFormats: eng.sheet.decimalFormatsFor(el), DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10, Interrupt: eng.interrupt()}
@@ -2250,6 +2259,24 @@ func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOver
 		return nil, err
 	}
 	return v, err
+}
+
+// bcScope is inBackwardsCompatScope for the stylesheet element an ordinary
+// evaluation is written on, remembered per run: the answer is read off el's
+// ancestors' [xsl:]version attributes, which a compiled stylesheet never
+// changes, and the walk (with a float parse) was repeated on every
+// evaluation. Only evalWith's plain path uses it — xsl:evaluate may pass a
+// node of a tree still being built.
+func (eng *engine) bcScope(el *xmltree.Node) bool {
+	if v, ok := eng.bcScopes[el]; ok {
+		return v
+	}
+	v := inBackwardsCompatScope(el)
+	if eng.bcScopes == nil {
+		eng.bcScopes = map[*xmltree.Node]bool{}
+	}
+	eng.bcScopes[el] = v
+	return v
 }
 
 // resolveNamedFunction builds the xpath.Context.ResolveNamedFunction hook
@@ -2642,7 +2669,14 @@ func (eng *engine) execSequence(instrs []instruction, r rt, out *xmltree.Node) e
 // identity matters to try/catch, termination and the iterate/break signals —
 // but the innermost instruction an error passed through is remembered
 // (errSite), so the host can be told WHERE in the stylesheet it arose.
+//
+// The recursion counter execInstrRaw's guard checks is kept here rather than
+// there: with all of execInstrRaw's returns its defer could not be open-coded
+// and went through the runtime's defer chain on every instruction; here it is
+// open-coded, and it still covers the same span (a panic included).
 func (eng *engine) execInstr(in instruction, r rt, out *xmltree.Node) error {
+	eng.depth++
+	defer func() { eng.depth-- }()
 	err := eng.execInstrRaw(in, r, out)
 	if err != nil && !sameErr(eng.errSite.err, err) {
 		eng.errSite = errSite{err: err, in: in}
@@ -2702,8 +2736,7 @@ func (eng *engine) positionedErr(err error) error {
 func (eng *engine) execInstrRaw(in instruction, r rt, out *xmltree.Node) error {
 	// Universal recursion guard: a non-terminating stylesheet (template/function/
 	// accumulator/key recursion) errors out rather than overflowing the stack.
-	eng.depth++
-	defer func() { eng.depth-- }()
+	// The depth was counted by execInstr, the only caller.
 	if eng.tooDeep() {
 		return fmt.Errorf("err:XPDY0130: instruction recursion too deep (possible non-terminating stylesheet)")
 	}
@@ -3134,7 +3167,9 @@ func (eng *engine) forEachItems(n *forEach, items []xpath.Item, out *xmltree.Nod
 
 func (eng *engine) execApplyTemplates(n *applyTemplates, r rt, out *xmltree.Node) error {
 	var nodes xpath.NodeSet
-	if n.sel != nil {
+	if ns, ok := eng.staticSelect(n.sel, n.el, r); ok {
+		nodes = ns
+	} else if n.sel != nil {
 		v, err := eng.eval(n.sel, n.el, r)
 		if err != nil {
 			return err
@@ -3161,6 +3196,31 @@ func (eng *engine) execApplyTemplates(n *applyTemplates, r rt, out *xmltree.Node
 		nodes = xpath.NodeSet(sorted)
 	}
 	return eng.applyToNodes(nodes, eng.resolveMode(n.mode), out, n.params, r)
+}
+
+// staticSelect evaluates an xsl:apply-templates select of the shape
+// xpath.Parsed.EvalStaticStepUnion handles ("@*|node()" and its kin) without
+// the evaluation context eval builds, and reports false — leaving it to eval —
+// for anything else. It gives eval's own result: that shape reads nothing of
+// the context but the node and the default element namespace (taken here
+// exactly as evalWith takes it), and cannot fail; and it steps aside whenever
+// eval would answer differently for reasons of its own — the recursion guard
+// about to trip, or an error already pending for eval to surface.
+func (eng *engine) staticSelect(p *xpath.Parsed, el *xmltree.Node, r rt) (xpath.NodeSet, bool) {
+	if p == nil || r.node == nil || eng.pendingErr != nil {
+		return nil, false
+	}
+	eng.depth++
+	deep := eng.tooDeep()
+	eng.depth--
+	if deep {
+		return nil, false
+	}
+	var dns string
+	if eng.sheet.hasXPathDefaultNS {
+		dns = xpathDefaultNSWalk(el)
+	}
+	return p.EvalStaticStepUnion(r.node, eng.staticMatchCtx(dns))
 }
 
 // itemsAsNodes models a general sequence as the node list apply-templates
@@ -3294,9 +3354,31 @@ func (eng *engine) invokeTemplate(tmpl *Template, r rt, out *xmltree.Node, calle
 	if eng.tooDeep() {
 		return errAt(tmpl.el, "err:XPDY0130: template recursion too deep (possible non-terminating stylesheet)")
 	}
-	if err := checkBackwardsCompatVersion(tmpl.el); err != nil {
-		return err
+	if !tmpl.versionOK {
+		if err := checkBackwardsCompatVersion(tmpl.el); err != nil {
+			return err
+		}
 	}
+	if tmpl.ctxItem != nil || eng.inMerge || eng.inStreamable {
+		return eng.invokeTemplateIsolated(tmpl, r, out, callerParams, tunnelIn, callerR)
+	}
+	return eng.invokeTemplateBody(tmpl, r, out, callerParams, tunnelIn, callerR)
+}
+
+// invokeTemplate is split in three so that each part's defers stay few enough
+// per return to be open-coded (a function with more returns than that gets
+// its defers through the runtime's defer chain instead, on every call — a
+// measurable share of a template-heavy run): invokeTemplate counts the depth,
+// invokeTemplateIsolated handles the three rarely set pieces of dynamic state
+// a callee must not see, and invokeTemplateBody binds the parameters and runs
+// the body. The work and its order are exactly those of the single function
+// they were; the deferred restorations still run last-in first-out, panics
+// included.
+
+// invokeTemplateIsolated is invokeTemplate for a template that declares an
+// xsl:context-item, or a call made inside an xsl:merge-action or a declared-
+// streamable construct.
+func (eng *engine) invokeTemplateIsolated(tmpl *Template, r rt, out *xmltree.Node, callerParams []*VarDef, tunnelIn map[string]xpath.Object, callerR rt) error {
 	// xsl:context-item constrains the focus the body runs in — and with
 	// use="absent" removes it entirely. It applies at EVERY entry point
 	// (call-template, apply-templates, next-match/apply-imports and the
@@ -3346,6 +3428,19 @@ func (eng *engine) invokeTemplate(tmpl *Template, r rt, out *xmltree.Node, calle
 			eng.inStreamable, eng.curGroup, eng.curGroupOK, eng.curKey, eng.curKeyOK = savedIn, savedGroup, savedOK, savedKey, savedKeyOK
 		}()
 	}
+	return eng.invokeTemplateBody(tmpl, r, out, callerParams, tunnelIn, callerR)
+}
+
+// suppliedParam is a with-param value computed for a template call, together
+// with the xsl:with-param that supplied it.
+type suppliedParam struct {
+	val xpath.Object
+	def *VarDef
+}
+
+// invokeTemplateBody evaluates the supplied parameters in the caller's scope,
+// then runs the template in its own (see invokeTemplate).
+func (eng *engine) invokeTemplateBody(tmpl *Template, r rt, out *xmltree.Node, callerParams []*VarDef, tunnelIn map[string]xpath.Object, callerR rt) error {
 	// Every xsl:with-param is evaluated in the context of the CALLING
 	// instruction, so all supplied values must be computed BEFORE the callee's
 	// scope exists and before any of its parameters are bound. Evaluating them
@@ -3356,10 +3451,6 @@ func (eng *engine) invokeTemplate(tmpl *Template, r rt, out *xmltree.Node, calle
 	// parameter's DEFAULT, by contrast, is evaluated in the callee's scope and
 	// may legitimately refer to an earlier parameter of the same template, so
 	// it stays inside the loop.
-	type suppliedParam struct {
-		val xpath.Object
-		def *VarDef
-	}
 	var supplied map[string]suppliedParam
 	for _, p := range tmpl.params {
 		if p.tunnel {
@@ -3395,7 +3486,12 @@ func (eng *engine) invokeTemplate(tmpl *Template, r rt, out *xmltree.Node, calle
 		eng.tunnel = tunnelIn
 	}
 	defer func() { eng.scopes = callerScopes; eng.tunnel = prevTunnel }()
+	return eng.runTemplate(tmpl, r, out, supplied)
+}
 
+// runTemplate binds tmpl's parameters — from supplied, the tunnel, or their
+// defaults — in the template's own, already opened scope, and runs its body.
+func (eng *engine) runTemplate(tmpl *Template, r rt, out *xmltree.Node, supplied map[string]suppliedParam) error {
 	for _, p := range tmpl.params {
 		var val xpath.Object
 		var err error
@@ -3823,45 +3919,60 @@ func copiedNamespaceNodes(node *xmltree.Node) []*xmltree.Node {
 }
 
 func (eng *engine) execCopy(n *copyInstr, r rt, out *xmltree.Node) error {
-	node := r.node
 	if n.sel != nil {
-		// XSLT 3.0: @select names the item to copy instead of the context
-		// item — at most ONE item (XTTE3180: copy-4805), zero items is a
-		// no-op (copy-4803), and a non-node (atomic) item copies as its
-		// plain value with the body ignored, like xsl:value-of (copy-4804).
-		v, err := eng.eval(n.sel, n.el, r)
-		if err != nil {
-			return err
-		}
-		items := xpath.Items(v)
-		if len(items) == 0 {
-			// An empty @select sequence means xsl:copy (and its children) are
-			// simply not evaluated — no output, not an error (copy-1207).
-			return nil
-		}
-		if len(items) > 1 {
-			return errAt(n.el, "err:XTTE3180: xsl:copy/@select must select at most one item, got %d", len(items))
-		}
-		nd, ok := items[0].(*xmltree.Node)
-		if !ok {
-			// A non-node item is "copied" by simply outputting its value, like
-			// xsl:sequence would.
-			return appendAtomicItem(out, items[0])
-		}
-		node = nd
-		// XSLT 3.0 §11.9.1: the contained sequence constructor is evaluated
-		// with the SELECTED item as the context item and the context position
-		// and size both 1 (copy-4501: position()/last() inside an
-		// xsl:copy select="$n" in a function are 1, not an inherited focus —
-		// and in a function there is no inherited focus at all, so without
-		// this they were XPDY0002), and with the current template rule ABSENT
-		// (next-match-030: xsl:next-match inside such an xsl:copy is
-		// XTDE0560, not a continuation of the enclosing rule's search).
-		r = rt{node: node, pos: 1, size: 1}
-		savedApply := eng.applyStack
-		eng.applyStack = nil
-		defer func() { eng.applyStack = savedApply }()
+		return eng.execCopySelect(n, r, out)
 	}
+	return eng.copyNodeInstr(n, r.node, r, out)
+}
+
+// execCopySelect is xsl:copy with @select. It is apart from execCopy, like
+// copyNodeInstr, only so that the defer it needs does not stop the compiler
+// from open-coding — on every xsl:copy — what would otherwise be a defer in a
+// function with that many returns.
+func (eng *engine) execCopySelect(n *copyInstr, r rt, out *xmltree.Node) error {
+	// XSLT 3.0: @select names the item to copy instead of the context
+	// item — at most ONE item (XTTE3180: copy-4805), zero items is a
+	// no-op (copy-4803), and a non-node (atomic) item copies as its
+	// plain value with the body ignored, like xsl:value-of (copy-4804).
+	v, err := eng.eval(n.sel, n.el, r)
+	if err != nil {
+		return err
+	}
+	items := xpath.Items(v)
+	if len(items) == 0 {
+		// An empty @select sequence means xsl:copy (and its children) are
+		// simply not evaluated — no output, not an error (copy-1207).
+		return nil
+	}
+	if len(items) > 1 {
+		return errAt(n.el, "err:XTTE3180: xsl:copy/@select must select at most one item, got %d", len(items))
+	}
+	nd, ok := items[0].(*xmltree.Node)
+	if !ok {
+		// A non-node item is "copied" by simply outputting its value, like
+		// xsl:sequence would.
+		return appendAtomicItem(out, items[0])
+	}
+	node := nd
+	// XSLT 3.0 §11.9.1: the contained sequence constructor is evaluated
+	// with the SELECTED item as the context item and the context position
+	// and size both 1 (copy-4501: position()/last() inside an
+	// xsl:copy select="$n" in a function are 1, not an inherited focus —
+	// and in a function there is no inherited focus at all, so without
+	// this they were XPDY0002), and with the current template rule ABSENT
+	// (next-match-030: xsl:next-match inside such an xsl:copy is
+	// XTDE0560, not a continuation of the enclosing rule's search).
+	r = rt{node: node, pos: 1, size: 1}
+	savedApply := eng.applyStack
+	eng.applyStack = nil
+	defer func() { eng.applyStack = savedApply }()
+	return eng.copyNodeInstr(n, node, r, out)
+}
+
+// copyNodeInstr is the copying half of xsl:copy: node is the item being
+// copied (the context item, or the one @select chose), r the focus its body
+// runs with.
+func (eng *engine) copyNodeInstr(n *copyInstr, node *xmltree.Node, r rt, out *xmltree.Node) error {
 	if node == nil {
 		// xsl:copy has no @select: it copies the context item, so a dynamic
 		// context with no context item at all (error-0945a: xsl:copy reached
@@ -4664,6 +4775,31 @@ func appendAtomicItem(out *xmltree.Node, it xpath.Item) error {
 }
 
 func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
+	// The copy's element, attribute, text, comment, PI and namespace nodes
+	// come from slabs (xmltree.NodeAlloc) rather than one allocation each;
+	// the first slab is sized to the copy when that is small.
+	var a xmltree.NodeAlloc
+	a.Reserve(copySizeHint(node, 64))
+	deepCopyNodes(node, out, &a)
+}
+
+// copySizeHint counts the nodes deepCopyNodes may carve for a copy of node,
+// stopping once the count reaches limit.
+func copySizeHint(node *xmltree.Node, limit int) int {
+	n := 1 + len(node.Attrs) + len(node.NSDecls())
+	for _, c := range node.Children {
+		if n >= limit {
+			return n
+		}
+		n += copySizeHint(c, limit-n)
+	}
+	return n
+}
+
+// deepCopyNodes is deepCopyInto with the slab allocator the copy's nodes are
+// taken from: each node it builds is the new(xmltree.Node) the copy used to
+// allocate on its own, filled in the same way.
+func deepCopyNodes(node *xmltree.Node, out *xmltree.Node, alloc *xmltree.NodeAlloc) {
 	if nd, ok := node.RealItem().(*xmltree.Node); ok {
 		node = nd // a node carried by reference (see RealItem)
 	}
@@ -4686,10 +4822,11 @@ func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
 		}
 		mergeUnparsed(out, node)
 		for _, c := range node.Children {
-			deepCopyInto(c, out)
+			deepCopyNodes(c, out, alloc)
 		}
 	case xmltree.KindElement:
-		el := xmltree.NewElement(node.Name)
+		el := alloc.New()
+		el.Kind, el.Name = xmltree.KindElement, node.Name
 		// A namespace-inheritance barrier (inherit-namespaces="no") is part of
 		// what the element's in-scope namespaces ARE, so a copy has to keep it
 		// — otherwise the copy silently re-inherits the ambient bindings at its
@@ -4699,7 +4836,9 @@ func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
 		el.SetNSBarrier(node.NSBarrier())
 		xmltree.CopyTypeInfo(el, node)
 		for _, ns := range node.NSDecls() {
-			el.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: el})
+			nn := alloc.New()
+			nn.Kind, nn.Name, nn.Value, nn.Parent = xmltree.KindNamespace, ns.Name, ns.Value, el
+			el.AddNS(nn)
 		}
 		// The copy gets exactly the original's attributes and (an adjacent
 		// atomic text merging aside) one child per original child: size both
@@ -4711,7 +4850,7 @@ func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
 			el.Children = make([]*xmltree.Node, 0, n)
 		}
 		for _, a := range node.Attrs {
-			xmltree.CopyTypeInfo(el.SetAttr(a.Name, a.Value), a)
+			xmltree.CopyTypeInfo(el.SetAttrFrom(alloc, a.Name, a.Value), a)
 		}
 		// xsl:copy-of/fn:copy-of retains the ORIGINAL node's base-uri only
 		// when this (outermost) copy is the raw, unwrapped result of an
@@ -4725,7 +4864,7 @@ func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
 		}
 		out.Append(el)
 		for _, c := range node.Children {
-			deepCopyInto(c, el)
+			deepCopyNodes(c, el, alloc)
 		}
 	case xmltree.KindText:
 		// A text node that is itself a synthetic stand-in for an atomic
@@ -4743,7 +4882,8 @@ func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
 			// node the instruction itself writes into a final result tree; a
 			// text node captured in a temporary tree and later copied out is
 			// escaped normally (doe-0183..0186).
-			t := xmltree.NewText(node.Value)
+			t := alloc.New()
+			t.Kind, t.Value = xmltree.KindText, node.Value
 			xmltree.CopyTypeInfo(t, node)
 			out.Append(t)
 		}
@@ -4756,11 +4896,17 @@ func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
 		// OTHER binding (e.g. the element's own name prefix) collides with
 		// this explicit one, exactly as a real xsl:namespace would
 		// (namespace-2001).
-		out.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: node.Name, Value: node.Value, Parent: out})
+		nn := alloc.New()
+		nn.Kind, nn.Name, nn.Value, nn.Parent = xmltree.KindNamespace, node.Name, node.Value, out
+		out.AddNS(nn)
 	case xmltree.KindComment:
-		out.Append(&xmltree.Node{Kind: xmltree.KindComment, Value: node.Value})
+		c := alloc.New()
+		c.Kind, c.Value = xmltree.KindComment, node.Value
+		out.Append(c)
 	case xmltree.KindPI:
-		out.Append(&xmltree.Node{Kind: xmltree.KindPI, Name: node.Name, Value: node.Value})
+		pi := alloc.New()
+		pi.Kind, pi.Name, pi.Value = xmltree.KindPI, node.Name, node.Value
+		out.Append(pi)
 	}
 }
 
@@ -5069,19 +5215,29 @@ func (eng *engine) keyIndexOn(name string, root *xmltree.Node) (map[string][]*xm
 		env, mctx := &sc.env, &sc.ctx
 		dns, st := xpathDefaultNS(kd.el), schemaTypesFor(kd.el)
 		withNS := kd.match.MayMatchNamespaceNode()
+		// A pattern that reads no more of a context than its default element
+		// namespace is matched against just that (see staticMatchCtx), not a
+		// Context rebuilt for every node of the tree.
+		static := kd.match.NeedsOnlyDefaultNS()
 		eng.walkAllNS(root, func(node *xmltree.Node) {
 			if walkErr != nil {
 				return
 			}
-			if mctx.Captured() || env.captured {
-				// The context points at env, so both are replaced.
-				env, mctx = new(evalEnv), new(xpath.Context)
+			var ok bool
+			var err error
+			if static {
+				ok, err = kd.match.Match(node, eng.staticMatchCtx(dns))
+			} else {
+				if mctx.Captured() || env.captured {
+					// The context points at env, so both are replaced.
+					env, mctx = new(evalEnv), new(xpath.Context)
+				}
+				*env = evalEnv{eng: eng, el: kd.el, current: node}
+				*mctx = xpath.Context{Node: node, CtxItem: realItemOf(node), Pos: 1, Size: 1, Vars: env, NS: env, Funcs: env, Resolver: eng.resolver, NoOutputURI: true, DefaultElemNS: dns, Now: eng.now, SchemaTypes: st}
+				eng.patternDepth++
+				ok, err = kd.match.Match(node, mctx)
+				eng.patternDepth--
 			}
-			*env = evalEnv{eng: eng, el: kd.el, current: node}
-			*mctx = xpath.Context{Node: node, CtxItem: realItemOf(node), Pos: 1, Size: 1, Vars: env, NS: env, Funcs: env, Resolver: eng.resolver, NoOutputURI: true, DefaultElemNS: dns, Now: eng.now, SchemaTypes: st}
-			eng.patternDepth++
-			ok, err := kd.match.Match(node, mctx)
-			eng.patternDepth--
 			if err != nil {
 				// A circular key definition surfaces here (XTDE0640).
 				if strings.Contains(err.Error(), "XTDE0640") {
@@ -5136,6 +5292,13 @@ func (eng *engine) keyIndexOn(name string, root *xmltree.Node) (map[string][]*xm
 				}
 			}
 		}, withNS)
+	}
+	// Each entry is put in document order without duplicates once, here,
+	// rather than by every key() lookup that hands it out (see the fast path
+	// there): normalizing is idempotent, and every other use of an entry
+	// normalizes what it assembles anyway.
+	for k, list := range idx {
+		idx[k] = xpath.NormalizeNodes(list)
 	}
 	eng.keyIndex[ck] = idx
 	if walkErr == nil && eng.pendingErr != nil {
@@ -5686,7 +5849,7 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 	for i := range order {
 		order[i] = i
 	}
-	slices.SortStableFunc(order, func(ai, bi int) int {
+	cmpItems := func(ai, bi int) int {
 		a, b := &items[ai], &items[bi]
 		for ki := range sorts {
 			var cmp int
@@ -5707,12 +5870,40 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 			return cmp
 		}
 		return 0
-	})
+	}
+	// A stable sort's result is the one ordering by (keys, original position).
+	// When every key compares by a total preorder — numbers (NaN lowest), or
+	// strings by code point, with or without @case-order — that ordering is
+	// exactly what an unstable O(n log n) sort produces with the position as
+	// the final tie-break, without the stable algorithm's O(n log² n)
+	// merging. Any other key (a collation, typed values whose comparison
+	// need not be transitive across types) keeps the stable sort itself.
+	if sortKeysTotal(dataTypes, colls) {
+		slices.SortFunc(order, func(ai, bi int) int {
+			if c := cmpItems(ai, bi); c != 0 {
+				return c
+			}
+			return ai - bi
+		})
+	} else {
+		slices.SortStableFunc(order, cmpItems)
+	}
 	out := make([]*xmltree.Node, n)
 	for i, ix := range order {
 		out[i] = items[ix].node
 	}
 	return out, nil
+}
+
+// sortKeysTotal reports whether sortNodes compares every key column by a
+// total preorder it can vouch for (see the comment at its use).
+func sortKeysTotal(dataTypes []string, colls []func(a, b string) int) bool {
+	for ki, dt := range dataTypes {
+		if dt == sortValueDataType || (dt != "number" && colls[ki] != nil) {
+			return false
+		}
+	}
+	return true
 }
 
 // compareNumberKey orders two data-type="number" sort keys.
@@ -5801,10 +5992,13 @@ func joinSeq(o xpath.Object, sep string) string {
 // 5th edition of XML 1.0 adopted the 1.1 Name production, so a name legal in
 // 1.1 is legal in 1.0 too (xml-version-029's note).
 func firstIllegalXML10Char(n *xmltree.Node) (rune, bool) {
+	// Every character looked for is ASCII, and in UTF-8 (valid or not) a
+	// byte below 0x80 only ever stands for that ASCII character itself, so a
+	// byte scan finds exactly what decoding rune by rune would.
 	bad := func(s string) (rune, bool) {
-		for _, r := range s {
-			if r >= 0x1 && r <= 0x1F && r != 0x9 && r != 0xA && r != 0xD {
-				return r, true
+		for i := 0; i < len(s); i++ {
+			if c := s[i]; c >= 0x1 && c <= 0x1F && c != 0x9 && c != 0xA && c != 0xD {
+				return rune(c), true
 			}
 		}
 		return 0, false

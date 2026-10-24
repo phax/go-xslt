@@ -183,17 +183,16 @@ stylesheets, 37 MB input, whole process, Apple M4:
 
 | Workload | go-xslt | libxslt / libxml2 |
 |---|---|---|
-| copy the document | 0.8 s | 0.9 s |
-| recursive apply-templates | 2.0 s | 1.8 s |
-| sort by two keys | 1.1 s | 24.1 s |
-| Muenchian grouping | 0.9 s | 0.9 s |
+| copy the document | 0.6 s | 0.7 s |
+| recursive apply-templates | 1.1 s | 1.3 s |
+| Muenchian grouping | 0.7 s | 0.9 s |
 | XPath predicates and functions | 0.6 s | 0.9 s |
-| XSD 1.0 validation | 0.7 s | 0.5 s |
+| XSD 1.0 validation | 0.6 s | 0.5 s |
 
-So go-xslt is about as fast as the C libraries: faster at copying, XPath and
-sorting, up to 1.3× slower at templates and validation. It uses somewhat more
-memory, with streaming available when memory matters. It implements XSLT
-3.0, XPath 3.1 and XSD 1.1, which they do not.
+So go-xslt is faster than the C libraries at transforming and about 1.1×
+slower at validation. It uses somewhat more memory, with streaming available
+when memory matters. It implements XSLT 3.0, XPath 3.1 and XSD 1.1, which
+they do not.
 `go run scripts/bench/main.go` reproduces the table.
 [Performance details →](https://tim-riep.github.io/go-xslt/performance)
 
