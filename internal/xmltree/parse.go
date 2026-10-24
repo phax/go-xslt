@@ -318,13 +318,26 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	// External parsed general entities are spliced in textually before
 	// tokenizing (see expandExternalEntities) — encoding/xml can only supply
 	// an entity's replacement as character data, never as markup.
-	src, entSpans := expandExternalEntities(src, baseDir, files)
+	inputLen := len(src)
+	src, entSpans, err := expandExternalEntities(src, baseDir, files)
+	if err != nil {
+		return nil, err
+	}
 	src = normalizeAttrWhitespace(src)
 	lines := newLinePos(src)
 	dec := xml.NewDecoder(strings.NewReader(downgradeXMLVersion(src)))
 	dec.Strict = true
 	dec.CharsetReader = charsetReader
-	dec.Entity = documentEntities(src, baseDir, files)
+	ents, err := documentEntities(src, baseDir, files)
+	if err != nil {
+		return nil, err
+	}
+	// Each reference in the body inserts its entity's whole value: bound the
+	// sum too, or one small entity referenced a million times amplifies.
+	if limit := expansionLimit(inputLen); len(ents) > 0 && entityRefVolume(src[doctypeEnd(src):], ents, limit) > limit {
+		return nil, errEntityExpansion(limit)
+	}
+	dec.Entity = ents
 	idKinds := idAttrKinds(src)
 	attrDefaults := attlistDefaults(src)
 	elemOnly := elementOnlyDecls(src, baseDir, files)

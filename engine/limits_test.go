@@ -1,8 +1,10 @@
 package engine_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tim-riep/go-xslt/engine"
 )
@@ -92,5 +94,48 @@ func TestNoStackOverflow(t *testing.T) {
 	ok := strings.Repeat("<a>", 9999) + strings.Repeat("</a>", 9999)
 	if res := engine.Transform(engine.Request{Stylesheet: copyAll, Source: ok}); res.HasErrors() {
 		t.Errorf("9,999 levels: %+v", res.Diagnostics)
+	}
+}
+
+// Entity expansion is bounded (expansionLimit: 8x the input, at least 16 MiB):
+// a few hundred bytes of declarations must neither hang nor exhaust memory.
+// Each case must be refused quickly with a parse error, not an internal one.
+func TestEntityExpansionIsBounded(t *testing.T) {
+	var laughs strings.Builder
+	laughs.WriteString(`<!DOCTYPE r [<!ENTITY l0 "lol">`)
+	for i := 1; i <= 9; i++ {
+		fmt.Fprintf(&laughs, `<!ENTITY l%d "%s">`, i, strings.Repeat(fmt.Sprintf("&l%d;", i-1), 10))
+	}
+	laughs.WriteString(`]><r>&l9;</r>`)
+	var markup strings.Builder
+	markup.WriteString(`<!DOCTYPE r [<!ENTITY m0 "<b>lol</b>">`)
+	for i := 1; i <= 8; i++ {
+		fmt.Fprintf(&markup, `<!ENTITY m%d "<a>%s</a>">`, i, strings.Repeat(fmt.Sprintf("&m%d;", i-1), 10))
+	}
+	markup.WriteString(`]><r>&m8;</r>`)
+	big := strings.Repeat("x", 1<<20)
+	for _, c := range []struct{ name, src string }{
+		{"billion laughs", laughs.String()},
+		{"recursive declarations", `<!DOCTYPE r [<!ENTITY aaa "&bbb;"><!ENTITY bbb "&aaa;>">]><r>&aaa;</r>`},
+		{"markup entities", markup.String()},
+		{"many references", `<!DOCTYPE r [<!ENTITY e "` + big + `">]><r>` + strings.Repeat("&e;", 200) + `</r>`},
+	} {
+		start := time.Now()
+		r := engine.EvalXPath(engine.XPathRequest{Expression: "string-length(/r)", Source: c.src})
+		if len(r.Diagnostics) == 0 || !strings.Contains(r.Diagnostics[0].Message, "entity expansion exceeds") {
+			t.Errorf("%s: want an entity-expansion error, got %q %+v", c.name, r.Value, r.Diagnostics)
+		}
+		if d := time.Since(start); d > 10*time.Second {
+			t.Errorf("%s: took %v", c.name, d)
+		}
+	}
+	// An unterminated DOCTYPE is a parse error, not an internal one.
+	if r := engine.EvalXPath(engine.XPathRequest{Expression: "1", Source: `<!DOCTYPE[<!ENTITY0 '<']`}); len(r.Diagnostics) == 0 || strings.Contains(r.Diagnostics[0].Message, "internal") {
+		t.Errorf("unterminated DOCTYPE: %+v", r.Diagnostics)
+	}
+	// Ordinary use stays: an entity referenced many times, well under the bound.
+	ok := `<!DOCTYPE r [<!ENTITY e "abc"><!ENTITY f "&e;&e;">]><r>` + strings.Repeat("&f;", 1000) + `</r>`
+	if r := engine.EvalXPath(engine.XPathRequest{Expression: "string-length(/r)", Source: ok}); r.HasErrors() || r.Value != "6000" {
+		t.Errorf("ordinary entities: %q %+v", r.Value, r.Diagnostics)
 	}
 }

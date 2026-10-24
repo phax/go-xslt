@@ -1,6 +1,7 @@
 package xmltree
 
 import (
+	"fmt"
 	"github.com/tim-riep/go-xslt/internal/fsaccess"
 	"path/filepath"
 	"strconv"
@@ -117,7 +118,30 @@ func scanUnparsedEntityDecls(sub string, out map[string]UnparsedEntity) {
 }
 
 func internalEntities(src string) map[string]string {
-	return documentEntities(src, "", nil)
+	ents, _ := documentEntities(src, "", nil)
+	return ents
+}
+
+// entityExpansionFloor is the least text entity expansion may produce; see
+// expansionLimit.
+const entityExpansionFloor = 16 << 20
+
+// expansionLimit bounds how many bytes entity expansion may produce for a
+// document of inputLen bytes: eight times the input, but at least 16 MiB.
+// Without it a few hundred bytes of mutually referring entity declarations
+// ("billion laughs") expand exponentially and take the whole process down
+// with them; no ordinary document comes near the bound.
+func expansionLimit(inputLen int) int {
+	if l := 8 * inputLen; l > entityExpansionFloor {
+		return l
+	}
+	return entityExpansionFloor
+}
+
+// errEntityExpansion reports a document whose entities expand past
+// expansionLimit.
+func errEntityExpansion(limit int) error {
+	return &ParseError{Msg: fmt.Sprintf("entity expansion exceeds %d bytes (the limit for this document)", limit)}
 }
 
 // documentEntities extracts a document's general entity declarations: the
@@ -131,8 +155,9 @@ func internalEntities(src string) map[string]string {
 // support existed. Internal declarations take precedence over external ones
 // (scanEntityDecls never overrides an already-seen name), matching the XML
 // rule that the internal subset wins over the external one.
-func documentEntities(src, baseDir string, files *fsaccess.Guard) map[string]string {
+func documentEntities(src, baseDir string, files *fsaccess.Guard) (map[string]string, error) {
 	ents := map[string]string{}
+	inputLen := len(src)
 	if sub, ok := internalSubset(src); ok {
 		scanEntityDecls(expandParamEntities(sub, baseDir, files), ents)
 	}
@@ -143,14 +168,17 @@ func documentEntities(src, baseDir string, files *fsaccess.Guard) map[string]str
 				path = filepath.Join(baseDir, path)
 			}
 			if data, err := files.ReadFile(path); err == nil {
+				inputLen += len(data)
 				scanEntityDecls(string(data), ents)
 			}
 		}
 	}
 	if len(ents) == 0 {
-		return nil
+		return nil, nil
 	}
-	expandEntityValues(ents)
+	if err := expandEntityValues(ents, expansionLimit(inputLen)); err != nil {
+		return nil, err
+	}
 	// encoding/xml inserts a Decoder.Entity value verbatim, without rescanning it
 	// for references, so character references and the five predefined entities
 	// have to be resolved here — exactly once, and only after general-entity
@@ -158,7 +186,30 @@ func documentEntities(src, baseDir string, files *fsaccess.Guard) map[string]str
 	for name, val := range ents {
 		ents[name] = expandBuiltinRefs(val)
 	}
-	return ents
+	return ents, nil
+}
+
+// entityRefVolume is an upper bound on the text the references to ents in
+// body expand to (a reference inside a comment or CDATA section is counted
+// too). It stops counting once the total passes limit.
+func entityRefVolume(body string, ents map[string]string, limit int) int {
+	total := 0
+	for i := 0; total <= limit; {
+		j := strings.IndexByte(body[i:], '&')
+		if j < 0 {
+			break
+		}
+		j += i
+		k := strings.IndexByte(body[j:], ';')
+		if k < 0 {
+			break
+		}
+		if v, ok := ents[body[j+1:j+k]]; ok {
+			total += len(v)
+		}
+		i = j + 1
+	}
+	return total
 }
 
 // scanEntityDecls scans text for <!ENTITY name "value"> declarations (skipping
@@ -257,20 +308,32 @@ func firstQuotedLiteral(s string) (lit, rest string, ok bool) {
 // expandEntityValues resolves entity references inside replacement text. The
 // pass count bounds the recursion depth, so a circular declaration leaves the
 // unresolved reference in place instead of looping.
-func expandEntityValues(ents map[string]string) {
+//
+// The values together may not grow past limit: declarations that refer to
+// each other can double a value on every pass.
+func expandEntityValues(ents map[string]string, limit int) error {
+	total := 0
+	for _, val := range ents {
+		total += len(val)
+	}
 	for pass := 0; pass < 40; pass++ {
 		changed := false
 		for name, val := range ents {
 			out, hit := substituteEntities(val, ents)
 			if hit {
+				total += len(out) - len(val)
+				if total > limit {
+					return errEntityExpansion(limit)
+				}
 				ents[name] = out
 				changed = true
 			}
 		}
 		if !changed {
-			return
+			return nil
 		}
 	}
+	return nil
 }
 
 // expandBuiltinRefs resolves character references and the five predefined
@@ -484,14 +547,19 @@ func scanExternalEntityDecls(text, baseDir string, files *fsaccess.Guard, out ma
 // case — has to be spliced into the source before tokenizing. Each
 // replacement's own text declaration is stripped, and expansion repeats so an
 // entity referencing another one resolves too.
-func expandExternalEntities(src, baseDir string, files *fsaccess.Guard) (string, []entitySpan) {
+//
+// The spliced document may not grow past expansionLimit of the input (the
+// document plus the entity files read).
+func expandExternalEntities(src, baseDir string, files *fsaccess.Guard) (string, []entitySpan, error) {
 	paths := externalGeneralEntityDecls(src, baseDir, files)
 	reps := map[string]string{}
+	inputLen := len(src)
 	for name, path := range paths {
 		b, err := files.ReadFile(path)
 		if err != nil {
 			continue
 		}
+		inputLen += len(b)
 		reps[name] = stripTextDecl(string(b))
 	}
 	// An INTERNAL general entity whose replacement text is markup gets the
@@ -516,12 +584,16 @@ func expandExternalEntities(src, baseDir string, files *fsaccess.Guard) (string,
 		}
 	}
 	if len(reps) == 0 {
-		return src, nil
+		return src, nil, nil
 	}
 	head := doctypeEnd(src)
 	var spans []entitySpan
-	body := spliceEntities(src[head:], reps, paths, head, 0, &spans)
-	return src[:head] + body, spans
+	budget := expansionLimit(inputLen)
+	body := spliceEntities(src[head:], reps, paths, head, 0, &spans, &budget)
+	if budget < 0 {
+		return "", nil, errEntityExpansion(expansionLimit(inputLen))
+	}
+	return src[:head] + body, spans, nil
 }
 
 // spliceEntities replaces every reference to a known external entity in text
@@ -529,9 +601,10 @@ func expandExternalEntities(src, baseDir string, files *fsaccess.Guard) (string,
 // replacement landed. offset is text's absolute position in the document being
 // built, so the recorded spans are absolute. A nested entity's span is
 // appended BEFORE its container's, which makes the first matching span the
-// innermost one.
-func spliceEntities(text string, reps, paths map[string]string, offset, depth int, spans *[]entitySpan) string {
-	if depth > 8 || !strings.Contains(text, "&") {
+// innermost one. Every replacement spliced in is charged to budget; once it
+// goes negative the splicing stops (the caller reports the error).
+func spliceEntities(text string, reps, paths map[string]string, offset, depth int, spans *[]entitySpan, budget *int) string {
+	if depth > 8 || *budget < 0 || !strings.Contains(text, "&") {
 		return text
 	}
 	var b strings.Builder
@@ -557,7 +630,10 @@ func spliceEntities(text string, reps, paths map[string]string, offset, depth in
 		}
 		b.WriteString(text[i:j])
 		begin := offset + b.Len()
-		b.WriteString(spliceEntities(rep, reps, paths, begin, depth+1, spans))
+		if *budget -= len(rep); *budget < 0 {
+			return ""
+		}
+		b.WriteString(spliceEntities(rep, reps, paths, begin, depth+1, spans, budget))
 		if path := paths[name]; path != "" {
 			// Only an EXTERNAL entity's text carries its own base URI.
 			*spans = append(*spans, entitySpan{start: begin, end: offset + b.Len(), path: path})
@@ -592,6 +668,9 @@ func doctypeEnd(src string) int {
 			}
 			for i < len(src) && src[i] != '>' {
 				i++
+			}
+			if i >= len(src) {
+				return len(src) // unterminated: the tokenizer reports it
 			}
 			return i + 1
 		case src[i] == '"' || src[i] == '\'':

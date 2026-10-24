@@ -125,11 +125,14 @@ evaluations and for every element validated, so a run stops shortly after the
 deadline. The run then ends with an error diagnostic naming `ctx.Err()`.
 
 Some limits always apply, because the input would otherwise crash the Go
-process (a stack overflow is a fatal error that no `recover` catches):
+process (a stack overflow is a fatal error that no `recover` catches) or,
+with a few hundred bytes of entity declarations, expand until memory runs
+out:
 
 | Input | Limit | Error |
 |---|---|---|
 | element nesting in a document | 10,000 levels | parse error |
+| text produced by entity expansion (DTD entities) | 8 × the input, at least 16 MiB | parse error |
 | nesting of an XPath expression | 5,000 levels | `XPDY0130` |
 | inline functions calling each other | 10,000 levels | `XPDY0130` |
 

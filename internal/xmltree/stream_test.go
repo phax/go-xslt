@@ -193,3 +193,21 @@ func TestStreamReaderRefusals(t *testing.T) {
 		}
 	}
 }
+
+// The streaming reader bounds entity expansion as Parse does, counting the
+// text the decoder's substitutions produce.
+func TestStreamEntityExpansionIsBounded(t *testing.T) {
+	src := `<!DOCTYPE r [<!ENTITY e "` + strings.Repeat("x", 1<<20) + `">]><r>` + strings.Repeat("<a>&e;</a>", 200) + `</r>`
+	s, err := NewStreamReader(strings.NewReader(src))
+	if err == nil {
+		for {
+			var ev StreamEvent
+			if ev, err = s.Advance(); err != nil || ev.Kind == StreamEOF {
+				break
+			}
+		}
+	}
+	if err == nil || !strings.Contains(err.Error(), "entity expansion exceeds") {
+		t.Fatalf("want an entity-expansion error, got %v", err)
+	}
+}

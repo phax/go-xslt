@@ -286,6 +286,11 @@ Desktop GUI (**run from `desktop/`**):
   which means "no such initial template"). `engine/limits_test.go`'s
   `TestNoStackOverflow` pins the crash inputs. A new recursive walk over
   input-controlled structure needs the same treatment.
+  Entity expansion is bounded the same way: `expansionLimit` (8 × the
+  input, at least 16 MiB) caps entity values (`expandEntityValues`), markup
+  splicing (`spliceEntities`), references in the body (`entityRefVolume`)
+  and, in `StreamReader`, the text the decoder produces (`countText`);
+  `TestEntityExpansionIsBounded` pins billion-laughs shapes.
 - **Cancellation**: `TransformContext`/`TransformToContext`/
   `Stylesheet.TransformContext`/`EvalXPathContext`/`ValidateContext`. The
   run's `budget` holds the ctx (checked every 1024 steps) and hands XPath an

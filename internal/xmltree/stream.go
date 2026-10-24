@@ -78,11 +78,16 @@ type StreamEvent struct {
 // drops nothing simply ends up with the whole document, exactly as Parse would
 // have produced it.
 type StreamReader struct {
-	dec      *xml.Decoder
-	doc      *Node
-	stack    []*Node
-	nsStack  []map[string]string
-	rawNames []xml.Name
+	dec *xml.Decoder
+	// textBytes counts the character data and attribute values read so far,
+	// once the DOCTYPE has declared entities: their references are expanded
+	// by the decoder, so this is how the reader bounds the amplification
+	// (expansionLimit of the input read).
+	textBytes int
+	doc       *Node
+	stack     []*Node
+	nsStack   []map[string]string
+	rawNames  []xml.Name
 
 	// order/tree stamp nodes as they are created, in the same sequence
 	// assignOrder would have used for a completed tree. See stamp.
@@ -225,6 +230,9 @@ func (s *StreamReader) advance() (StreamEvent, error) {
 		// resolves names to URIs and discards the prefix the author wrote. The
 		// namespace frame stack below re-establishes the resolution, and the
 		// end-tag check Token would have done is re-established too.
+		if err := s.countText(tok); err != nil {
+			return StreamEvent{}, err
+		}
 		switch t := tok.(type) {
 		case xml.StartElement:
 			// A streamed document is XML 1.0 (1.1 is ErrStreamUnsupported), so
@@ -275,6 +283,29 @@ func (s *StreamReader) advance() (StreamEvent, error) {
 	}
 }
 
+// countText adds a token's character data and attribute values to
+// textBytes once the DOCTYPE has declared entities, and fails when entity
+// expansion has made them outgrow expansionLimit of the input read so far.
+func (s *StreamReader) countText(tok xml.Token) error {
+	if s.dec.Entity == nil {
+		return nil
+	}
+	switch t := tok.(type) {
+	case xml.CharData:
+		s.textBytes += len(t)
+	case xml.StartElement:
+		for _, a := range t.Attr {
+			s.textBytes += len(a.Value)
+		}
+	default:
+		return nil
+	}
+	if limit := expansionLimit(int(s.dec.InputOffset())); s.textBytes > limit {
+		return errEntityExpansion(limit)
+	}
+	return nil
+}
+
 func (s *StreamReader) top() *Node { return s.stack[len(s.stack)-1] }
 
 // directive handles the DOCTYPE, the only directive that carries information
@@ -296,7 +327,11 @@ func (s *StreamReader) directive(t xml.Directive) error {
 	}
 	// baseDir "" throughout: every one of these helpers uses it only to reach
 	// an external file, which the two checks above have already excluded.
-	if ents := documentEntities(src, "", nil); len(ents) > 0 {
+	ents, err := documentEntities(src, "", nil)
+	if err != nil {
+		return err
+	}
+	if len(ents) > 0 {
 		s.dec.Entity = ents
 	}
 	s.idKinds = idAttrKinds(src)
@@ -525,6 +560,9 @@ func (s *StreamReader) SkipSubtree() error {
 			if err == io.EOF {
 				return errors.New("unexpected end of document: unclosed elements")
 			}
+			return err
+		}
+		if err := s.countText(tok); err != nil {
 			return err
 		}
 		switch t := tok.(type) {
