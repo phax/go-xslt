@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<!-- A schema for a namespace other than urn:t, for the XTSE0220 mismatch test. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:other">
+  <xs:element name="o" type="xs:string"/>
+</xs:schema>

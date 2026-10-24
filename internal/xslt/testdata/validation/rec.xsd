@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<!-- Small schema written for the [xsl:]validation unit tests. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  xmlns:t="urn:t" targetNamespace="urn:t" elementFormDefault="qualified">
+  <xs:element name="n" type="xs:integer"/>
+  <xs:element name="rec" type="t:RecT"/>
+  <xs:complexType name="RecT">
+    <xs:sequence>
+      <xs:element ref="t:n" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID"/>
+  </xs:complexType>
+  <xs:simpleType name="Small">
+    <xs:restriction base="xs:integer">
+      <xs:maxInclusive value="10"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="MyQName">
+    <xs:restriction base="xs:QName"/>
+  </xs:simpleType>
+  <xs:attribute name="code" type="t:Small"/>
+  <xs:element name="ids">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="i" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:attribute name="id" type="xs:ID"/>
+            <xs:attribute name="ref" type="xs:IDREF"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

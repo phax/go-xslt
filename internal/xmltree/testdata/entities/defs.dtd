@@ -1,0 +1,7 @@
+<!-- External DTD subset used by entities_dtd_test.go. -->
+<!ENTITY % inner "<!ENTITY fromParam 'pv'>">
+%inner;
+<!ENTITY dtdent "from-dtd">
+<!ATTLIST r a CDATA "d" b CDATA #IMPLIED>
+<!ENTITY pic SYSTEM "pic.gif" NDATA gif>
+<!NOTATION gif SYSTEM "image/gif">
