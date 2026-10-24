@@ -300,11 +300,15 @@ Desktop GUI (**run from `desktop/`**):
   memory acquisition (`runtime.madvise` ~35%) and GC, NOT parsing (~12%) —
   about 0.5 s per GB of fresh heap, so the lever is allocating less.
 - **Reused scratch contexts** (predicates in `applyPredicateOrdered`, the
-  `xsl:key` walk, `matchingTemplates`' pool) are overwritten per item. Any
-  code that keeps a `*xpath.Context` beyond the evaluation (an inline
-  function, function-lookup, partial application, function coercion) must set
-  `ctx.captured = true`, and a reuser checks `Captured()` and takes a fresh
-  one. The parser carves nodes from slabs and collects children on a shared
+  `xsl:key` walk, `matchingTemplates`' pool, `evalWith`'s `evalPool`) are
+  overwritten per use. Any code that keeps a `*xpath.Context` beyond the
+  evaluation (an inline function, function-lookup, a named function
+  reference, partial application, function coercion) must call
+  `ctx.capture()` — never set the flag directly: it also tells the host's
+  VarResolver (`CaptureListener`, the XSLT `evalEnv`), since a context derived
+  inside for/let/predicates still resolves through it. A reuser checks
+  `Captured()`/`env.captured` and takes a fresh pair; `evalWith`'s scope
+  snapshot is taken at that moment (`ContextCaptured`), not per evaluation. The parser carves nodes from slabs and collects children on a shared
   stack (`parseRaw`), so nothing may read `Children` of an open element while
   parsing.
 - **Results must not depend on the platform.** The nightly job runs on
