@@ -297,7 +297,12 @@ Desktop GUI (**run from `desktop/`**):
   input, at least 16 MiB) caps entity values (`expandEntityValues`), markup
   splicing (`spliceEntities`), references in the body (`entityRefVolume`)
   and, in `StreamReader`, the text the decoder produces (`countText`);
-  `TestEntityExpansionIsBounded` pins billion-laughs shapes.
+  parameter entities (`expandParamEntities`) too. Every check runs BEFORE
+  the string is built (a check after building let 699 bytes allocate 5 GB —
+  GHSA-6xxr-4cc9-4m89); `StreamReader` leaves values over 24 bytes to the
+  full parser, since encoding/xml builds a whole text run before it can
+  count. `TestEntityExpansionIsBounded` pins billion-laughs shapes,
+  `TestEntityExpansionAllocationIsBounded` the bytes allocated.
 - **Cancellation**: `TransformContext`/`TransformToContext`/
   `Stylesheet.TransformContext`/`EvalXPathContext`/`ValidateContext`. The
   run's `budget` holds the ctx (checked every 1024 steps) and hands XPath an

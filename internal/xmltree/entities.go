@@ -159,7 +159,11 @@ func documentEntities(src, baseDir string, files *fsaccess.Guard) (map[string]st
 	ents := map[string]string{}
 	inputLen := len(src)
 	if sub, ok := internalSubset(src); ok {
-		scanEntityDecls(expandParamEntities(sub, baseDir, files), ents)
+		decls, err := expandParamEntities(sub, baseDir, files, expansionLimit(len(src)))
+		if err != nil {
+			return nil, err
+		}
+		scanEntityDecls(decls, ents)
 	}
 	if baseDir != "" {
 		if sysID, ok := externalDTDSystemID(src); ok {
@@ -319,12 +323,15 @@ func expandEntityValues(ents map[string]string, limit int) error {
 	for pass := 0; pass < 40; pass++ {
 		changed := false
 		for name, val := range ents {
-			out, hit := substituteEntities(val, ents)
+			// The room this value may grow into: the limit less every other
+			// value. Checked while substituting, not after, so a value with
+			// many references to a large one is never built past the limit.
+			out, hit, ok := substituteEntities(val, ents, limit-(total-len(val)))
+			if !ok {
+				return errEntityExpansion(limit)
+			}
 			if hit {
 				total += len(out) - len(val)
-				if total > limit {
-					return errEntityExpansion(limit)
-				}
 				ents[name] = out
 				changed = true
 			}
@@ -378,12 +385,15 @@ func expandBuiltinRefs(s string) string {
 	return b.String()
 }
 
-func substituteEntities(s string, ents map[string]string) (string, bool) {
+// substituteEntities replaces the references to ents in s. It stops as
+// soon as the result would grow past max — before writing the replacement
+// that would cross it — and then reports ok false: the caller must refuse the
+// document, and no string longer than max has been built.
+func substituteEntities(s string, ents map[string]string, max int) (out string, hit, ok bool) {
 	if !strings.Contains(s, "&") {
-		return s, false
+		return s, false, true
 	}
 	var b strings.Builder
-	hit := false
 	for i := 0; i < len(s); {
 		if s[i] != '&' {
 			b.WriteByte(s[i])
@@ -397,6 +407,9 @@ func substituteEntities(s string, ents map[string]string) (string, bool) {
 		}
 		name := s[i+1 : i+end]
 		if rep, ok := ents[name]; ok {
+			if b.Len()+len(rep) > max {
+				return "", hit, false
+			}
 			b.WriteString(rep)
 			hit = true
 		} else {
@@ -404,7 +417,7 @@ func substituteEntities(s string, ents map[string]string) (string, bool) {
 		}
 		i += end + 1
 	}
-	return b.String(), hit
+	return b.String(), hit, true
 }
 
 // internalSubset returns the text between the '[' and matching ']' of a DOCTYPE
@@ -573,7 +586,11 @@ func expandExternalEntities(src, baseDir string, files *fsaccess.Guard) (string,
 	// (whose values ARE pre-expanded, as verbatim substitution needs).
 	if sub, ok := internalSubset(src); ok {
 		raw := map[string]string{}
-		scanEntityDecls(expandParamEntities(sub, baseDir, files), raw)
+		decls, err := expandParamEntities(sub, baseDir, files, expansionLimit(inputLen))
+		if err != nil {
+			return "", nil, err
+		}
+		scanEntityDecls(decls, raw)
 		for name, val := range raw {
 			if _, ok := reps[name]; ok {
 				continue
@@ -708,9 +725,9 @@ func stripTextDecl(s string) string {
 // external one the contents of the file it names (resolved against baseDir).
 // This is what makes declarations living in a separate .dtd reachable from the
 // internal subset (whitespace-011: "<!ENTITY % ext SYSTEM 'entity.ent'>%ext;").
-func expandParamEntities(sub, baseDir string, files *fsaccess.Guard) string {
+func expandParamEntities(sub, baseDir string, files *fsaccess.Guard, limit int) (string, error) {
 	if !strings.Contains(sub, "%") {
-		return sub
+		return sub, nil
 	}
 	vals := map[string]string{}
 	for i := 0; ; {
@@ -766,13 +783,17 @@ func expandParamEntities(sub, baseDir string, files *fsaccess.Guard) string {
 		}
 	}
 	if len(vals) == 0 {
-		return sub
+		return sub, nil
 	}
 	for pass := 0; pass < 4; pass++ {
 		changed := false
 		for name, val := range vals {
 			ref := "%" + name + ";"
-			if strings.Contains(sub, ref) {
+			if n := strings.Count(sub, ref); n > 0 {
+				// The size of the result is known before it is built.
+				if len(sub)+n*(len(val)-len(ref)) > limit {
+					return "", errEntityExpansion(limit)
+				}
 				sub = strings.ReplaceAll(sub, ref, val)
 				changed = true
 			}
@@ -781,5 +802,5 @@ func expandParamEntities(sub, baseDir string, files *fsaccess.Guard) string {
 			break
 		}
 	}
-	return sub
+	return sub, nil
 }

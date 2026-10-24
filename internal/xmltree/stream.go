@@ -286,6 +286,11 @@ func (s *StreamReader) advance() (StreamEvent, error) {
 // countText adds a token's character data and attribute values to
 // textBytes once the DOCTYPE has declared entities, and fails when entity
 // expansion has made them outgrow expansionLimit of the input read so far.
+// streamEntityMax is the longest entity value the streaming reader expands
+// itself: at most 8 times the 3 bytes of the shortest reference (&e;), the
+// factor expansionLimit allows.
+const streamEntityMax = 24
+
 func (s *StreamReader) countText(tok xml.Token) error {
 	if s.dec.Entity == nil {
 		return nil
@@ -330,6 +335,17 @@ func (s *StreamReader) directive(t xml.Directive) error {
 	ents, err := documentEntities(src, "", nil)
 	if err != nil {
 		return err
+	}
+	// encoding/xml builds a whole run of text, every reference in it
+	// substituted, before this reader sees it, so countText alone cannot keep
+	// a long entity value referenced many times from being built. Such a
+	// document goes to the full parser, which bounds the expansion before
+	// building anything; short values (character names like &nbsp;) amplify
+	// no more than the full parser's own limit allows.
+	for _, v := range ents {
+		if len(v) > streamEntityMax {
+			return fmt.Errorf("%w: an entity value longer than %d bytes", ErrStreamUnsupported, streamEntityMax)
+		}
 	}
 	if len(ents) > 0 {
 		s.dec.Entity = ents
