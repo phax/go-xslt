@@ -2,6 +2,7 @@ package xsd
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -495,11 +496,40 @@ func checkPrimitiveLexical(prim xpath.AtomType, v string) error {
 		// The integer/decimal lexical spaces need an explicit guard: xpath.CastTo
 		// truncates "1.5"→1 for integers and accepts big.Rat fraction syntax
 		// ("1/2") for decimals, neither of which is a valid XSD lexical.
-		if isIntegerLike(prim) && !reInteger.MatchString(v) {
-			return invalidf("cvc-datatype-valid", "%q is not a valid %s", v, atomName(prim))
+		if isIntegerLike(prim) {
+			if !reInteger.MatchString(v) {
+				return invalidf("cvc-datatype-valid", "%q is not a valid %s", v, atomName(prim))
+			}
+			// With the lexical shape settled, all the cast below can still
+			// reject is the derived type's value range (xpath.checkIntegerBounds).
+			// A value that fits int64 is range-checked here against the same
+			// bounds, without building the string atomic, the big.Int and the
+			// result atomic the cast builds for every integer an instance
+			// holds; one that overflows int64 takes the cast as before.
+			if n, perr := strconv.ParseInt(v, 10, 64); perr == nil {
+				if !integerInRange(n, prim) {
+					return invalidf("cvc-datatype-valid", "%q is not a valid %s", v, atomName(prim))
+				}
+				return nil
+			}
 		}
-		if prim == xpath.XSdecimal && !reDecimal.MatchString(v) {
-			return invalidf("cvc-datatype-valid", "%q is not a valid xs:decimal", v)
+		if prim == xpath.XSdecimal {
+			if !reDecimal.MatchString(v) {
+				return invalidf("cvc-datatype-valid", "%q is not a valid xs:decimal", v)
+			}
+			// Every string the regex admits is one big.Rat.SetString accepts
+			// (checked exhaustively over the regex's shapes), and that is the
+			// whole of what the cast below does with a string source, so for a
+			// decimal the cast cannot fail: the lexical check is complete here.
+			return nil
+		}
+		if handled, err := xpath.CheckDateTimeLexical(prim, v); handled {
+			// The cast's own verdict, without the two atomics it would build
+			// (every date in an instance passed through here).
+			if err != nil {
+				return invalidf("cvc-datatype-valid", "%q is not a valid %s", v, atomName(prim))
+			}
+			return nil
 		}
 		if _, err := xpath.CastTo(xpath.NewString(v), prim); err != nil {
 			return invalidf("cvc-datatype-valid", "%q is not a valid %s", v, atomName(prim))
@@ -517,6 +547,36 @@ func isIntegerLike(t xpath.AtomType) bool {
 		return true
 	}
 	return false
+}
+
+// integerInRange reports whether n lies in the value space of the integer-
+// family type t — the same bounds xpath's checkIntegerBounds enforces, for a
+// value already known to fit int64 (so xs:long and the lower half of
+// xs:unsignedLong need only the sign test; a larger value never reaches this).
+func integerInRange(n int64, t xpath.AtomType) bool {
+	switch t {
+	case xpath.XSbyte:
+		return n >= -128 && n <= 127
+	case xpath.XSshort:
+		return n >= -32768 && n <= 32767
+	case xpath.XSint:
+		return n >= -2147483648 && n <= 2147483647
+	case xpath.XSunsignedByte:
+		return n >= 0 && n <= 255
+	case xpath.XSunsignedShort:
+		return n >= 0 && n <= 65535
+	case xpath.XSunsignedInt:
+		return n >= 0 && n <= 4294967295
+	case xpath.XSunsignedLong, xpath.XSnonNegativeInteger:
+		return n >= 0
+	case xpath.XSpositiveInteger:
+		return n >= 1
+	case xpath.XSnonPositiveInteger:
+		return n <= 0
+	case xpath.XSnegativeInteger:
+		return n <= -1
+	}
+	return true // xs:integer, xs:long: unbounded within int64
 }
 
 // validAnyURI10 checks the XSD 1.0 xs:anyURI lexical space: an RFC 2396

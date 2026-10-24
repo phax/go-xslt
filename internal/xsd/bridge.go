@@ -453,8 +453,12 @@ func (s *Schema) ValidateNode(n *xmltree.Node, opts NodeValidateOptions) error {
 	local.childModels = map[*ComplexType]*childModel{}
 	local.typeCache = map[*xmltree.Node]Type{}
 	local.unassessed = map[*xmltree.Node]bool{}
-	local.assertTypes = map[*xmltree.Node]xpath.AtomType{}
-	local.assertLists = map[*xmltree.Node]assertList{}
+	if local.version == Version11 && local.hasAsserts {
+		// Recorded only where assertTree can ever read them: see
+		// Schema.hasAsserts.
+		local.assertTypes = map[*xmltree.Node]xpath.AtomType{}
+		local.assertLists = map[*xmltree.Node]assertList{}
+	}
 	local.nodeTypes = map[*xmltree.Node]Type{}
 	local.nodeNilled = map[*xmltree.Node]bool{}
 	local.nodeDefaults = map[*xmltree.Node][]defaultAttr{}

@@ -1292,7 +1292,7 @@ func parseSeqTypeStringWithSchema(s string, sn SchemaNameLookup) (*SeqType, erro
 // on actual values, not when the function item is merely bound.
 func coerceFunctionItem(fn *Function, want ItemType, ctx *Context) *Function {
 	if ctx != nil {
-		ctx.captured = true // the conversions below run later, against ctx
+		ctx.capture() // the conversions below run later, against ctx
 	}
 	return &Function{
 		Arity: fn.Arity, Name: fn.Name, NS: fn.NS,

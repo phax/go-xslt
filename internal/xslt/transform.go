@@ -1511,6 +1511,8 @@ type engine struct {
 	patternDepth int
 	// matchPool is the free list of matchScratch pairs (see matchingTemplates).
 	matchPool []*matchScratch
+	// evalPool is the free list of evalScratch pairs (see evalWith).
+	evalPool []*evalScratch
 	// streamedRoots holds the root of each document the stylesheet asked to
 	// process with xsl:source-document streamable="yes". The tree is built in
 	// full either way; the flag exists only so the rules that are conditional
@@ -1941,12 +1943,30 @@ type evalEnv struct {
 	eng     *engine
 	el      *xmltree.Node // stylesheet element for namespace context
 	current *xmltree.Node // the current node (for current())
-	// scopes, when non-nil, is a snapshot of eng.scopes taken when this
+	// scopes, when non-nil, is a snapshot of eng.scopes as it was when this
 	// evalEnv was built (eng.eval), frozen against later eng.popScope calls —
 	// see lookupVarIn. Sites that build an evalEnv outside eng.eval (pattern
 	// matching, key/accumulator/grouping evaluation, …) leave this nil and so
 	// keep resolving against the live eng.scopes, as before.
-	scopes []map[string]xpath.Object
+	//
+	// eng.eval takes the snapshot lazily: it sets snapScopes and copies
+	// eng.scopes only in ContextCaptured, the moment a function item first
+	// retains a context resolving through this env — the only way a lookup
+	// through it can ever happen after the evaluation returned, or while a
+	// callee's scope stack is in force. Up to that point every lookup is made
+	// synchronously inside the evaluation that built the env, when eng.scopes
+	// is still exactly the stack the eager copy held, so resolving against the
+	// live stack reads the same frames (nothing an XPath evaluation itself
+	// does pushes or pops a frame; a stylesheet function call swaps the stack
+	// for the duration of its body and restores it before control returns to
+	// this evaluation). Most evaluations create no function item, and were
+	// paying the copy for nothing.
+	scopes     []map[string]xpath.Object
+	snapScopes bool
+	// captured is set by ContextCaptured: a function item holds a context
+	// that resolves through this env, so the env may be read again later and
+	// must not be reused in place (evalScratch, matchScratch).
+	captured bool
 	// focusNode is the XPath CONTEXT node at the point the function call being
 	// dispatched appears — NOT the XSLT current node (e.current), which is what
 	// current() returns. The two differ inside a path step or predicate:
@@ -1984,6 +2004,20 @@ func (e *evalEnv) ResolveNS(prefix string) (string, bool) {
 		return "", true
 	}
 	return e.el.LookupPrefix(prefix)
+}
+
+// ContextCaptured implements xpath.CaptureListener: a function item now holds
+// a context that resolves variables through e. The env is retired from reuse
+// (captured) and, for an env built by eng.eval, the scope stack is frozen now
+// — see the scopes field.
+func (e *evalEnv) ContextCaptured() {
+	if e.captured {
+		return
+	}
+	e.captured = true
+	if e.snapScopes && e.scopes == nil {
+		e.scopes = append([]map[string]xpath.Object{}, e.eng.scopes...)
+	}
 }
 
 func (e *evalEnv) ResolveVar(prefix, local string) (xpath.Object, bool) {
@@ -2086,14 +2120,65 @@ type evalOverride struct {
 	noSchema bool
 }
 
+// evalScratch is the xpath.Context + evalEnv pair one evalWith call evaluates
+// with, together with the two function-resolver closures over that env (built
+// once per pair, since they close over the env's ADDRESS). The pairs live on
+// a per-engine free list (engine.evalPool): a call checks one out and returns
+// it on exit unless a function item captured it (xpath.Context.Captured,
+// evalEnv.ContextCaptured — then it is simply dropped, since the function
+// item may read it later), so an evaluation that nests another (a stylesheet
+// function call, a lazily evaluated global) gets a pair of its own, and the
+// evaluations that follow one another at one level all reuse one pair. Each
+// used to allocate the Context, the env, its scope snapshot and both
+// closures — about a third of every byte a template-heavy transformation
+// allocated. p.Eval itself keeps no reference to its Context once it returns:
+// the only retention is through function items, which is what the capture
+// flags record.
+type evalScratch struct {
+	env    evalEnv
+	ctx    xpath.Context
+	named  func(ns, local string, arity int) (*xpath.Function, bool)
+	lookup func(ns, local string, arity int) (*xpath.Function, bool)
+}
+
+// checkoutEvalScratch takes a pair off the free list, or builds one.
+func (eng *engine) checkoutEvalScratch() *evalScratch {
+	if n := len(eng.evalPool); n > 0 {
+		sc := eng.evalPool[n-1]
+		eng.evalPool = eng.evalPool[:n-1]
+		return sc
+	}
+	sc := new(evalScratch)
+	sc.named = eng.resolveNamedFunction(&sc.env)
+	sc.lookup = eng.resolveLookupFunction(&sc.env)
+	return sc
+}
+
+// releaseEvalScratch returns a pair to the free list, unless a function item
+// captured it. The node references are dropped so a pooled pair never keeps a
+// (possibly streamed, possibly temporary) tree alive between evaluations.
+func (eng *engine) releaseEvalScratch(sc *evalScratch) {
+	if sc.ctx.Captured() || sc.env.captured {
+		return
+	}
+	sc.ctx.Node, sc.ctx.CtxItem = nil, nil
+	sc.env.current, sc.env.focusNode = nil, nil
+	eng.evalPool = append(eng.evalPool, sc)
+}
+
 // evalWith is eval with explicit static-context overrides.
 func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOverride) (xpath.Object, error) {
 	eng.depth++
-	defer func() { eng.depth-- }()
+	sc := eng.checkoutEvalScratch()
+	defer func() {
+		eng.depth--
+		eng.releaseEvalScratch(sc)
+	}()
 	if eng.tooDeep() {
 		return nil, fmt.Errorf("err:XPDY0130: evaluation recursion too deep (possible non-terminating stylesheet)")
 	}
-	env := &evalEnv{eng: eng, el: el, current: r.node, scopes: append([]map[string]xpath.Object{}, eng.scopes...)}
+	env := &sc.env
+	*env = evalEnv{eng: eng, el: el, current: r.node, snapScopes: true}
 	var dns, base string
 	if eng.sheet.hasXPathDefaultNS {
 		dns = xpathDefaultNSWalk(el)
@@ -2138,7 +2223,9 @@ func (eng *engine) evalWith(p *xpath.Parsed, el *xmltree.Node, r rt, ov evalOver
 	if eng.sheet.hasBackwardsCompat && eng.sheet.feat.BackwardsCompatible {
 		bc10 = inBackwardsCompatScope(el)
 	}
-	v, err := p.Eval(&xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: eng.resolveNamedFunction(env), ResolveLookupFunction: eng.resolveLookupFunction(env), Resolver: eng.resolver, DecimalFormats: eng.sheet.decimalFormatsFor(el), DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10, Interrupt: eng.interrupt()})
+	ctx := &sc.ctx
+	*ctx = xpath.Context{Node: r.node, CtxItem: ctxItem, Pos: r.pos, Size: r.size, NoFocus: r.noFocus, Vars: env, NS: env, Funcs: env, ResolveNamedFunction: sc.named, ResolveLookupFunction: sc.lookup, Resolver: eng.resolver, DecimalFormats: eng.sheet.decimalFormatsFor(el), DefaultElemNS: dns, BaseURI: base, HomeDoc: eng.homeDoc(rootOfNode(el)), DefaultCollation: coll, Now: eng.now, RootlessTree: true, HostPrefixesOnly: true, SchemaTypes: schemaTypes, BC10: bc10, Interrupt: eng.interrupt()}
+	v, err := p.Eval(ctx)
 	if err != nil && eng.errEl == nil {
 		eng.errEl = el
 	}
@@ -4917,7 +5004,7 @@ func (eng *engine) keyIndexOn(name string, root *xmltree.Node) (map[string][]*xm
 			if walkErr != nil {
 				return
 			}
-			if mctx.Captured() {
+			if mctx.Captured() || env.captured {
 				// The context points at env, so both are replaced.
 				env, mctx = new(evalEnv), new(xpath.Context)
 			}
@@ -5292,9 +5379,10 @@ func (eng *engine) sortKeyValue(sk sortKey, outerEl *xmltree.Node, ctx rt) (xpat
 // sortKeyIsNumeric reports whether v is a single, genuinely numeric atomic
 // value (empty is true for an empty-sequence key, which doesn't count either
 // way toward the default data-type="number" inference in sortNodes).
-func sortKeyIsNumeric(v xpath.Object) (numeric, empty bool) {
-	items, err := xpath.Atomize(v)
-	if err != nil || len(items) == 0 {
+// The three take the key's ALREADY atomized value (sortNodes atomizes each key
+// once and asks all of its questions of the result).
+func sortKeyIsNumeric(items []xpath.Item) (numeric, empty bool) {
+	if len(items) == 0 {
 		return false, true
 	}
 	if len(items) != 1 {
@@ -5306,9 +5394,8 @@ func sortKeyIsNumeric(v xpath.Object) (numeric, empty bool) {
 
 // sortKeyIsOrderableNonString mirrors sortKeyIsNumeric for the date/time/
 // duration family (see xpath.Atomic.IsOrderableNonString).
-func sortKeyIsOrderableNonString(v xpath.Object) (orderable, empty bool) {
-	items, err := xpath.Atomize(v)
-	if err != nil || len(items) == 0 {
+func sortKeyIsOrderableNonString(items []xpath.Item) (orderable, empty bool) {
+	if len(items) == 0 {
 		return false, true
 	}
 	if len(items) != 1 {
@@ -5318,13 +5405,12 @@ func sortKeyIsOrderableNonString(v xpath.Object) (orderable, empty bool) {
 	return ok && a.IsOrderableNonString(), false
 }
 
-// sortKeyIsUnorderedDuration reports whether v atomizes to a single general
+// sortKeyIsUnorderedDuration reports whether the key is a single general
 // xs:duration value (date-053: sorting by that type, with no @data-type, is
 // XTDE1030 — it has no defined 'lt' ordering, unlike yearMonthDuration/
 // dayTimeDuration, which sortKeyIsOrderableNonString already handles).
-func sortKeyIsUnorderedDuration(v xpath.Object) bool {
-	items, err := xpath.Atomize(v)
-	if err != nil || len(items) != 1 {
+func sortKeyIsUnorderedDuration(items []xpath.Item) bool {
+	if len(items) != 1 {
 		return false
 	}
 	a, ok := items[0].(*xpath.Atomic)
@@ -5417,16 +5503,31 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 		allNumeric[si] = sk.dataType == nil
 		allOrderable[si] = sk.dataType == nil
 	}
-	items := make([]keyed, len(nodes))
+	n, nk := len(nodes), len(sorts)
+	items := make([]keyed, n)
+	// One flat array per column serves every item's keys and vals (and nums
+	// below), sliced per item: the per-item slices were four or five small
+	// allocations for each of the nodes sorted.
+	keysFlat := make([]string, n*nk)
+	valsFlat := make([]xpath.Object, n*nk)
 	for i, node := range nodes {
-		k := keyed{node: node}
+		k := keyed{node: node, keys: keysFlat[i*nk : (i+1)*nk : (i+1)*nk], vals: valsFlat[i*nk : (i+1)*nk : (i+1)*nk]}
 		for si, sk := range sorts {
-			v, s, err := eng.sortKeyValue(sk, el, rt{node: node, pos: i + 1, size: len(nodes)})
+			v, s, err := eng.sortKeyValue(sk, el, rt{node: node, pos: i + 1, size: n})
 			if err != nil {
 				return nil, err
 			}
+			// The key is atomized ONCE for every question asked of it below.
+			// An atomization error is reported here, which is where it
+			// surfaced before as well: the inference checks that used to
+			// atomize first treated an error as an empty key, changing no
+			// state, so nothing observable happened between there and here.
+			atoms, aerr := xpath.Atomize(v)
+			if aerr != nil {
+				return nil, aerr
+			}
 			if allNumeric[si] {
-				if num, empty := sortKeyIsNumeric(v); !empty {
+				if num, empty := sortKeyIsNumeric(atoms); !empty {
 					anyNumericSeen[si] = true
 					if !num {
 						allNumeric[si] = false
@@ -5434,23 +5535,19 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 				}
 			}
 			if allOrderable[si] {
-				if ord, empty := sortKeyIsOrderableNonString(v); !empty {
+				if ord, empty := sortKeyIsOrderableNonString(atoms); !empty {
 					anyOrderableSeen[si] = true
 					if !ord {
 						allOrderable[si] = false
 					}
 				}
 			}
-			if sk.dataType == nil && sortKeyIsUnorderedDuration(v) {
+			if sk.dataType == nil && sortKeyIsUnorderedDuration(atoms) {
 				anyUnorderedDuration[si] = true
 			}
 			// XTTE1020: after atomization and any @data-type conversion, a
 			// sort key value that is a sequence of more than one item is a
 			// type error (error-1020a: select="(.,.,.)").
-			atoms, aerr := xpath.Atomize(v)
-			if aerr != nil {
-				return nil, aerr
-			}
 			if len(atoms) > 1 {
 				return nil, errAt(sk.el, "err:XTTE1020: the xsl:sort key value is a sequence of %d items", len(atoms))
 			}
@@ -5469,8 +5566,8 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 					}
 				}
 			}
-			k.keys = append(k.keys, s)
-			k.vals = append(k.vals, v)
+			k.keys[si] = s
+			k.vals[si] = v
 		}
 		items[i] = k
 	}
@@ -5501,8 +5598,9 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 		}
 	}
 	if anyNumber {
+		numsFlat := make([]float64, n*nk)
 		for i := range items {
-			items[i].nums = make([]float64, len(sorts))
+			items[i].nums = numsFlat[i*nk : (i+1)*nk : (i+1)*nk]
 			for ki := range sorts {
 				if dataTypes[ki] == "number" {
 					items[i].nums[ki] = xpath.ToNumber(items[i].keys[ki])
@@ -5510,7 +5608,17 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 			}
 		}
 	}
-	slices.SortStableFunc(items, func(a, b keyed) int {
+	// The sort permutes an index array, not the 80-byte keyed records: the
+	// same stable algorithm asks the same comparisons in the same order and so
+	// arrives at the same permutation, but every move it makes is one word
+	// instead of a record (a stable sort of 200k records spent longer moving
+	// records than comparing keys).
+	order := make([]int, n)
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(ai, bi int) int {
+		a, b := &items[ai], &items[bi]
 		for ki := range sorts {
 			var cmp int
 			switch dataTypes[ki] {
@@ -5531,9 +5639,9 @@ func (eng *engine) sortNodes(nodes []*xmltree.Node, sorts []sortKey, el *xmltree
 		}
 		return 0
 	})
-	out := make([]*xmltree.Node, len(items))
-	for i, it := range items {
-		out[i] = it.node
+	out := make([]*xmltree.Node, n)
+	for i, ix := range order {
+		out[i] = items[ix].node
 	}
 	return out, nil
 }

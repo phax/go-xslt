@@ -45,7 +45,7 @@ func evalFunc(n *FuncCall, ctx *Context) (Object, error) {
 			template[i] = v
 		}
 		prefix, local := n.Prefix, n.Local
-		ctx.captured = true // the partial application keeps ctx (its focus)
+		ctx.capture() // the partial application keeps ctx (its focus)
 		return &Function{Arity: holes, Name: "", Call: func(supplied []Object) (Object, error) {
 			filled := make([]Object, len(template))
 			si := 0

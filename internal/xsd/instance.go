@@ -70,8 +70,12 @@ func (s *Schema) ValidateOptsCtx(ctx context.Context, instance, lang string, max
 	local.typeCache = map[*xmltree.Node]Type{}
 	local.unparsed = xmltree.UnparsedEntities(xmltree.DecodeBOM(instance))
 	local.unassessed = map[*xmltree.Node]bool{}
-	local.assertTypes = map[*xmltree.Node]xpath.AtomType{}
-	local.assertLists = map[*xmltree.Node]assertList{}
+	if local.version == Version11 && local.hasAsserts {
+		// Recorded only where assertTree can ever read them: see
+		// Schema.hasAsserts.
+		local.assertTypes = map[*xmltree.Node]xpath.AtomType{}
+		local.assertLists = map[*xmltree.Node]assertList{}
+	}
 	// Populated on THIS path too, although only ValidateNode writes the
 	// supplied attributes back to a caller's tree (supplyDefaults): assertion
 	// evaluation reads them as well, and the two entry points must reach the

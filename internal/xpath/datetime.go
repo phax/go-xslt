@@ -60,28 +60,31 @@ var (
 func parseDateTimeValue(t AtomType, s string) (time.Time, bool, error) {
 	s = strings.TrimSpace(s)
 	switch t {
+	// The three hot grammars are matched by hand (datetime_lexical.go: the
+	// exact equivalents of reDateTime/reDate/reTime, kept beside them and
+	// tested against them), so no submatch slice is allocated per value.
 	case XSdateTime, XSdateTimeStamp:
-		m := reDateTime.FindStringSubmatch(s)
-		if m == nil {
+		m, ok := matchDateTime(s)
+		if !ok {
 			return time.Time{}, false, fmt.Errorf("invalid xs:dateTime %q", s)
 		}
-		return buildTime(m[1], m[2], m[3], m[4], m[5], m[6], m[7])
+		return buildTime(m[0], m[1], m[2], m[3], m[4], m[5], m[6])
 	case XSdate:
-		m := reDate.FindStringSubmatch(s)
-		if m == nil {
+		m, ok := matchDate(s)
+		if !ok {
 			return time.Time{}, false, fmt.Errorf("invalid xs:date %q", s)
 		}
-		return buildTime(m[1], m[2], m[3], "00", "00", "00", m[4])
+		return buildTime(m[0], m[1], m[2], "00", "00", "00", m[3])
 	case XStime:
-		m := reTime.FindStringSubmatch(s)
-		if m == nil {
+		m, ok := matchTime(s)
+		if !ok {
 			return time.Time{}, false, fmt.Errorf("invalid xs:time %q", s)
 		}
-		t, hasTZ, err := buildTime("1972", "12", "31", m[1], m[2], m[3], m[4])
+		t, hasTZ, err := buildTime("1972", "12", "31", m[0], m[1], m[2], m[3])
 		if err != nil {
 			return t, hasTZ, err
 		}
-		if m[1] == "24" {
+		if m[0] == "24" {
 			// Reaching here with an hour of "24" means buildTime's own
 			// hour==24 check already required minute/second to be exactly
 			// zero (K-SeqExprCast-351/352, K2-SeqExprCast-448/449/450 —

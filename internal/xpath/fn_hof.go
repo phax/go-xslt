@@ -123,7 +123,7 @@ func lookupFunction(ctx *Context, ns, local string, arity int) (*Function, bool)
 		}
 		captured := ctx
 		if ctx != nil {
-			ctx.captured = true
+			ctx.capture()
 		}
 		return sigApply(&Function{Arity: arity, NS: ns, Name: local, Call: func(args []Object) (Object, error) {
 			if !registryHas(ns, local) {
@@ -141,7 +141,7 @@ func lookupFunction(ctx *Context, ns, local string, arity int) (*Function, bool)
 			if hc, ok := ctx.Funcs.(HostFuncCatalog); ok {
 				if lo, hi, known := hc.HostFuncArity(ns, local); known && arity >= lo && arity <= hi {
 					captured, hostLocal := ctx, local
-					ctx.captured = true
+					ctx.capture()
 					return &Function{Arity: arity, NS: ns, Name: local, Call: func(args []Object) (Object, error) {
 						v, ok, err := captured.Funcs.ResolveFunc("", hostLocal, args, captured)
 						if err != nil {
@@ -159,7 +159,7 @@ func lookupFunction(ctx *Context, ns, local string, arity int) (*Function, bool)
 	}
 	captured := ctx
 	if ctx != nil {
-		ctx.captured = true
+		ctx.capture()
 	}
 	return sigApply(&Function{Arity: arity, NS: ns, Name: local, Call: func(args []Object) (Object, error) {
 		return dispatchFunc(token, local, args, captured)

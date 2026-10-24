@@ -352,6 +352,13 @@ type Schema struct {
 	// identity-constraint selectors must not see into them (1.1 §3.11.4,
 	// wild101/102/103; per-call, like ids).
 	unassessed map[*xmltree.Node]bool
+	// hasAsserts is set at compile time when any xs:assert was parsed. The
+	// only reader of assertTypes/assertLists is assertTree, reached through
+	// checkAsserts solely for a complex type with effective assertions — and
+	// solely under XSD 1.1 — so a Validate call under 1.0, or over a schema
+	// without a single xs:assert, leaves both maps nil and records nothing
+	// (recording cost a map entry per simple-typed element).
+	hasAsserts bool
 	// assertTypes: per-Validate-call typed-XDM annotations (element -> the
 	// primitive its simple content validated against); consumed by assertTree.
 	assertTypes map[*xmltree.Node]xpath.AtomType

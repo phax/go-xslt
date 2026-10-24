@@ -444,6 +444,11 @@ type matchScratch struct {
 	ctx xpath.Context
 }
 
+// captured reports whether a function item retained the pair — the Context
+// itself, or the env through a context derived from it (see
+// xpath.CaptureListener) — so it must not be overwritten in place again.
+func (sc *matchScratch) captured() bool { return sc.ctx.Captured() || sc.env.captured }
+
 func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Template {
 	var cands []*Template
 	// XSLT §5.5: a pattern is evaluated with an empty "current captured
@@ -468,7 +473,7 @@ func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Templat
 		sc = new(matchScratch)
 	}
 	defer func() {
-		if sc.ctx.Captured() {
+		if sc.captured() {
 			return // a function item kept the pair: never reuse it
 		}
 		*sc = matchScratch{} // drop node/stylesheet references while pooled
@@ -479,6 +484,13 @@ func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Templat
 	for _, t := range eng.sheet.templates {
 		if t.pattern == nil || !t.matchesMode(mode) {
 			continue
+		}
+		if sc.captured() {
+			// A function item created while matching the previous template
+			// kept the pair (or the env, through a derived context): the
+			// rest of this call works on a fresh one.
+			sc = new(matchScratch)
+			env, ctx = &sc.env, &sc.ctx
 		}
 		*env = evalEnv{eng: eng, el: t.el, current: node}
 		*ctx = xpath.Context{Node: node, CtxItem: item, Pos: 1, Size: 1, Vars: env, NS: env, Funcs: env, Resolver: eng.resolver, NoOutputURI: true, DefaultElemNS: eng.templateDefaultNS(t), Now: eng.now, SchemaTypes: schemaTypesFor(t.el)}

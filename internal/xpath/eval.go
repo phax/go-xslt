@@ -458,7 +458,12 @@ func evalExpr(e Expr, ctx *Context) (Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		return NodeSet(append(append(NodeSet{}, ls...), rs...)).normalize(), nil
+		// One exactly sized allocation (the two chained appends grew the
+		// result twice for "@*|node()", the most evaluated union there is).
+		u := make(NodeSet, 0, len(ls)+len(rs))
+		u = append(u, ls...)
+		u = append(u, rs...)
+		return u.normalize(), nil
 	case *FilterExpr:
 		return evalFilter(n, ctx)
 	case *PathExpr:
@@ -639,10 +644,15 @@ func evalExpr(e Expr, ctx *Context) (Object, error) {
 		// the focus can tell it was reached THROUGH a function item — see
 		// Context.ViaFunctionItem and XSLT 3.0 §10.3.6.
 		captured := ctx
-		if captured != nil && !captured.ViaFunctionItem {
-			c := *captured
-			c.ViaFunctionItem = true
-			captured = &c
+		if captured != nil {
+			// The function item keeps ctx (or a copy of it, which still
+			// points at the host's resolvers): see Context.capture.
+			ctx.capture()
+			if !captured.ViaFunctionItem {
+				c := *captured
+				c.ViaFunctionItem = true
+				captured = &c
+			}
 		}
 		return sigApply(&Function{Arity: ref.Arity, Name: ref.Local, NS: ns, Call: func(args []Object) (Object, error) {
 			return dispatchFunc(prefix, ref.Local, args, captured)
@@ -950,12 +960,37 @@ func evalArray(n *ArrayExpr, ctx *Context) (Object, error) {
 	return NewArray(members), nil
 }
 
-// poll asks the host's Interrupt hook whether to stop.
 // Captured reports whether a function item retained a pointer to c (see the
 // captured field): a host reusing one Context across many evaluations must
 // take a fresh one once this is set.
 func (c *Context) Captured() bool { return c.captured }
 
+// CaptureListener is the optional interface a host's VarResolver implements to
+// learn that a function item retained a Context — this one or a copy or a
+// derivative of it — that resolves variables through that resolver. Such a
+// function item may be called after the evaluation that built it has
+// returned, so a host that reuses its resolver objects across evaluations
+// must retire this one (the XSLT engine's evalEnv). The flag on the Context
+// itself (Captured) cannot carry that information: an inline function created
+// inside a for/let/predicate captures the DERIVED context the body ran in,
+// not the one the host built, while every derived context still points at
+// the host's resolver.
+type CaptureListener interface {
+	ContextCaptured()
+}
+
+// capture marks c as retained by a function item (never to be reused in place
+// again) and tells the host's VarResolver so — every site that stores a
+// Context pointer into a function item's closure calls this, never sets the
+// field directly.
+func (c *Context) capture() {
+	c.captured = true
+	if l, ok := c.Vars.(CaptureListener); ok {
+		l.ContextCaptured()
+	}
+}
+
+// poll asks the host's Interrupt hook whether to stop.
 func (c *Context) poll() error {
 	if c == nil || c.Interrupt == nil {
 		return nil
@@ -978,7 +1013,7 @@ func evalInlineFunc(n *InlineFunc, ctx *Context) *Function {
 	rtype := n.RetType
 	body := n.Body
 	captured := ctx
-	ctx.captured = true
+	ctx.capture()
 	// The counter travels with the function value and into the contexts its
 	// body runs in, so a recursion through it — or through the inline
 	// functions created inside it — is counted on one counter.
@@ -1323,6 +1358,15 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 			matched, err := evalStep(step, cn, ctx, &pc)
 			if err != nil {
 				return nil, err
+			}
+			if len(current) == 1 {
+				// The step's result is taken as is rather than copied: evalStep
+				// always builds it by appending into a slice of its own (never
+				// the tree's Children/Attrs that axisNodes hands it), so nothing
+				// else references it. One context node is the shape of every
+				// select="child" in a template body.
+				next = matched
+				break
 			}
 			next = append(next, matched...)
 		}
@@ -1788,7 +1832,7 @@ func evalArrow(n *ArrowExpr, ctx *Context) (Object, error) {
 		// first bound argument is the arrow operand: "$" => concat(?) is
 		// concat("$", ?) (ArrowPostfix-108).
 		template, holeAt := args, isHole
-		ctx.captured = true // call may keep ctx (its focus)
+		ctx.capture() // call may keep ctx (its focus)
 		cur = &Function{Arity: holes, Call: func(supplied []Object) (Object, error) {
 			filled := make([]Object, len(template))
 			si := 0

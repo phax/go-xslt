@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/big"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -534,10 +535,19 @@ func castToInteger(a *Atomic, target AtomType) (*Atomic, error) {
 		// A STRING/untypedAtomic source must be a valid xs:integer LEXICAL:
 		// no '.' and no exponent (xs:long("3.0") is FORG0001, not 3). Only a
 		// numeric decimal/double VALUE source truncates, handled above.
-		var ok bool
-		z, ok = new(big.Int).SetString(s, 10)
-		if !ok {
-			return nil, fmt.Errorf("err:FORG0001: invalid integer %q", s)
+		// strconv.ParseInt accepts exactly the base-10 grammar big.Int.SetString
+		// does (an optional sign, then digits — no underscores, no spaces),
+		// only bounded, so a value it parses is one SetString would parse to
+		// the same number; anything else, overflow included, goes the general
+		// way, which also decides the lexical question.
+		if n, perr := strconv.ParseInt(s, 10, 64); perr == nil {
+			z = big.NewInt(n)
+		} else {
+			var ok bool
+			z, ok = new(big.Int).SetString(s, 10)
+			if !ok {
+				return nil, fmt.Errorf("err:FORG0001: invalid integer %q", s)
+			}
 		}
 	}
 	if err := checkIntegerBounds(z, target); err != nil {
@@ -546,37 +556,36 @@ func castToInteger(a *Atomic, target AtomType) (*Atomic, error) {
 	return &Atomic{T: target, i: z}, nil
 }
 
+// integerRange is the value range of a derived integer type; a nil bound is
+// unbounded on that side.
+type integerRange struct{ lo, hi *big.Int }
+
+// integerRanges holds the bounds of every bounded derived integer type, built
+// once: checkIntegerBounds used to construct two big.Ints (four for the
+// 64-bit types) on every call, i.e. for every integer an XSD validation
+// typed. Read-only after init, so safe to share.
+var integerRanges = func() map[AtomType]integerRange {
+	bi := func(s string) *big.Int { v, _ := new(big.Int).SetString(s, 10); return v }
+	return map[AtomType]integerRange{
+		XSbyte:               {big.NewInt(-128), big.NewInt(127)},
+		XSshort:              {big.NewInt(-32768), big.NewInt(32767)},
+		XSint:                {big.NewInt(-2147483648), big.NewInt(2147483647)},
+		XSlong:               {bi("-9223372036854775808"), bi("9223372036854775807")},
+		XSunsignedByte:       {big.NewInt(0), big.NewInt(255)},
+		XSunsignedShort:      {big.NewInt(0), big.NewInt(65535)},
+		XSunsignedInt:        {big.NewInt(0), big.NewInt(4294967295)},
+		XSunsignedLong:       {big.NewInt(0), bi("18446744073709551615")},
+		XSnonNegativeInteger: {big.NewInt(0), nil},
+		XSpositiveInteger:    {big.NewInt(1), nil},
+		XSnonPositiveInteger: {nil, big.NewInt(0)},
+		XSnegativeInteger:    {nil, big.NewInt(-1)},
+	}
+}()
+
 // checkIntegerBounds enforces the value range of a derived integer type.
 func checkIntegerBounds(z *big.Int, target AtomType) error {
-	type rng struct{ lo, hi *big.Int }
-	bi := func(s string) *big.Int { v, _ := new(big.Int).SetString(s, 10); return v }
-	var b rng
-	switch target {
-	case XSbyte:
-		b = rng{big.NewInt(-128), big.NewInt(127)}
-	case XSshort:
-		b = rng{big.NewInt(-32768), big.NewInt(32767)}
-	case XSint:
-		b = rng{big.NewInt(-2147483648), big.NewInt(2147483647)}
-	case XSlong:
-		b = rng{bi("-9223372036854775808"), bi("9223372036854775807")}
-	case XSunsignedByte:
-		b = rng{big.NewInt(0), big.NewInt(255)}
-	case XSunsignedShort:
-		b = rng{big.NewInt(0), big.NewInt(65535)}
-	case XSunsignedInt:
-		b = rng{big.NewInt(0), big.NewInt(4294967295)}
-	case XSunsignedLong:
-		b = rng{big.NewInt(0), bi("18446744073709551615")}
-	case XSnonNegativeInteger:
-		b = rng{big.NewInt(0), nil}
-	case XSpositiveInteger:
-		b = rng{big.NewInt(1), nil}
-	case XSnonPositiveInteger:
-		b = rng{nil, big.NewInt(0)}
-	case XSnegativeInteger:
-		b = rng{nil, big.NewInt(-1)}
-	default:
+	b, ok := integerRanges[target]
+	if !ok {
 		return nil
 	}
 	if b.lo != nil && z.Cmp(b.lo) < 0 {

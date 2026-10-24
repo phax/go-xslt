@@ -25,6 +25,9 @@ func (c *compiler) parseAsserts(node *xmltree.Node) ([]*assertion, error) {
 		}
 		out = append(out, a)
 	}
+	if len(out) > 0 {
+		c.sch.hasAsserts = true // see Schema.hasAsserts
+	}
 	return out, nil
 }
 

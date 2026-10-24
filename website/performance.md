@@ -11,16 +11,16 @@ Apple M4, macOS, libxml2 2.9.13 / libxslt 1.1.35; input 200,000 records,
 
 | Workload | go-xslt | libxslt / libxml2 | ratio | peak memory go-xslt | peak memory libxml2 |
 |---|---|---|---|---|---|
-| copy the whole document | 1.16 s | 0.68 s | 1.7× | 1,250 MB | 1,067 MB |
-| recursive apply-templates, rebuilding every node | 2.42 s | 1.27 s | 1.9× | 1,709 MB | 1,074 MB |
-| sort all records by two keys | 1.53 s | 18.99 s | 0.08× | 970 MB | 587 MB |
-| Muenchian grouping with `xsl:key` | 1.41 s | 0.90 s | 1.6× | 926 MB | 538 MB |
-| predicates, string and number functions | 1.15 s | 0.85 s | 1.4× | 864 MB | 590 MB |
-| XSD 1.0 validation | 1.47 s | 0.51 s | 2.9× | 912 MB | 539 MB |
+| copy the whole document | 1.33 s | 0.78 s | 1.7× | 1,248 MB | 1,067 MB |
+| recursive apply-templates, rebuilding every node | 2.51 s | 1.38 s | 1.8× | 1,402 MB | 1,074 MB |
+| sort all records by two keys | 1.45 s | 21.07 s | 0.07× | 913 MB | 587 MB |
+| Muenchian grouping with `xsl:key` | 1.48 s | 0.93 s | 1.6× | 921 MB | 538 MB |
+| predicates, string and number functions | 1.24 s | 0.89 s | 1.4× | 860 MB | 590 MB |
+| XSD 1.0 validation | 1.23 s | 0.55 s | 2.3× | 700 MB | 539 MB |
 
 ## Reading the numbers
 
-- On most workloads go-xslt takes 1.4 to 2.9 times as long as the C
+- On most workloads go-xslt takes 1.4 to 2.3 times as long as the C
   libraries and needs more memory for the document tree. Sorting is the
   exception: libxslt's sort is more than ten times slower here.
 - The comparison is limited to what both can do. go-xslt also implements
@@ -43,7 +43,11 @@ time (switching it off saves under 10%). The lever is therefore the memory
 a run allocates, not the XML tokenizer: allocating less (one reused
 evaluation context per predicate and key walk instead of one per node, nodes
 carved from blocks, content models matched without per-element maps) is what
-brought grouping from 2.6 to 1.4 s and validation from 2.2 to 1.5 s.
+brought grouping from 3.0 to 1.6 times libxslt's time, validation from 4.5
+to 2.3 times libxml2's, and apply-templates from 2.2 to 1.8 times. One
+reused context per XPath evaluation in templates, sort keys atomized once,
+and date and number checks in XSD validation without building values
+followed.
 
 ## Same results
 

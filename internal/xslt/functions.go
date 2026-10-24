@@ -199,6 +199,13 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 				values = append(values, canonKeyString(xpath.KeyString(it), collURI))
 			}
 		}
+		if len(values) == 1 && scope == nil {
+			// The common lookup — one search value, no scoping: the index's
+			// entry list, copied once (Unique copies before it normalizes).
+			// The general path below copies it into out and then once more
+			// in dedupNodes, for the same result.
+			return xpath.NodeSet(idx[values[0]]).Unique(), true, nil
+		}
 		var out xpath.NodeSet
 		for _, v := range values {
 			out = append(out, idx[v]...)
