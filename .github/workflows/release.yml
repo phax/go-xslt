@@ -291,10 +291,13 @@ jobs:
       # Installing these lets wails3's own build:native task run directly
       # on this runner instead of falling back to the ~800MB wails-cross
       # Docker image.
+      # A hanging package mirror once kept this step running for good; the
+      # timeout makes it fail instead ("Re-run failed jobs" then retries it).
       - name: Install Linux GUI build dependencies
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
 
       - name: Cache the wails3 CLI
         id: wails3
