@@ -2,6 +2,8 @@ module github.com/tim-riep/go-xslt/desktop
 
 go 1.25.0
 
+toolchain go1.26.10
+
 require (
 	github.com/tim-riep/go-xslt v0.0.0
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.103
@@ -18,7 +20,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/wailsapp/wails/webview2 v1.0.24 // indirect
 	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 )
 
 // The desktop GUI consumes the engine library from this same repository.

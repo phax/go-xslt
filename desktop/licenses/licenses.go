@@ -44,7 +44,7 @@ var entries = []Entry{
 
 	// Go modules (root go.mod + desktop/go.mod, direct and indirect — all
 	// statically linked into the compiled binary).
-	{Name: "golang.org/x/text", Version: "v0.38.0", License: "BSD-3-Clause", Kind: "go",
+	{Name: "golang.org/x/text", Version: "v0.39.0", License: "BSD-3-Clause", Kind: "go",
 		URL: "https://pkg.go.dev/golang.org/x/text", path: "go/golang.org/x/text/LICENSE"},
 	{Name: "golang.org/x/sys", Version: "v0.43.0", License: "BSD-3-Clause", Kind: "go",
 		URL: "https://pkg.go.dev/golang.org/x/sys", path: "go/golang.org/x/sys/LICENSE"},

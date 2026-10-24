@@ -216,8 +216,12 @@ Desktop GUI (**run from `desktop/`**):
 - Frontend build: `cd desktop/frontend && npm run build` (tsc + vite). It is
   embedded via `//go:embed all:frontend/dist`, so build the frontend before
   `go build`.
-- **CI/CD** (`.github/workflows/`): `ci.yml` runs library build/vet/test on
-  push/PR to `main`. `release.yml` triggers on any `v*` tag push — builds all
+- **CI/CD** (`.github/workflows/`): `ci.yml` runs library build/vet/test and
+  `govulncheck` on push/PR to `main`. Both `go.mod` files keep `go 1.25.0`
+  (the minimum for library users) plus a `toolchain` line, which is what
+  CI and the release builds actually use (setup-go reads it): keep it on
+  the latest patch release — the published binaries were built with a
+  year-old go1.25.0 until v0.3.5. `release.yml` triggers on any `v*` tag push — builds all
   5 desktop binaries (macOS arm64+amd64 and Windows amd64+arm64 natively on
   one `macos-latest` runner; Linux amd64 natively on `ubuntu-latest` with
   GTK/WebKitGTK installed, avoiding the `wails-cross` Docker image) and

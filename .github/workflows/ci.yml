@@ -35,6 +35,12 @@ jobs:
       - name: go test
         run: go test ./...
 
+      # Known vulnerabilities in the Go toolchain (go.mod's toolchain line) and
+      # in golang.org/x/text that our code actually reaches; a new advisory
+      # turns the build red instead of going unnoticed in shipped binaries.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
   frontend:
     # The desktop GUI's TypeScript is type-checked against the GENERATED Wails
     # bindings. A changed engine struct without `make bindings` only broke the
