@@ -417,6 +417,7 @@ type serializer struct {
 	declared map[string]string // uri -> prefix currently in scope
 	prefixes map[string]string // prefix -> uri currently in scope
 	suppress bool              // inside a suppress-indentation element
+	attrBuf  []byte            // startTag's scratch buffer for an element's attributes
 }
 
 func (s *serializer) node(n *Node, depth int) {
@@ -771,7 +772,12 @@ func (s *serializer) startTag(n *Node, depth int) elemOpen {
 	if !html {
 		attrEsc = escapeAttrXML
 	}
-	var attrs strings.Builder
+	// The attributes are gathered in the serializer's reusable scratch buffer
+	// (they must follow the namespace declarations, which resolving their
+	// prefixes may still add to) and every piece is appended separately:
+	// building each attribute, and then the whole tag, by string
+	// concatenation cost three allocations per element.
+	attrs := s.attrBuf[:0]
 	for _, a := range n.Attrs {
 		if fixContentTypeAttr && a.Name.Space == "" && strings.EqualFold(a.Name.Local, "content") {
 			// Dropped so the correct value can be appended once below, instead
@@ -787,7 +793,8 @@ func (s *serializer) startTag(n *Node, depth int) elemOpen {
 			strings.EqualFold(a.Value, a.Name.Local) {
 			// HTML boolean attribute (attribute-0701): serialize as a bare
 			// name, not name="value".
-			attrs.WriteString(" " + aq)
+			attrs = append(attrs, ' ')
+			attrs = append(attrs, aq...)
 			continue
 		}
 		val := a.Value
@@ -809,13 +816,23 @@ func (s *serializer) startTag(n *Node, depth int) elemOpen {
 		if htmlish {
 			out = escapeC1(out)
 		}
-		attrs.WriteString(" " + aq + `="` + out + `"`)
+		attrs = append(attrs, ' ')
+		attrs = append(attrs, aq...)
+		attrs = append(attrs, '=', '"')
+		attrs = append(attrs, out...)
+		attrs = append(attrs, '"')
 	}
 	if fixContentTypeAttr {
-		attrs.WriteString(` content="` + s.mapChars(s.contentTypeValue(), escapeAttr) + `"`)
+		attrs = append(attrs, ` content="`...)
+		attrs = append(attrs, s.mapChars(s.contentTypeValue(), escapeAttr)...)
+		attrs = append(attrs, '"')
 	}
 
-	s.b.WriteString("<" + qname + decls.String() + attrs.String())
+	s.b.WriteString("<")
+	s.b.WriteString(qname)
+	s.b.WriteString(decls.String())
+	s.b.Write(attrs)
+	s.attrBuf = attrs[:0]
 	return elemOpen{qname: qname, meta: meta, saves: saves, indent: indent, suppress: suppressed}
 }
 
@@ -824,7 +841,9 @@ func (s *serializer) closeTag(o elemOpen, depth int) {
 	if o.indent {
 		s.b.WriteString("\n" + strings.Repeat("  ", depth))
 	}
-	s.b.WriteString("</" + o.qname + ">")
+	s.b.WriteString("</")
+	s.b.WriteString(o.qname)
+	s.b.WriteString(">")
 	s.undeclare(o.saves)
 	if o.suppress {
 		s.suppress = false

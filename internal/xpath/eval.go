@@ -442,6 +442,11 @@ func evalExpr(e Expr, ctx *Context) (Object, error) {
 	case *BinaryExpr:
 		return evalBinary(n, ctx)
 	case *UnionExpr:
+		if ls, rs := unionStep(n.L), unionStep(n.R); ls != nil && rs != nil &&
+			ctx != nil && ctx.Node != nil && !ctx.Node.SynthCtx() && ctx.PatternTop == nil &&
+			ctx.evalDepth < maxEvalDepth {
+			return evalStepUnion(ls, rs, ctx)
+		}
 		l, err := evalExpr(n.L, ctx)
 		if err != nil {
 			return nil, err
@@ -1239,6 +1244,11 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 		}
 	}
 	var current NodeSet
+	// one is the path's single starting node (the context node, or the root
+	// for "/…") while current has not been materialized: the first axis step
+	// is applied to it directly, saving the one-element NodeSet a relative
+	// path like "@*" or "node()" otherwise allocated on every evaluation.
+	var one *xmltree.Node
 	if n.Start != nil {
 		v, err := evalExpr(n.Start, ctx)
 		if err != nil {
@@ -1283,17 +1293,17 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 					return nil, fmt.Errorf("XPDY0050: the tree has no document root")
 				}
 			}
-			current = NodeSet{root}
+			one = root
 		}
 	} else {
 		if ctx.Node != nil {
 			if ctx.Node.SynthCtx() {
 				return nil, fmt.Errorf("err:XPTY0020: the context item for an axis step is not a node")
 			}
-			current = NodeSet{ctx.Node}
+			one = ctx.Node
 		} else if nd, ok := ctx.CtxItem.(*xmltree.Node); ok {
 			// A node focus set only through CtxItem (simple map "!").
-			current = NodeSet{nd}
+			one = nd
 		} else if ctx.CtxItem != nil {
 			// An axis step with an atomic (or function) context item is
 			// XPTY0020 (K2-Axes-38/39: 123[..], 1[element()]).
@@ -1315,6 +1325,21 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 			// two-step form can express.
 			step = step.Fuse
 			i++
+		}
+		if one != nil {
+			cn := one
+			one = nil
+			if step.Postfix == nil {
+				// Exactly the len(current) == 1 case of the loop below.
+				var pc prefixCache
+				matched, err := evalStep(step, cn, ctx, &pc)
+				if err != nil {
+					return nil, err
+				}
+				current = matched.normalize()
+				continue
+			}
+			current = NodeSet{cn}
 		}
 		if step.Postfix != nil {
 			// PostfixExpr step (function call etc.): evaluate per context node.
@@ -1372,7 +1397,83 @@ func evalPath(n *PathExpr, ctx *Context) (Object, error) {
 		}
 		current = next.normalize()
 	}
+	if one != nil {
+		current = NodeSet{one} // a path without steps: its starting node
+	}
 	return current, nil
+}
+
+// unionStep returns e's step when e is a relative path of one predicate-free
+// child:: or attribute:: step with no prefix to resolve — "@*", "node()",
+// "text()", "@id" — the operands of "@*|node()", the most evaluated union
+// there is; nil for anything else.
+func unionStep(e Expr) *Step {
+	p, ok := e.(*PathExpr)
+	if !ok || p.Start != nil || p.Absolute || len(p.Steps) != 1 {
+		return nil
+	}
+	st := p.Steps[0]
+	if st.Postfix != nil || st.Fuse != nil || len(st.Preds) > 0 ||
+		(st.Axis != "child" && st.Axis != "attribute") ||
+		st.Test.Prefix != "" || st.Test.Braced {
+		return nil
+	}
+	return st
+}
+
+// evalStepUnion evaluates L|R for two unionStep operands from the context
+// node, with the result the general UnionExpr case computes — each operand
+// is the step's matches normalized, exactly as evalPath returns them, then
+// the concatenation normalized — but built in ONE slice: the general case
+// allocates each operand's slice, boxes each as an Object, and copies both
+// into a third. The caller has checked everything evalPath would reject or
+// treat specially (no context node, an atomic one, a PatternTop, the
+// nesting limit its two nested evalExpr calls would reach).
+func evalStepUnion(ls, rs *Step, ctx *Context) (Object, error) {
+	cn := ctx.Node
+	lc, rc := axisNodes(ls.Axis, cn), axisNodes(rs.Axis, cn)
+	u := make(NodeSet, 0, len(lc)+len(rc))
+	var pc prefixCache
+	u, err := appendMatches(u, lc, ls, ctx, &pc)
+	if err != nil {
+		return nil, err
+	}
+	u = u.normalize() // in place on u's array, or a fresh slice
+	mid := len(u)
+	pc = prefixCache{}
+	u, err = appendMatches(u, rc, rs, ctx, &pc)
+	if err != nil {
+		return nil, err
+	}
+	r := u[mid:].normalize()
+	u = append(u[:mid], r...) // r is u[mid:] itself or its in-place prefix, or a fresh slice
+	return u.normalize(), nil
+}
+
+// appendMatches appends the candidates that satisfy step's node test to dst.
+// For a test that selects most of what it sees (node(), * or @*), a nil dst
+// is allocated at the first match, sized for what can still follow (capped,
+// so a long child list is not reserved whole): node() or @* over a handful of
+// children or attributes is one allocation, not append's 1-2-4-8 regrowth. A
+// name test, which typically keeps one candidate of several, grows by append
+// as before rather than reserving room it will not use.
+func appendMatches(dst, candidates NodeSet, step *Step, ctx *Context, pc *prefixCache) (NodeSet, error) {
+	t := &step.Test
+	broad := t.Kind == testNode ||
+		(t.Kind == testName && t.AnyName && !t.WildNS && t.Prefix == "" && !t.Braced)
+	for i, c := range candidates {
+		ok, err := matchTestC(step.Test, step.Axis, c, ctx, pc)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			if dst == nil && broad {
+				dst = make(NodeSet, 0, min(len(candidates)-i, 16))
+			}
+			dst = append(dst, c)
+		}
+	}
+	return dst, nil
 }
 
 // evalStep produces the nodes selected by step from context node cn.
@@ -1409,14 +1510,9 @@ func evalStep(step *Step, cn *xmltree.Node, ctx *Context, pc *prefixCache) (Node
 			// child-or-top / attribute-or-top (see Context.PatternTop).
 			candidates = append(NodeSet{cn}, candidates...)
 		}
-		for _, c := range candidates {
-			ok, err := matchTestC(step.Test, step.Axis, c, ctx, pc)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				matched = append(matched, c)
-			}
+		var err error
+		if matched, err = appendMatches(nil, candidates, step, ctx, pc); err != nil {
+			return nil, err
 		}
 	}
 	// predicates

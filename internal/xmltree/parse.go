@@ -318,30 +318,53 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	// External parsed general entities are spliced in textually before
 	// tokenizing (see expandExternalEntities) — encoding/xml can only supply
 	// an entity's replacement as character data, never as markup.
+	//
+	// Every DTD pre-pass below (external/internal entities, ATTLIST defaults
+	// and ID types, element-content declarations, unparsed entities) starts
+	// from strings.Index(src, "<!DOCTYPE") and finds nothing without one — and
+	// each such miss scans the whole document, ~5% of a large transform. So
+	// look once: with no "<!DOCTYPE" anywhere, every pre-pass would return its
+	// empty result, and skipping them is exactly equivalent. (Neither
+	// expandExternalEntities, which changes nothing without a DOCTYPE, nor
+	// normalizeAttrWhitespace, which only turns tab/LF/CR bytes into spaces,
+	// can make a "<!DOCTYPE" appear or disappear.)
+	hasDTD := strings.Contains(src, "<!DOCTYPE")
 	inputLen := len(src)
-	src, entSpans, err := expandExternalEntities(src, baseDir, files)
-	if err != nil {
-		return nil, err
+	var entSpans []entitySpan
+	if hasDTD {
+		var err error
+		src, entSpans, err = expandExternalEntities(src, baseDir, files)
+		if err != nil {
+			return nil, err
+		}
 	}
 	src = normalizeAttrWhitespace(src)
 	lines := newLinePos(src)
-	ents, err := documentEntities(src, baseDir, files)
-	if err != nil {
-		return nil, err
-	}
-	// Each reference in the body inserts its entity's whole value: bound the
-	// sum too, or one small entity referenced a million times amplifies.
-	if limit := expansionLimit(inputLen); len(ents) > 0 && entityRefVolume(src[doctypeEnd(src):], ents, limit) > limit {
-		return nil, errEntityExpansion(limit)
+	var ents map[string]string
+	if hasDTD {
+		var err error
+		ents, err = documentEntities(src, baseDir, files)
+		if err != nil {
+			return nil, err
+		}
+		// Each reference in the body inserts its entity's whole value: bound the
+		// sum too, or one small entity referenced a million times amplifies.
+		if limit := expansionLimit(inputLen); len(ents) > 0 && entityRefVolume(src[doctypeEnd(src):], ents, limit) > limit {
+			return nil, errEntityExpansion(limit)
+		}
 	}
 	tz := newTokenizer(downgradeXMLVersion(src), ents)
-	idKinds := idAttrKinds(src)
-	attrDefaults := attlistDefaults(src)
-	elemOnly := elementOnlyDecls(src, baseDir, files)
-
+	var idKinds map[string]map[string]uint8
+	var attrDefaults map[string]map[string]attlistDefault
+	var elemOnly map[string]bool
 	doc := &Node{Kind: KindDocument}
-	if u := unparsedEntityDecls(src, baseDir, files); len(u) > 0 {
-		doc.SetUnparsed(u)
+	if hasDTD {
+		idKinds = idAttrKinds(src)
+		attrDefaults = attlistDefaults(src)
+		elemOnly = elementOnlyDecls(src, baseDir, files)
+		if u := unparsedEntityDecls(src, baseDir, files); len(u) > 0 {
+			doc.SetUnparsed(u)
+		}
 	}
 	stack := []*Node{doc}
 	// Nodes are carved from slabs rather than allocated one by one: a parsed

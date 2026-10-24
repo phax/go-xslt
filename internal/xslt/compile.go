@@ -247,6 +247,20 @@ type Template struct {
 	// ctxItem is the template's xsl:context-item declaration (XSLT 3.0 §6.4),
 	// lifted out of the body by splitContextItem; nil when it has none.
 	ctxItem *contextItemDecl
+	// alone is the one-element candidate list []*Template{t} that
+	// matchingTemplates returns when t is the only rule matching a node — by
+	// far the common case — instead of allocating one per matched node. Set
+	// once at the end of the compile (finishTemplates), read-only afterwards;
+	// its capacity is 1, so an append by any holder copies.
+	alone []*Template
+}
+
+// finishTemplates fills in each template's read-only alone list (see
+// Template.alone).
+func finishTemplates(ss *Stylesheet) {
+	for _, t := range ss.templates {
+		t.alone = []*Template{t}
+	}
 }
 
 // Stylesheet is a compiled stylesheet.
@@ -1028,6 +1042,7 @@ func compileModule(src, baseDir, selfPath string, hostStatic map[string]string, 
 	if err := applyTypedModeRewrites(ss); err != nil {
 		return nil, err
 	}
+	finishTemplates(ss)
 	return ss, nil
 }
 

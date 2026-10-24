@@ -11,18 +11,22 @@ Apple M4, macOS, libxml2 2.9.13 / libxslt 1.1.35; input 200,000 records,
 
 | Workload | go-xslt | libxslt / libxml2 | ratio | peak memory go-xslt | peak memory libxml2 |
 |---|---|---|---|---|---|
-| copy the whole document | 1.33 s | 0.78 s | 1.7× | 1,248 MB | 1,067 MB |
-| recursive apply-templates, rebuilding every node | 2.51 s | 1.38 s | 1.8× | 1,402 MB | 1,074 MB |
-| sort all records by two keys | 1.45 s | 21.07 s | 0.07× | 913 MB | 587 MB |
-| Muenchian grouping with `xsl:key` | 1.48 s | 0.93 s | 1.6× | 921 MB | 538 MB |
-| predicates, string and number functions | 1.24 s | 0.89 s | 1.4× | 860 MB | 590 MB |
-| XSD 1.0 validation | 1.23 s | 0.55 s | 2.3× | 700 MB | 539 MB |
+| copy the whole document | 0.80 s | 0.89 s | 0.90× | 1,142 MB | 1,067 MB |
+| recursive apply-templates, rebuilding every node | 2.00 s | 1.79 s | 1.11× | 1,179 MB | 1,074 MB |
+| sort all records by two keys | 1.09 s | 24.06 s | 0.05× | 822 MB | 587 MB |
+| Muenchian grouping with `xsl:key` | 0.91 s | 0.95 s | 0.96× | 845 MB | 538 MB |
+| predicates, string and number functions | 0.65 s | 0.91 s | 0.71× | 776 MB | 590 MB |
+| XSD 1.0 validation | 0.73 s | 0.54 s | 1.34× | 620 MB | 539 MB |
+
+The machine was not idle during this run, which slows both tools alike; the
+ratios are what carries over.
 
 ## Reading the numbers
 
-- On most workloads go-xslt takes 1.4 to 2.3 times as long as the C
-  libraries and needs more memory for the document tree. Sorting is the
-  exception: libxslt's sort is more than ten times slower here.
+- go-xslt is about as fast as the C libraries: faster at copying the
+  document, at XPath and especially at sorting (libxslt's sort is about
+  twenty times slower here), up to 1.3 times slower at template rules and
+  validation. It needs somewhat more memory for the document tree.
 - The comparison is limited to what both can do. go-xslt also implements
   XSLT 3.0, XPath 3.1 and XSD 1.1, which libxslt and libxml2 do not.
 - For documents too large for memory, XSLT 3.0
@@ -34,20 +38,25 @@ Apple M4, macOS, libxml2 2.9.13 / libxslt 1.1.35; input 200,000 records,
 
 ## Where the time goes
 
-A CPU profile of the copy workload shows that parsing is not the bottleneck:
-the parser takes about 12% of the CPU time, `encoding/xml` within it 4%. Most
-of the time goes to obtaining memory for the document tree — 35% in the
-operating system's memory calls while the heap grows past 1 GB — and to the
-garbage collector scanning it, which runs on other cores and hardly adds wall
-time (switching it off saves under 10%). The lever is therefore the memory
-a run allocates, not the XML tokenizer: allocating less (one reused
-evaluation context per predicate and key walk instead of one per node, nodes
-carved from blocks, content models matched without per-element maps) is what
-brought grouping from 3.0 to 1.6 times libxslt's time, validation from 4.5
-to 2.3 times libxml2's, and apply-templates from 2.2 to 1.8 times. One
-reused context per XPath evaluation in templates, sort keys atomized once,
-and date and number checks in XSD validation without building values
-followed.
+Profiles showed early on that most of the time went to obtaining memory —
+about 35% in the operating system's memory calls while the heap grows past
+1 GB, roughly half a second per gigabyte allocated — and to the garbage
+collector scanning it. The lever was therefore the memory a run allocates.
+Three steps brought go-xslt from 1.5–4.5 times libxslt's time to where it is
+now:
+
+- reusing evaluation contexts (per predicate, key walk, template match and
+  XPath evaluation) instead of allocating one per node, carving parsed
+  nodes from blocks, and matching XSD content models without per-element
+  maps;
+- an own XML tokenizer in place of `encoding/xml` that hands out pieces of
+  the document instead of copies — it accepts and rejects exactly what
+  `encoding/xml` did, which differential fuzzing and the W3C XML
+  Conformance Test Suite check — about 260 MB less per 37 MB document;
+- skipping the DTD passes for documents without a DOCTYPE, fewer
+  allocations per template call, and serializing without building strings.
+
+What remains is mostly the document and result trees themselves.
 
 ## Same results
 

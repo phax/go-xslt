@@ -3363,9 +3363,14 @@ func (eng *engine) invokeTemplate(tmpl *Template, r rt, out *xmltree.Node, calle
 	// own parameters and locals — never the local variables of the template or
 	// instruction that happened to invoke it. (The supplied values were all
 	// evaluated above, in the caller's scope.)
+	//
+	// The body's own frame is not pushed here: bindVar opens it on the first
+	// binding into an empty stack, which is exactly this frame, and most
+	// template rules bind nothing — they paid a one-slot slice per invocation
+	// (~10% of a template-heavy transform's mallocs) for a frame that stayed
+	// empty.
 	callerScopes := eng.scopes
 	eng.scopes = nil
-	eng.pushScope()
 	prevTunnel := eng.tunnel
 	if tunnelIn != nil {
 		eng.tunnel = tunnelIn
@@ -4666,6 +4671,15 @@ func deepCopyInto(node *xmltree.Node, out *xmltree.Node) {
 		xmltree.CopyTypeInfo(el, node)
 		for _, ns := range node.NSDecls() {
 			el.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: ns.Name, Value: ns.Value, Parent: el})
+		}
+		// The copy gets exactly the original's attributes and (an adjacent
+		// atomic text merging aside) one child per original child: size both
+		// lists once instead of growing them by append.
+		if n := len(node.Attrs); n > 0 {
+			el.Attrs = make([]*xmltree.Node, 0, n)
+		}
+		if n := len(node.Children); n > 0 {
+			el.Children = make([]*xmltree.Node, 0, n)
 		}
 		for _, a := range node.Attrs {
 			xmltree.CopyTypeInfo(el.SetAttr(a.Name, a.Value), a)

@@ -481,6 +481,7 @@ func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Templat
 	}()
 	env, ctx := &sc.env, &sc.ctx
 	item := realItemOf(node)
+	var first *Template // the only match so far (cands stays nil until a second)
 	for _, t := range eng.sheet.templates {
 		if t.pattern == nil || !t.matchesMode(mode) {
 			continue
@@ -500,10 +501,26 @@ func (eng *engine) matchingTemplates(node *xmltree.Node, mode string) []*Templat
 		if err != nil || !ok {
 			continue
 		}
+		if first == nil {
+			first = t
+			continue
+		}
+		if cands == nil {
+			cands = append(cands, first)
+		}
 		cands = append(cands, t)
 	}
-	if len(cands) < 2 {
-		return cands // nothing to order (and no sort closure to allocate)
+	if cands == nil {
+		// Zero or one match: nothing to order (and no sort closure to
+		// allocate). A single match is the template's own shared one-element
+		// list when the compile set it up (Template.alone).
+		if first == nil {
+			return nil
+		}
+		if a := first.alone; len(a) == 1 && a[0] == first {
+			return a[:1:1]
+		}
+		return []*Template{first}
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		a, b := cands[i], cands[j]
