@@ -528,19 +528,27 @@ func TestStreamKeyIsRefused(t *testing.T) {
 // objects only (dead records of a streamed run cost nothing), and "peak" still
 // means what it did: the non-streaming path holds its whole tree live at the
 // later probes, the streaming one never does.
+//
+// The reading is relative to the live heap just before fn: whatever the test
+// process already holds (other tests' caches, compiled stylesheets not yet
+// collected) is not the run's memory, and counted in it made the bounded run
+// look like it grew with the document once the package had more tests.
 func strbPeakHeap(fn func()) uint64 {
 	var peak uint64
+	var m runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m)
+	base := m.HeapAlloc
 	prevProbe, prevEvery := stepProbe, stepProbeEvery
 	stepProbe, stepProbeEvery = func() {
 		runtime.GC()
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
-		if m.HeapAlloc > peak {
-			peak = m.HeapAlloc
+		if m.HeapAlloc > base && m.HeapAlloc-base > peak {
+			peak = m.HeapAlloc - base
 		}
 	}, strbProbeEvery
 	defer func() { stepProbe, stepProbeEvery = prevProbe, prevEvery }()
-	runtime.GC()
 	fn()
 	return peak
 }
