@@ -83,8 +83,9 @@ type Request struct {
 	// (xsl:initial-template) instead of matching against the source root.
 	InitialTemplate string `json:"initialTemplate"`
 	// BaseDir is the workspace directory used to resolve relative URIs in
-	// xsl:import/xsl:include, document()/doc(), unparsed-text(), and to write
-	// xsl:result-document. Empty disables disk resolution.
+	// xsl:import/xsl:include, document()/doc(), unparsed-text(), and the
+	// hrefs of xsl:result-document (returned in SecondaryOutputs; nothing is
+	// written to disk). Empty disables disk resolution.
 	BaseDir string `json:"baseDir"`
 	// Security limits which files and network resources the run may read;
 	// the zero value allows files under BaseDir only, and no network.

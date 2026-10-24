@@ -1,7 +1,9 @@
-// Package engine is the public facade of the goxslt XSLT/XPath processor.
-// It re-exports goxslt/internal/engine, the module's stable compatibility
-// boundary, so external modules can consume the engine; everything behind
-// this facade may be rewritten freely.
+// Package engine runs XSLT 3.0 transformations, XPath 3.1 expressions and
+// XSD 1.0/1.1 validation in pure Go: Transform and TransformTo run a
+// stylesheet, Compile prepares one for many runs, EvalXPath evaluates an
+// expression and Validate checks a document against schemas. Every entry
+// point reports problems as Diagnostics instead of panicking, and has a
+// Context variant for cancellation.
 package engine
 
 import (
@@ -12,7 +14,12 @@ import (
 )
 
 type (
-	Request          = engine.Request
+	// Request is one transformation: the stylesheet, the source document,
+	// parameters, the initial template/mode, and the security, limit and
+	// feature settings.
+	Request = engine.Request
+	// TransformRequest is a run of an already compiled Stylesheet: the
+	// per-run parts of a Request.
 	TransformRequest = engine.TransformRequest
 	// Security limits the files and network resources a run may read.
 	Security = engine.Security
@@ -22,26 +29,43 @@ type (
 	// Limits bounds what a run may execute (instruction steps, nesting depth).
 	Limits = engine.Limits
 	// Stylesheet is a stylesheet compiled once by Compile and run many times.
-	Stylesheet      = engine.Stylesheet
-	Result          = engine.Result
-	Diagnostic      = engine.Diagnostic
+	Stylesheet = engine.Stylesheet
+	// Result is the outcome of a transformation: the principal output, the
+	// documents written by xsl:result-document, messages and Diagnostics.
+	Result = engine.Result
+	// Diagnostic is an error or warning, with its W3C error code and, where
+	// known, the line and column it refers to.
+	Diagnostic = engine.Diagnostic
+	// SecondaryOutput is a document written by xsl:result-document.
 	SecondaryOutput = engine.SecondaryOutput
 
-	// XSD schema-validation API.
+	// ValidateRequest is one schema validation: the instance document, the
+	// schemas, the XSD version and the security settings.
 	ValidateRequest = engine.ValidateRequest
-	ValidateResult  = engine.ValidateResult
-	XSDVersion      = engine.XSDVersion
+	// ValidateResult says whether the instance is valid and lists every
+	// error found, in document order.
+	ValidateResult = engine.ValidateResult
+	// XSDVersion selects XSD 1.0 or XSD 1.1 validation.
+	XSDVersion = engine.XSDVersion
 
-	// Standalone XPath 3.1 evaluation API.
+	// XPathRequest is one standalone XPath 3.1 evaluation: the expression,
+	// an optional context document, namespace and variable bindings.
 	XPathRequest = engine.XPathRequest
-	XPathResult  = engine.XPathResult
-	XPathItem    = engine.XPathItem
+	// XPathResult is the value of an XPath evaluation, as a string and as
+	// a list of items.
+	XPathResult = engine.XPathResult
+	// XPathItem is one item of an XPath result with its type.
+	XPathItem = engine.XPathItem
 )
 
+// Severities of a Diagnostic.
 const (
 	SeverityError   = engine.SeverityError
 	SeverityWarning = engine.SeverityWarning
+)
 
+// XSD versions for ValidateRequest.
+const (
 	XSD10 = engine.XSD10
 	XSD11 = engine.XSD11
 )

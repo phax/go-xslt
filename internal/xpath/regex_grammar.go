@@ -406,7 +406,6 @@ func rangeEndpointRune(pat string, j, end int) (rune, bool) {
 	}
 }
 
-
 // validQuantBody reports whether s is the body of a well-formed XSD quantifier:
 // "n", "n,", or "n,m" with n,m sequences of digits.
 func validQuantBody(s string) bool {

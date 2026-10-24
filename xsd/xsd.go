@@ -1,4 +1,4 @@
-// Package xsd is the public, read-only schema component model of the goxslt
+// Package xsd is the public, read-only schema component model of the go-xslt
 // XSD 1.0/1.1 processor: compile schema documents once and walk the resulting
 // element declarations, type definitions, content models and attributes —
 // without an instance document. It exists for tools that check things against a
@@ -85,29 +85,47 @@ type (
 	// AttributeUse is an attribute of a complex type.
 	AttributeUse = xsd.AttributeUseView
 
-	Variety     = xsd.Variety
+	// Variety is a simple type's variety: atomic, list or union.
+	Variety = xsd.Variety
+	// ContentKind is a complex type's content: empty, simple, element-only
+	// or mixed.
 	ContentKind = xsd.ContentKind
-	Compositor  = xsd.Compositor
-	Use         = xsd.Use
+	// Compositor is a model group's kind: sequence, choice or all.
+	Compositor = xsd.Compositor
+	// Use is an attribute use's use: optional, required or prohibited.
+	Use = xsd.Use
 )
 
+// Values of Variety.
 const (
 	VarietyAtomic = xsd.VarietyAtomic
 	VarietyList   = xsd.VarietyList
 	VarietyUnion  = xsd.VarietyUnion
+)
 
+// Values of ContentKind.
+const (
 	ContentEmpty       = xsd.ContentEmpty
 	ContentSimple      = xsd.ContentSimple
 	ContentElementOnly = xsd.ContentElementOnly
 	ContentMixed       = xsd.ContentMixed
+)
 
+// Values of Compositor.
+const (
 	CompositorSequence = xsd.CompositorSequence
 	CompositorChoice   = xsd.CompositorChoice
 	CompositorAll      = xsd.CompositorAll
+)
 
+// Values of Use.
+const (
 	UseOptional   = xsd.UseOptional
 	UseRequired   = xsd.UseRequired
 	UseProhibited = xsd.UseProhibited
+)
+
+const (
 
 	// Unbounded is a Particle's MaxOccurs for maxOccurs="unbounded".
 	Unbounded = xsd.Unbounded
