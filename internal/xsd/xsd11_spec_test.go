@@ -87,7 +87,7 @@ func TestXSD11Features(t *testing.T) {
 		}},
 		// The test sees attributes only: the element is presented with no
 		// children (cvc-type-alternative / §3.12.4), so "a" is false.
-		{"cta-no-children-visible", ver11 + skipBug, `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+		{"cta-no-children-visible", ver11, `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
 		  <xs:element name="r"><xs:alternative test="a" type="xs:int"/><xs:alternative type="xs:anyType"/></xs:element></xs:schema>`, true, []docCheck{
 			{`<r><a/></r>`, true},
 		}},

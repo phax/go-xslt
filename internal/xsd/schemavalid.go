@@ -532,7 +532,16 @@ func checkDeclConstraints(el *xmltree.Node, v Version) error {
 			}
 			if b, ok := ch.AttrLocal("base"); ok {
 				switch resolveQName(ch, b) {
-				case xname{xsNS, "anySimpleType"}, xname{xsNS, "anyType"}:
+				case xname{xsNS, "anyType"}:
+					// simpleContent may restrict xs:anyType — mixed with an
+					// emptiable particle — when the restriction carries its
+					// own <simpleType> (XSD 1.0 src-ct.2.1.2/2.2; 1.1
+					// derivation-ok-restriction 2.1).
+					if el.Name.Local == "simpleContent" && firstXSChild(ch, "simpleType") != nil {
+						break
+					}
+					return invalidf("", "a simpleType cannot restrict %s", b)
+				case xname{xsNS, "anySimpleType"}:
 					return invalidf("", "a simpleType cannot restrict %s", b)
 				case xname{xsNS, "anyAtomicType"}:
 					// 1.1 Part 2 §3.4.1: anyAtomicType may not be the base of a

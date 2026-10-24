@@ -249,7 +249,6 @@ func TestXMLToJSONControlEscape(t *testing.T) {
 	// §17.5.4: "any other codepoint in the range 1-31 or 127-159 is replaced
 	// by an escape in the form \uHHHH where HHHH is the upper-case
 	// hexadecimal representation". U+007F..U+009F are XML 1.0 characters.
-	t.Skip("BUG: xml-to-json (and the JSON output method) emit U+007F..U+009F unescaped")
 	jsnRun(t, "", nil, []jsnCase{
 		{`xml-to-json(json-to-xml('"\u007F\u0080\u009F"'))`, `"\u007F\u0080\u009F"`},
 	})

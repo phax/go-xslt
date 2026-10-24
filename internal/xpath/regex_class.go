@@ -154,15 +154,12 @@ func parseClassRanges(s string) ([][2]rune, bool) {
 		switch {
 		case rs[i] == '\\' && i+1 < len(rs):
 			n := rs[i+1]
+			if c, ok := singleCharEscape(n); ok {
+				lo = c
+				i++
+				break
+			}
 			switch n {
-			case 'n':
-				lo = '\n'
-			case 'r':
-				lo = '\r'
-			case 't':
-				lo = '\t'
-			case '\\', '-', ']', '[', '^', '.', '|', '(', ')', '{', '}', '*', '+', '?', '/':
-				lo = n
 			case 'i':
 				// XSD \i (XML NameStartChar) — expand so class subtraction like
 				// [\i-[:]] reduces to explicit ranges.
@@ -172,6 +169,15 @@ func parseClassRanges(s string) ([][2]rune, bool) {
 			case 'c':
 				// XSD \c (XML NameChar).
 				out = append(out, xmlNameCharRanges...)
+				i++
+				continue
+			case 'I', 'C':
+				// Their complements (XSD Part 2 §G.4.2.5), e.g. [\I-[a]].
+				if n == 'I' {
+					out = append(out, complementRanges(xmlNameStartRanges)...)
+				} else {
+					out = append(out, complementRanges(xmlNameCharRanges)...)
+				}
 				i++
 				continue
 			case 'p', 'P':
@@ -233,7 +239,6 @@ func parseClassRanges(s string) ([][2]rune, bool) {
 			default:
 				return nil, false // \\ escapes this cannot reduce
 			}
-			i++
 		default:
 			lo = rs[i]
 		}
@@ -242,7 +247,13 @@ func parseClassRanges(s string) ([][2]rune, bool) {
 			hiStart := i + 2
 			var hi rune
 			if rs[hiStart] == '\\' && hiStart+1 < len(rs) {
-				hi = rs[hiStart+1]
+				// An escaped endpoint denotes the escaped character
+				// (seRange ::= charOrEsc '-' charOrEsc): [\t-\r] is #x9..#xD.
+				c, ok := singleCharEscape(rs[hiStart+1])
+				if !ok {
+					return nil, false
+				}
+				hi = c
 				i = hiStart + 1
 			} else {
 				hi = rs[hiStart]
@@ -254,6 +265,23 @@ func parseClassRanges(s string) ([][2]rune, bool) {
 		out = append(out, [2]rune{lo, lo})
 	}
 	return out, true
+}
+
+// singleCharEscape decodes the letter after '\' of a single-character escape
+// (\n \r \t and the escaped metacharacters) to the character it denotes;
+// ok=false for any other escape.
+func singleCharEscape(n rune) (rune, bool) {
+	switch n {
+	case 'n':
+		return '\n', true
+	case 'r':
+		return '\r', true
+	case 't':
+		return '\t', true
+	case '\\', '-', ']', '[', '^', '.', '|', '(', ')', '{', '}', '*', '+', '?', '/':
+		return n, true
+	}
+	return 0, false
 }
 
 // intersectRanges returns the codepoints present in both a and b.

@@ -205,18 +205,76 @@ func (c *compiler) applyStatic(root *xmltree.Node, principal bool) error {
 	if err := c.expandShadowAttrs(root); err != nil {
 		return err
 	}
+	// use-when="false" on the PRINCIPAL module's root excludes its children
+	// but not the element itself or its attributes (XSLT 3.0 §3.13.1: "If
+	// the xsl:package, xsl:stylesheet or xsl:transform element itself is
+	// effectively excluded, the effect is to exclude all the children ...
+	// but not the xsl:stylesheet or xsl:transform element or its
+	// attributes"), so a static error in those attributes is still reported
+	// (use-when-0227). Nothing is declared before the root, so no static
+	// variable of the module is in scope for its use-when.
+	if uw, ok := useWhenAttr(root); ok && principal {
+		env := &staticEnv{el: root, params: c.staticParams, resolver: c.staticResolver()}
+		v, err := env.eval(uw)
+		if err != nil {
+			return errAt(root, "use-when: %v", err)
+		}
+		if !xpath.ToBool(v) {
+			root.Children = nil
+			// The module list compile validates is reached through a
+			// module's children, of which there are none now: check the
+			// element itself here.
+			return validateTree(root, false)
+		}
+	}
+	// In the principal module every other top-level element's use-when (and
+	// its subtree) is decided as the walk reaches it, so it sees only the
+	// static variables declared BEFORE it: "The static context for evaluation
+	// of a static expression only contains those static variables visible
+	// within the containing package whose declarations occur prior to the
+	// element containing the static expression in stylesheet tree order"
+	// (XSLT 3.0 §9.6). A forward reference is then XPST0008 like any other
+	// undeclared variable. (When the stylesheet has several modules the
+	// cross-module pass, staticdecl.go, has already bound every name, so
+	// this only narrows the single-module case.)
+	var excluded map[*xmltree.Node]bool
+	exclude := func(ch *xmltree.Node) {
+		if excluded == nil {
+			excluded = map[*xmltree.Node]bool{}
+		}
+		excluded[ch] = true
+	}
+	pruneNow := func(ch *xmltree.Node) error {
+		if !principal {
+			return nil
+		}
+		keep, err := c.pruneChild(ch)
+		if err != nil {
+			return err
+		}
+		if !keep {
+			exclude(ch)
+		}
+		return nil
+	}
 	for _, ch := range elementChildren(root) {
 		if err := c.expandShadowAttrs(ch); err != nil {
 			return err
 		}
 		// Both static parameters and static variables enter the static context.
 		if ch.Name.Space != NS || (ch.Name.Local != "param" && ch.Name.Local != "variable") {
+			if err := pruneNow(ch); err != nil {
+				return err
+			}
 			continue
 		}
 		// @static is an XSLT boolean: "yes"/"true"/"1", with surrounding
 		// whitespace allowed (use-when-0140 writes static=" 1 ").
 		st, _ := ch.AttrLocal("static")
 		if !isXSLTTrue(strings.TrimSpace(st)) {
+			if err := pruneNow(ch); err != nil {
+				return err
+			}
 			continue
 		}
 		// A static param/variable's own use-when (if present) is evaluated
@@ -235,7 +293,16 @@ func (c *compiler) applyStatic(root *xmltree.Node, principal bool) error {
 				return errAt(ch, "use-when: %v", err)
 			}
 			if !xpath.ToBool(v) {
+				exclude(ch)
 				continue
+			}
+		}
+		if principal {
+			// Its content (use-when-0421: an element excluded by its own
+			// use-when) is pruned before the declaration is bound, since a
+			// static variable is not in scope within its own declaration.
+			if err := c.pruneUseWhen(ch); err != nil {
+				return err
 			}
 		}
 		name, _ := ch.AttrLocal("name")
@@ -324,9 +391,8 @@ func (c *compiler) applyStatic(root *xmltree.Node, principal bool) error {
 		}
 	}
 	// A use-when on an INCLUDED/IMPORTED module's own root element excludes
-	// the whole module (use-when-0116). On the PRINCIPAL module it has no
-	// effect at all — a static error elsewhere on that element must still be
-	// reported (use-when-0227).
+	// the whole module (use-when-0116); the principal module's is handled
+	// above.
 	if uw, ok := useWhenAttr(root); ok && !principal {
 		env := &staticEnv{el: root, params: c.staticParams, resolver: c.staticResolver()}
 		v, err := env.eval(uw)
@@ -337,6 +403,19 @@ func (c *compiler) applyStatic(root *xmltree.Node, principal bool) error {
 			root.Children = nil
 			return nil
 		}
+	}
+	if principal {
+		// Already pruned element by element above.
+		if len(excluded) > 0 {
+			kept := make([]*xmltree.Node, 0, len(root.Children))
+			for _, ch := range root.Children {
+				if !excluded[ch] {
+					kept = append(kept, ch)
+				}
+			}
+			root.Children = kept
+		}
+		return nil
 	}
 	return c.pruneUseWhen(root)
 }
@@ -462,46 +541,58 @@ func (c *compiler) staticResolver() xpath.ResourceResolver {
 func (c *compiler) pruneUseWhen(node *xmltree.Node) error {
 	var kept []*xmltree.Node
 	for _, ch := range node.Children {
-		if ch.Kind == xmltree.KindElement {
-			// Shadow attributes are expanded before use-when is consulted —
-			// _use-when itself is a shadow attribute (shadow-005) — and only
-			// for elements that survive, so a shadow AVT inside an excluded
-			// subtree is never evaluated.
-			if err := c.expandShadowAttrs(ch); err != nil {
-				return err
-			}
-			if uw, ok := useWhenAttr(ch); ok {
-				env := &staticEnv{el: ch, params: c.staticParams, resolver: c.staticResolver()}
-				v, err := env.eval(uw)
-				if err != nil {
-					// An XSLT element this version does not recognize, under
-					// forwards-compatible processing, is ignored along with
-					// its content — so a use-when on it that this version
-					// cannot even evaluate (it may call a function only the
-					// FUTURE version defines, forwards-008) simply excludes
-					// the element instead of failing the compilation. The
-					// expression is still evaluated first, since a use-when
-					// this version CAN evaluate governs inclusion as usual
-					// (version-030's element-available test).
-					if ch.Name.Space == NS && inForwardsCompatScope(ch) {
-						if _, known := xsltElemSpecs[ch.Name.Local]; !known {
-							continue
-						}
-					}
-					return errAt(ch, "use-when: %v", err)
-				}
-				if !xpath.ToBool(v) {
-					continue // excluded from the stylesheet
-				}
-			}
-		}
-		if err := c.pruneUseWhen(ch); err != nil {
+		keep, err := c.pruneChild(ch)
+		if err != nil {
 			return err
 		}
-		kept = append(kept, ch)
+		if keep {
+			kept = append(kept, ch)
+		}
 	}
 	node.Children = kept
 	return nil
+}
+
+// pruneChild is pruneUseWhen for one child: it reports whether ch survives
+// its own use-when, and prunes ch's subtree when it does.
+func (c *compiler) pruneChild(ch *xmltree.Node) (bool, error) {
+	if ch.Kind == xmltree.KindElement {
+		// Shadow attributes are expanded before use-when is consulted —
+		// _use-when itself is a shadow attribute (shadow-005) — and only
+		// for elements that survive, so a shadow AVT inside an excluded
+		// subtree is never evaluated.
+		if err := c.expandShadowAttrs(ch); err != nil {
+			return false, err
+		}
+		if uw, ok := useWhenAttr(ch); ok {
+			env := &staticEnv{el: ch, params: c.staticParams, resolver: c.staticResolver()}
+			v, err := env.eval(uw)
+			if err != nil {
+				// An XSLT element this version does not recognize, under
+				// forwards-compatible processing, is ignored along with
+				// its content — so a use-when on it that this version
+				// cannot even evaluate (it may call a function only the
+				// FUTURE version defines, forwards-008) simply excludes
+				// the element instead of failing the compilation. The
+				// expression is still evaluated first, since a use-when
+				// this version CAN evaluate governs inclusion as usual
+				// (version-030's element-available test).
+				if ch.Name.Space == NS && inForwardsCompatScope(ch) {
+					if _, known := xsltElemSpecs[ch.Name.Local]; !known {
+						return false, nil
+					}
+				}
+				return false, errAt(ch, "use-when: %v", err)
+			}
+			if !xpath.ToBool(v) {
+				return false, nil // excluded from the stylesheet
+			}
+		}
+	}
+	if err := c.pruneUseWhen(ch); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // evalStaticAVT evaluates s (an attribute's raw text, possibly a text value

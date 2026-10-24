@@ -31,6 +31,7 @@ type msgMessage struct {
 	sel       *xpath.Parsed // @select (optional, combines with body — see above)
 	body      []instruction // sequence constructor (additional content after @select, or the whole content when @select is absent)
 	terminate *avt          // @terminate AVT, evaluates to "yes"/"no" (optional)
+	errorCode *avt          // @error-code AVT, an EQName (optional; default err:XTMM9000)
 }
 
 func (*msgMessage) instr() {}
@@ -71,7 +72,51 @@ func msgCompileMessage(c *compiler, el *xmltree.Node) (instruction, error) {
 		}
 		m.terminate = a
 	}
+	if ec, ok := el.AttrLocal("error-code"); ok {
+		a, err := parseAVTFor(el, ec)
+		if err != nil {
+			return nil, errAt(el, "xsl:message bad error-code %q: %v", ec, err)
+		}
+		m.errorCode = a
+	}
 	return m, nil
+}
+
+// msgErrorCode is the error QName of a terminating xsl:message (XSLT 3.0
+// §23.1): the effective value of @error-code when it is a valid EQName,
+// otherwise err:XTMM9000.
+func (n *msgMessage) msgErrorCode(eng *engine, r rt) (xmltree.Name, error) {
+	def := xmltree.Name{Space: tcErrNS, Local: "XTMM9000", Prefix: "err"}
+	if n.errorCode == nil {
+		return def, nil
+	}
+	v, err := eng.evalAVT(n.errorCode, n.el, r)
+	if err != nil {
+		return def, err
+	}
+	v = strings.TrimSpace(v)
+	if uri, local, ok := bracedEQName(v); ok {
+		if !isNCName(local) {
+			return def, nil
+		}
+		return xmltree.Name{Space: uri, Local: local}, nil
+	}
+	if !isLexicalQName(v) {
+		return def, nil
+	}
+	prefix, local := "", v
+	if i := strings.IndexByte(v, ':'); i >= 0 {
+		prefix, local = v[:i], v[i+1:]
+	}
+	uri := ""
+	if prefix != "" {
+		u, ok := n.el.LookupPrefix(prefix)
+		if !ok {
+			return def, nil
+		}
+		uri = u
+	}
+	return xmltree.Name{Space: uri, Local: local, Prefix: prefix}, nil
 }
 
 func msgCompileAssert(c *compiler, el *xmltree.Node) (instruction, error) {
@@ -199,8 +244,12 @@ func (n *msgMessage) exec(eng *engine, r rt, out *xmltree.Node) error {
 			// must be err:XTMM9000, $err:description the message, and
 			// $err:value the message CONTENT as a node sequence
 			// (message-0501).
+			code, err := n.msgErrorCode(eng, r)
+			if err != nil {
+				return err
+			}
 			return xpath.NewError(
-				xmltree.Name{Space: tcErrNS, Local: "XTMM9000", Prefix: "err"},
+				code,
 				"xsl:message terminated: "+msg,
 				msgContentNodes(eng, n.el, n.sel, n.body, r))
 		case "no", "false", "0":

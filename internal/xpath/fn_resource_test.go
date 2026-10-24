@@ -54,6 +54,7 @@ func rsNewResolver(t *testing.T) *rsResolver {
 			"http://example.com/t/lines.txt": "abc\r\ndef\rghi\njkl\n",
 			"http://example.com/t/blank.txt": "a\n\nb",
 			"http://example.com/t/empty.txt": "",
+			"http://example.com/t/nl.txt":    "\n",
 			"http://example.com/t/nul.txt":   "a\x00b",
 			"http://example.com/t/bad.txt":   "a\xffb",
 		},
@@ -99,6 +100,10 @@ func TestResourceUnparsedText(t *testing.T) {
 		{expr: `count(unparsed-text-lines('blank.txt'))`, want: "3"},
 		{expr: `unparsed-text-lines('blank.txt')[2]`, want: ""},
 		{expr: `unparsed-text-lines('empty.txt')`, want: "()"},
+		// tokenize("\n", '\r\n|\r|\n') is ("", ""); only the LAST empty
+		// string is dropped, so a lone newline is one empty line.
+		{expr: `count(unparsed-text-lines('nl.txt'))`, want: "1"},
+		{expr: `unparsed-text-lines('nl.txt')`, want: ""},
 		{expr: `unparsed-text-lines('plain.txt', 'UTF-8')`, want: "hello world"},
 		{expr: `unparsed-text-lines(())`, want: "()"},
 		{expr: `unparsed-text-lines('missing.txt')`, err: "FOUT1170"},
@@ -192,6 +197,12 @@ func TestResourceParseXML(t *testing.T) {
 		{expr: `string(parse-xml("<alpha>abcd</alpha>"))`, want: "abcd"},
 		{expr: `parse-xml(())`, want: "()"},
 		{expr: `parse-xml("<a>")`, err: "FODC0006"},
+		// XML 1.0 §2.1 [1] document ::= prolog element Misc*: a root element
+		// is required and no character data may stand beside it.
+		{expr: `parse-xml("text only")`, err: "FODC0006"},
+		{expr: `parse-xml("<!-- c -->")`, err: "FODC0006"},
+		{expr: `parse-xml("<a/>tail")`, err: "FODC0006"},
+		{expr: `string(parse-xml-fragment("text only"))`, want: "text only"},
 		// namespace well-formedness: unbound element or attribute prefix
 		{expr: `parse-xml("<p:a/>")`, err: "FODC0006"},
 		{expr: `parse-xml("<a q:x='1'/>")`, err: "FODC0006"},

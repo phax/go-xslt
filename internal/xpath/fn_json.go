@@ -2,6 +2,7 @@ package xpath
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -233,8 +234,11 @@ func jsEmitStringOpts(b *strings.Builder, s string, o jsEmitOpts) {
 			b.WriteString(`\f`)
 		default:
 			switch {
-			case r < 0x20:
-				fmt.Fprintf(b, `\u%04x`, r)
+			case r < 0x20 || (r >= 0x7F && r <= 0x9F):
+				// F&O 3.1 §17.5.4 / Serialization 3.1 §9: any other
+				// codepoint in 1-31 or 127-159 becomes \uHHHH (upper-case
+				// hexadecimal, as xml-to-json requires).
+				fmt.Fprintf(b, `\u%04X`, r)
 			case maxRune > 0 && r > maxRune && r > 0xFFFF:
 				hi, lo := utf16.EncodeRune(r)
 				fmt.Fprintf(b, `\u%04x\u%04x`, hi, lo)
@@ -430,20 +434,28 @@ func serAdaptiveItem(it Item, p serParams) (string, error) {
 			return "false()", nil
 		case v.T == XSqname || v.T == XSnotation:
 			return "Q{" + v.qnv().Space + "}" + v.qnv().Local, nil
-		case v.T == XSdouble || v.T == XSfloat:
+		case v.T == XSdouble:
 			return serAdaptiveDouble(v.Float()), nil
-		case v.T == XSdecimal:
-			lex := v.Lexical()
-			if !strings.Contains(lex, ".") {
-				lex += ".0"
-			}
-			return lex, nil
-		case v.IsNumeric():
+		case v.T == XSdecimal || isIntegerType(v.T):
+			// §10: "An instance of xs:integer or xs:decimal is serialized
+			// by converting the value to a string using the fn:string
+			// function" (xs:decimal('5') is 5, not 5.0).
 			return v.Lexical(), nil
 		case v.T == XSuntypedAtomic || v.T == XSanyURI || isStringType(v.T):
 			return quote(v.Lexical()), nil
 		}
-		return v.Lexical(), nil
+		// §10: "An atomic value of any other type is serialized using the
+		// syntax of a constructor function: xs:TYPE("VAL") where TYPE is the
+		// name of the primitive type" — xs:float, the date/time, duration,
+		// g* and binary types.
+		prim := v.T
+		switch prim {
+		case XSdateTimeStamp:
+			prim = XSdateTime
+		case XSyearMonthDuration, XSdayTimeDuration:
+			prim = XSduration
+		}
+		return prim.String() + `("` + v.Lexical() + `")`, nil
 	case string:
 		return quote(v), nil
 	case bool:
@@ -992,9 +1004,11 @@ func jsParseToken(dec *jsTokenizer, opts jsOptions) (Object, error) {
 		return NewString(t), nil
 	case json.Number:
 		f, perr := strconv.ParseFloat(string(t), 64)
-		if perr != nil {
+		if perr != nil && !errors.Is(perr, strconv.ErrRange) {
 			return NewDouble(0), nil
 		}
+		// F&O 3.1 §17.4.2: out-of-range values become +INF/-INF (ParseFloat
+		// already returns ±Inf alongside ErrRange), never an error.
 		return NewDouble(f), nil
 	case bool:
 		return NewBool(t), nil
@@ -1495,7 +1509,10 @@ func fnJSSerialize(ctx *Context, args []Object) (Object, error) {
 		}
 		opts.IncludeContentType = !p.noContentType
 	}
-	items := Items(in)
+	// SER 3.1 §2 step 1: "Each item in the sequence that is an array is
+	// flattened by calling the function array:flatten() before being
+	// copied."
+	items := Flatten(Items(in))
 	var b strings.Builder
 	prevAtomic := false
 	for i, it := range items {
@@ -1518,7 +1535,7 @@ func fnJSSerialize(ctx *Context, args []Object) (Object, error) {
 				n = serApplyCharMaps(n, p.charMaps)
 			}
 			b.WriteString(xmltree.Serialize(n, opts))
-		case *Map, *Array, *Function:
+		case *Map, *Function:
 			return nil, fmt.Errorf("err:SENR0001: cannot serialize a %T with method %q", it, p.method)
 		default:
 			b.WriteString(itemString(it))

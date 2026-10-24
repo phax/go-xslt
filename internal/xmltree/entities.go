@@ -156,12 +156,20 @@ func errEntityExpansion(limit int) error {
 // (scanEntityDecls never overrides an already-seen name), matching the XML
 // rule that the internal subset wins over the external one.
 func documentEntities(src, baseDir string, files *fsaccess.Guard) (map[string]string, error) {
+	ents, _, err := documentEntitiesRec(src, baseDir, files)
+	return ents, err
+}
+
+// documentEntitiesRec is documentEntities that also returns the names of the
+// declared entities it dropped as recursive (see dropRecursiveEntities), so a
+// reference to one can be reported as what it is.
+func documentEntitiesRec(src, baseDir string, files *fsaccess.Guard) (map[string]string, map[string]bool, error) {
 	ents := map[string]string{}
 	inputLen := len(src)
 	if sub, ok := internalSubset(src); ok {
 		decls, err := expandParamEntities(sub, baseDir, files, expansionLimit(len(src)))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		scanEntityDecls(decls, ents)
 	}
@@ -178,10 +186,18 @@ func documentEntities(src, baseDir string, files *fsaccess.Guard) (map[string]st
 		}
 	}
 	if len(ents) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
+	// WFC: No Recursion (XML 1.0 §4.1, on EntityRef): "A parsed entity MUST
+	// NOT contain a recursive reference to itself, either directly or
+	// indirectly." An entity whose expansion reaches a cycle has no
+	// replacement text; it is dropped, so a reference to it in the document
+	// fails like an undeclared one (an unreferenced declaration stays
+	// harmless — the constraint is on the reference). Dropping them first also
+	// keeps the pass loop below from leaving a literal "&a;" in a value.
+	rec := dropRecursiveEntities(ents)
 	if err := expandEntityValues(ents, expansionLimit(inputLen)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// encoding/xml inserts a Decoder.Entity value verbatim, without rescanning it
 	// for references, so character references and the five predefined entities
@@ -190,7 +206,7 @@ func documentEntities(src, baseDir string, files *fsaccess.Guard) (map[string]st
 	for name, val := range ents {
 		ents[name] = expandBuiltinRefs(val)
 	}
-	return ents, nil
+	return ents, rec, nil
 }
 
 // entityRefVolume is an upper bound on the text the references to ents in
@@ -341,6 +357,87 @@ func expandEntityValues(ents map[string]string, limit int) error {
 		}
 	}
 	return nil
+}
+
+// dropRecursiveEntities deletes (and returns the names of) every entity whose replacement
+// text refers, directly or through other entities, to an entity on a cycle
+// of references. The walk is iterative (a declaration chain is input, and
+// nothing may overflow the Go stack) and linear in the total value length.
+func dropRecursiveEntities(ents map[string]string) map[string]bool {
+	refs := func(val string) []string {
+		var out []string
+		for i := 0; ; {
+			j := strings.IndexByte(val[i:], '&')
+			if j < 0 {
+				return out
+			}
+			j += i
+			k := strings.IndexByte(val[j:], ';')
+			if k < 0 {
+				return out
+			}
+			if name := val[j+1 : j+k]; name != "" {
+				if _, ok := ents[name]; ok {
+					out = append(out, name)
+				}
+			}
+			i = j + 1
+		}
+	}
+	const (
+		unseen = iota
+		onPath
+		clean
+		bad
+	)
+	state := make(map[string]int, len(ents))
+	type frame struct {
+		name string
+		next []string
+	}
+	for root := range ents {
+		if state[root] != unseen {
+			continue
+		}
+		state[root] = onPath
+		stack := []frame{{root, refs(ents[root])}}
+		for len(stack) > 0 {
+			top := &stack[len(stack)-1]
+			if len(top.next) == 0 {
+				if state[top.name] == onPath {
+					state[top.name] = clean
+				}
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			n := top.next[0]
+			top.next = top.next[1:]
+			switch state[n] {
+			case unseen:
+				state[n] = onPath
+				stack = append(stack, frame{n, refs(ents[n])})
+			case onPath, bad:
+				// A back edge closes a cycle, and every entity on the path
+				// reaches it; reaching a bad entity is as bad. Marking stops
+				// at the first bad frame: everything below it is bad already,
+				// which keeps the walk linear.
+				for i := len(stack) - 1; i >= 0 && state[stack[i].name] != bad; i-- {
+					state[stack[i].name] = bad
+				}
+			}
+		}
+	}
+	var dropped map[string]bool
+	for name, s := range state {
+		if s == bad {
+			delete(ents, name)
+			if dropped == nil {
+				dropped = map[string]bool{}
+			}
+			dropped[name] = true
+		}
+	}
+	return dropped
 }
 
 // expandBuiltinRefs resolves character references and the five predefined

@@ -1550,7 +1550,7 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 				return evalXSLTAssertOn(a, raw[0], output, baseURI, ns, entryValue, entryVar, assertSchema)
 			}
 		}
-		doc, perr := xmltree.Parse(strings.TrimSpace(stripDecl(output)))
+		doc, perr := parseResultDoc(xmltree.Parse, "", strings.TrimSpace(stripDecl(output)))
 		if perr != nil {
 			doc, perr = xmltree.Parse(wrapFragment(output))
 		}
@@ -1565,7 +1565,7 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 			// root, and the assertions are written against it as the document
 			// element ("/html/body/..."), which a wrapper would hide
 			// (copy-2801).
-			doc, perr = xmltree.Parse(strings.TrimSpace(stripDecl(closeHTMLVoidTags(output))))
+			doc, perr = parseResultDoc(xmltree.Parse, "", strings.TrimSpace(stripDecl(closeHTMLVoidTags(output))))
 			if perr != nil {
 				doc, perr = xmltree.Parse(wrapFragment(closeHTMLVoidTags(output)))
 			}
@@ -1574,7 +1574,7 @@ func checkXSLTAssert(a fotsAssert, output string, runErr error, dir, baseURI str
 			// The same XML 1.1 / 5th-edition-name leniency parseAssertXML
 			// gives assert-xml (xml-version-012 asserts over an element whose
 			// name carries a U+0346 combining mark).
-			doc, perr = xmltree.ParseLenient11(`<?xml version="1.1"?>` + strings.TrimSpace(stripDecl(output)))
+			doc, perr = parseResultDoc(xmltree.ParseLenient11, `<?xml version="1.1"?>`, strings.TrimSpace(stripDecl(output)))
 			if perr != nil {
 				doc, perr = xmltree.ParseLenient11(`<?xml version="1.1"?>` + wrapFragment(output))
 			}
@@ -1707,6 +1707,40 @@ func xmlTreeEqual(expected, actual string, normWS bool) bool {
 		return serialEqual(expected, actual, true)
 	}
 	return xsltNodeEqual(ed, ad, normWS)
+}
+
+// parseResultDoc parses a serialized result tree as the DOCUMENT NODE it
+// came from. A result document node may hold what a well-formed XML document
+// may not — no element, several, or text beside them (an xsl:message of one
+// comment: message-0410; validation-0215) — which the parser rightly rejects
+// (XML 1.0 §2.1 [1]). Only for those two refusals is the content parsed
+// inside a wrapper element instead, whose children become the document's,
+// whitespace-only text dropped as at document level.
+func parseResultDoc(parse func(string) (*xmltree.Node, error), decl, s string) (*xmltree.Node, error) {
+	d, err := parse(decl + s)
+	if err == nil {
+		return d, nil
+	}
+	if pe, ok := err.(*xmltree.ParseError); !ok ||
+		pe.Msg != "no root element" && pe.Msg != "character data outside the root element" {
+		return nil, err
+	}
+	w, werr := parse(decl + wrapFragment(s))
+	if werr != nil {
+		return nil, err
+	}
+	doc := &xmltree.Node{Kind: xmltree.KindDocument}
+	if root := xmltree.RootElement(w); root != nil {
+		for _, ch := range root.Children {
+			if ch.Kind == xmltree.KindText && strings.Trim(ch.Value, " \t\r\n") == "" {
+				continue
+			}
+			ch.Parent = doc
+			doc.Children = append(doc.Children, ch)
+		}
+	}
+	xmltree.AssignOrder(doc)
+	return doc, nil
 }
 
 // parseAssertXML parses an expected/actual result fragment into a tree. Some

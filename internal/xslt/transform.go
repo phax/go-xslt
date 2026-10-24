@@ -956,12 +956,8 @@ func (ss *Stylesheet) transformEntryInto(srcXML string, e Entry, baseDir string,
 	if ss.globalCtxUse == "absent" && ctxNode != nil {
 		return nil, nil, fmt.Errorf("err:XTSE3088: the stylesheet declares use=\"absent\" for the global context item, but one was supplied")
 	}
-	if ss.globalCtxAs != "" && ctxNode != nil {
-		if st, perr := xpath.ParseSeqTypeString(ss.globalCtxAs); perr == nil {
-			if !xpath.MatchesSeqTypeCtx(st, ctxNode, asTypeCtx(ss.globalCtxEl)) {
-				return nil, nil, fmt.Errorf("err:XTTE0590: the global context item does not match the declared type %s", ss.globalCtxAs)
-			}
-		}
+	if err := ss.checkGlobalContextType(ctxNode); err != nil {
+		return nil, nil, err
 	}
 	r := rt{node: ctxNode, pos: 1, size: 1}
 	resultRoot := &xmltree.Node{Kind: xmltree.KindDocument}
@@ -1356,6 +1352,11 @@ func (ss *Stylesheet) transformInto(srcXML string, params map[string]string, bas
 	if err := eng.resolveGlobals(params); err != nil {
 		return nil, nil, err
 	}
+	// The source document is the global context item here, so it must match
+	// xsl:global-context-item/@as just as on the Entry path (XTTE0590).
+	if err := ss.checkGlobalContextType(doc); err != nil {
+		return nil, nil, err
+	}
 
 	resultRoot := &xmltree.Node{Kind: xmltree.KindDocument}
 	if ss.output.HasItemSeparator {
@@ -1374,13 +1375,28 @@ func (ss *Stylesheet) transformInto(srcXML string, params map[string]string, bas
 			eng.outSink.Attach(resultRoot)
 		}
 	}
-	if err := eng.applyToNodes(xpath.NodeSet{doc}, "", resultRoot, nil, rt{node: doc, pos: 1, size: 1}); err != nil {
+	// No initial mode is supplied: it is the default-mode of the top-level
+	// package (XSLT 3.0 §2.3.3), the unnamed mode when that is absent.
+	if err := eng.applyToNodes(xpath.NodeSet{doc}, ss.defaultMode, resultRoot, nil, rt{node: doc, pos: 1, size: 1}); err != nil {
 		return nil, nil, err
 	}
 	if err := eng.checkPrincipalSealed(); err != nil {
 		return nil, nil, err
 	}
 	return eng, resultRoot, nil
+}
+
+// checkGlobalContextType checks a supplied global context item (nil when
+// there is none) against xsl:global-context-item/@as: XTTE0590 on a mismatch.
+func (ss *Stylesheet) checkGlobalContextType(ctxNode *xmltree.Node) error {
+	if ss.globalCtxAs != "" && ctxNode != nil {
+		if st, perr := xpath.ParseSeqTypeString(ss.globalCtxAs); perr == nil {
+			if !xpath.MatchesSeqTypeCtx(st, ctxNode, asTypeCtx(ss.globalCtxEl)) {
+				return fmt.Errorf("err:XTTE0590: the global context item does not match the declared type %s", ss.globalCtxAs)
+			}
+		}
+	}
+	return nil
 }
 
 // checkPrincipalSealed reports XTDE1490 when the transform wrote to the
@@ -2263,7 +2279,7 @@ func (eng *engine) resolveNamedFunction(env *evalEnv) func(ns, local string, ari
 
 func (eng *engine) resolveFunctionAs(env *evalEnv, lookup bool) func(ns, local string, arity int) (*xpath.Function, bool) {
 	return func(ns, local string, arity int) (*xpath.Function, bool) {
-		fd, ok := eng.sheet.functions[funcKey(ns, local, arity)]
+		fd, ok := eng.sheet.funcFor(env.el, funcKey(ns, local, arity))
 		if ns == NS && local == "original" {
 			if orig := eng.sheet.originalFunc(env.el, arity); orig != nil {
 				fd, ok = orig, true
@@ -2901,6 +2917,9 @@ func (eng *engine) execLitElement(n *litElement, r rt, out *xmltree.Node) error 
 		return err
 	}
 	stripEmptyLiteralText(el)
+	if n.noInheritNS {
+		markNSBarrier(el, 0)
+	}
 	// The element's content is complete, which is the point §24.4.1.1 defines
 	// its own xsl:validation/xsl:type to take effect at — after any request on
 	// a CHILD instruction has already had its turn, so an outer strip can
@@ -3877,8 +3896,10 @@ func (eng *engine) execCopy(n *copyInstr, r rt, out *xmltree.Node) error {
 			// XSLT 3.0 §11.9.1: with copy-namespaces="no" the copy keeps only
 			// the bindings namespace fixup demands. It is pruned AFTER the body
 			// has run because the body is what supplies the attributes whose
-			// names those bindings may be needed for (si-copy-020/026).
-			pruneCopiedNamespaces(el)
+			// names those bindings may be needed for (si-copy-020/026). Only
+			// the copied element itself: the body's own content keeps the
+			// namespaces its constructors gave it.
+			pruneOwnNamespaces(el)
 		}
 		if n.noInheritNS {
 			markNSBarrier(el, 0)
@@ -3912,6 +3933,14 @@ func (eng *engine) execCopy(n *copyInstr, r rt, out *xmltree.Node) error {
 		// something validates one.
 		xmltree.CopyTypeInfo(cp, node)
 		return eng.applyValidation(n.val, cp)
+	case xmltree.KindNamespace:
+		// XSLT 3.0 §11.9.1: xsl:copy of a namespace node creates a copy of
+		// it, added to the element being constructed like any namespace node
+		// in its content (§5.7.1) — the same as xsl:copy-of does.
+		if out.Kind == xmltree.KindElement && len(out.Children) > 0 && !out.NoAtomicMerge() {
+			return errAt(n.el, "err:XTDE0410: cannot copy a namespace node after non-attribute content")
+		}
+		out.AddNS(&xmltree.Node{Kind: xmltree.KindNamespace, Name: node.Name, Value: node.Value, Parent: out})
 	case xmltree.KindComment:
 		out.Append(&xmltree.Node{Kind: xmltree.KindComment, Value: node.Value})
 	case xmltree.KindPI:
@@ -4772,8 +4801,19 @@ func appendAttrItem(out *xmltree.Node, name xmltree.Name, value string) *xmltree
 // lexical name, and only one declarable binding (bug-1501/1601). The expanded
 // name is untouched, so SetAttr's by-expanded-name replacement is unaffected.
 func attrFixupName(out *xmltree.Node, name xmltree.Name) xmltree.Name {
-	if out.Kind != xmltree.KindElement || name.Space == "" || name.Prefix == "" {
+	if out.Kind != xmltree.KindElement || name.Space == "" {
 		return name
+	}
+	if name.Prefix == "" {
+		// An attribute in a namespace needs a prefix: "if the attribute is
+		// in a non-null namespace and no prefix is specified, then the
+		// namespace fixup process will invent a prefix" (XSLT 3.0 §11.3).
+		// Reuse a prefix already bound to that namespace on the element,
+		// otherwise "ns" — the same choice the serializer makes.
+		name.Prefix = attrInScopePrefix(out, name.Space)
+		if name.Prefix == "" {
+			name.Prefix = "ns"
+		}
 	}
 	if !attrPrefixConflicts(out, name) {
 		return name
@@ -4785,6 +4825,21 @@ func attrFixupName(out *xmltree.Node, name xmltree.Name) xmltree.Name {
 			return cand
 		}
 	}
+}
+
+// attrInScopePrefix returns a non-empty prefix bound to uri on el (its own
+// name, then its in-scope namespaces in prefix order), or "".
+func attrInScopePrefix(el *xmltree.Node, uri string) string {
+	if el.Name.Space == uri && el.Name.Prefix != "" {
+		return el.Name.Prefix
+	}
+	var best string
+	for pfx, u := range el.InScopeNamespaces() {
+		if u == uri && pfx != "" && (best == "" || pfx < best) {
+			best = pfx
+		}
+	}
+	return best
 }
 
 func attrPrefixConflicts(out *xmltree.Node, name xmltree.Name) bool {

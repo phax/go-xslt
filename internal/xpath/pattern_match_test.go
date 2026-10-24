@@ -272,6 +272,14 @@ func TestSpPatternDefaultPriority(t *testing.T) {
 		{`@a[. = 1]`, 0.5}, {`id('x')`, 0.5}, {`id('x')/a`, 0.5}, {`$v`, 0.5},
 		{`(a|b)[1]`, 0.5},
 		{`.[1]`, 1}, {`.[1][2]`, 1},
+		// "." is a PredicatePattern with an empty predicate list: -1.
+		{`.`, -1},
+		// An IntersectExceptExprP takes the priority of its first operand.
+		{`a except b`, 0}, {`a intersect b`, 0}, {`* except b`, -0.5},
+		{`p:* except b`, -0.25}, {`a/b except c`, 0.5}, {`@a except @b`, 0},
+		{`a except b except c`, 0}, {`a intersect b except c`, 0},
+		{`element(a, xs:integer) except b`, 0.25}, {`(a|b) except c`, 0.5},
+		{`a[1] except b`, 0.5}, {`$v except a`, 0.5},
 		// A union is a set of rules; DefaultPriority reports the highest.
 		{`a | *`, 0}, {`(a | b)`, 0}, {`* | a/b`, 0.5}, {`* | node()`, -0.5},
 	}

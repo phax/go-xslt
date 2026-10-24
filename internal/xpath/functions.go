@@ -1266,11 +1266,14 @@ func fnReplace(c *Context, a []Object) (Object, error) {
 			return nil, fmt.Errorf("err:FORX0003: the pattern matches a zero-length string")
 		}
 		if strings.Contains(flags, "i") {
-			re, err := compileRegex(pat, strings.ReplaceAll(flags, "q", ""))
+			// Keep 'q' so the pattern stays literal; the replacement "is used
+			// as is" (F&O 3.1 §5.6.4) — only Go's own '$' needs escaping, a
+			// backslash is not special in a Go replacement.
+			re, err := compileRegex(pat, flags)
 			if err != nil {
 				return nil, err
 			}
-			return re.ReplaceAllString(in, strings.ReplaceAll(strings.ReplaceAll(replStr, "\\", "\\\\"), "$", "$$")), nil
+			return re.ReplaceAllString(in, strings.ReplaceAll(replStr, "$", "$$")), nil
 		}
 		return strings.ReplaceAll(in, pat, replStr), nil
 	}

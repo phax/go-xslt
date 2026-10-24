@@ -29,7 +29,6 @@ func TestUsePackageReexport(t *testing.T) {
 // accepts as private is private there, so it is hidden from a package using
 // the middle one (§3.5.3.2) and cannot be referenced.
 func TestUsePackageAcceptedPrivateNotReexported(t *testing.T) {
-	t.Skip("engine bug: a component accepted as private by a used package stays callable from the using package")
 	inner := pkAPkg("urn:pkA:inner", "", `<xsl:function name="l:kept" visibility="public"><xsl:sequence select="'kept'"/></xsl:function>`)
 	mid := pkAPkg("urn:pkA:mid", "", `
 		<xsl:use-package name="urn:pkA:inner">

@@ -49,6 +49,21 @@ func TestLoaderSpecModules(t *testing.T) {
 		{name: "conflicting input-type-annotations", code: "XTSE0265", sheet: `<xsl:stylesheet version="3.0" input-type-annotations="strip" ` + specNS + `><xsl:include href="preserve.xsl"/>` +
 			`<xsl:template match="/">x</xsl:template></xsl:stylesheet>`},
 	})
+	// §5.1.2: xpath-default-namespace is a standard attribute whose scope is
+	// the element it is on and its descendants — on an included or imported
+	// module's root element it governs that module's expressions and
+	// patterns, not the including module's.
+	specWrite(t, dir, "xdn-inc.xsl", `<xsl:stylesheet version="3.0" xpath-default-namespace="urn:x" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+<xsl:template match="item">[<xsl:value-of select="count(//item)"/>]</xsl:template></xsl:stylesheet>`)
+	xdnSrc := `<r xmlns="urn:x"><item/><item/></r>`
+	xdnMain := func(decl string) string {
+		return `<xsl:stylesheet version="3.0" ` + specNS + `>` + decl + `<xsl:output method="text"/>
+<xsl:template match="/"><xsl:apply-templates select="*/*"/></xsl:template></xsl:stylesheet>`
+	}
+	specRunAll(t, dir, []specCase{
+		{name: "xpath-default-namespace on an included module", src: xdnSrc, want: "[2][2]", sheet: xdnMain(`<xsl:include href="xdn-inc.xsl"/>`)},
+		{name: "xpath-default-namespace on an imported module", src: xdnSrc, want: "[2][2]", sheet: xdnMain(`<xsl:import href="xdn-inc.xsl"/>`)},
+	})
 	// Behaviour that disagrees with the REC, skipped with the bug it shows.
 	bugs := []struct {
 		bug string

@@ -135,7 +135,6 @@ func TestJSONParseOutOfRangeNumber(t *testing.T) {
 	// F&O 3.1 §17.4.2: the JSON-number-to-xs:double mapping "will never
 	// generate an error for out-of-range values; instead very large or very
 	// small values will be converted to +INF or -INF".
-	t.Skip("BUG: parse-json('1E400') yields 0 instead of INF (jsParseToken maps a strconv range error to 0)")
 	jsnRun(t, "", nil, []jsnCase{
 		{`parse-json('1E400') eq xs:double('INF')`, "true"},
 		{`parse-json('-1E400') eq xs:double('-INF')`, "true"},

@@ -94,7 +94,6 @@ func TestSeqSpecDeepEqual(t *testing.T) {
 // processing instructions are significant only if these nodes appear directly
 // as items in the two sequences being compared").
 func TestSeqSpecDeepEqualIgnoresCommentChildren(t *testing.T) {
-	t.Skip("BUG: deep-equal counts comment/PI children of elements and documents (F&O 3.1 §14.2.3 compares $i/(*|text()) only)")
 	sqRun(t, `<r><a><b/><!--x--><b/></a><a><b/><b/></a><a><b/><?pi?><b/></a></r>`, []sqCase{
 		{`deep-equal(//a[1], //a[2])`, "true"},
 		{`deep-equal(//a[3], //a[2])`, "true"},

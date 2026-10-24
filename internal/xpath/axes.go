@@ -636,7 +636,7 @@ func matchNameTestC(t NodeTest, axis string, c *xmltree.Node, ctx *Context, pc *
 			return false, nil
 		}
 	}
-	if t.AnyName && t.Prefix == "" {
+	if t.AnyName && t.Prefix == "" && !t.Braced {
 		return true, nil
 	}
 	// "*:local" — wildcard namespace, specific local name (any namespace, incl. none).

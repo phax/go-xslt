@@ -441,5 +441,7 @@ func addDurationToDate(d *Atomic, dur *Atomic, subtract bool) (Object, error) {
 		y, m, day := tm.Date()
 		tm = time.Date(y, m, day, 0, 0, 0, 0, tm.Location())
 	}
-	return NewDateTime(d.T, tm, d.hasTZ), nil
+	// op:add-*-to-dateTime returns an xs:dateTime, also for an
+	// xs:dateTimeStamp operand (such as fn:current-dateTime()).
+	return NewDateTime(dtPrim(d.T), tm, d.hasTZ), nil
 }

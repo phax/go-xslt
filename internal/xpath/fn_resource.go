@@ -169,14 +169,20 @@ func fnUnparsedTextLines(c *Context, a []Object) (Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "\n")
-	s = strings.TrimSuffix(s, "\n")
+	// F&O 3.1 §14.6.6: the same as tokenize($text, '\r\n|\r|\n')
+	// [not(position()=last() and .='')] — an empty resource gives (), a lone
+	// newline one empty line.
 	if s == "" {
 		return Sequence{}, nil
 	}
-	var items []Item
-	for _, line := range strings.Split(s, "\n") {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	lines := strings.Split(s, "\n")
+	if lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	items := make([]Item, 0, len(lines))
+	for _, line := range lines {
 		items = append(items, NewString(line))
 	}
 	return FromItems(items), nil

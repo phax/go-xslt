@@ -22,15 +22,6 @@ func TestSpecKnownBugs(t *testing.T) {
 			specCase{name: "required stylesheet parameter", code: "XTDE0050", sheet: `
 <xsl:param name="p" required="yes"/>
 <xsl:template match="/"><xsl:value-of select="$p"/></xsl:template>`}},
-		{"BUG: Stylesheet.Transform/TransformFull do not enforce xsl:global-context-item (TransformEntry does); §5.3.? requires XTTE0590 here",
-			specCase{name: "global-context-item via TransformFull", code: "XTTE0590", sheet: `
-<xsl:global-context-item as="element()"/><xsl:template match="/">x</xsl:template>`}},
-		{"BUG: xsl:copy of a namespace node adds nothing to the result element; §11.9.1 copies the namespace node",
-			specCase{name: "copy namespace node", src: `<p:a xmlns:p="urn:p" xmlns:q="urn:q"/>`, want: `<e xmlns:q="urn:q"/>`, sheet: specXML(`
-<xsl:template match="/*"><e><xsl:for-each select="namespace::q"><xsl:copy/></xsl:for-each></e></xsl:template>`)}},
-		{"BUG: an xsl:attribute in a namespace with an unprefixed name keeps no prefix in the tree; namespace fixup (§5.7.3) must give it one",
-			specCase{name: "attribute prefix fixup", want: `true`, sheet: `
-<xsl:template match="/"><xsl:variable name="e"><e><xsl:attribute name="a" namespace="urn:x">v</xsl:attribute></e></xsl:variable><xsl:value-of select="contains(name($e/e/@*), ':')"/></xsl:template>`}},
 		{"BUG: an attribute constructed after a child node raises XTDE0420 (document node rule); §5.7.1 defines XTDE0410",
 			specCase{name: "attribute after child", code: "XTDE0410", sheet: specXML(`
 <xsl:template match="/"><e><c/><xsl:attribute name="a">v</xsl:attribute></e></xsl:template>`)}},
@@ -45,4 +36,25 @@ func TestSpecKnownBugs(t *testing.T) {
 			specCheck(t, "", b.c)
 		})
 	}
+}
+
+// Former BUG: entries, now checked against the REC.
+func TestSpecFixedBugs(t *testing.T) {
+	specRunAll(t, "", []specCase{
+		// §5.3.4: the global context item must match
+		// xsl:global-context-item/@as (XTTE0590), whichever entry point runs.
+		{name: "global-context-item via TransformFull", code: "XTTE0590", sheet: `
+<xsl:global-context-item as="element()"/><xsl:template match="/">x</xsl:template>`},
+		{name: "global-context-item matching via TransformFull", want: "x", sheet: `
+<xsl:global-context-item as="document-node()"/><xsl:template match="/">x</xsl:template>`},
+		// §11.9.1: xsl:copy of a namespace node returns a copy of it.
+		{name: "copy namespace node", src: `<p:a xmlns:p="urn:p" xmlns:q="urn:q"/>`, want: `<e xmlns:q="urn:q"/>`, sheet: specXML(`
+<xsl:template match="/*"><e><xsl:for-each select="namespace::q"><xsl:copy/></xsl:for-each></e></xsl:template>`)},
+		// §11.3: "If the attribute is in a non-null namespace and no prefix is
+		// specified, then the namespace fixup process will invent a prefix."
+		{name: "attribute prefix fixup", want: `true`, sheet: `
+<xsl:template match="/"><xsl:variable name="e"><e><xsl:attribute name="a" namespace="urn:x">v</xsl:attribute></e></xsl:variable><xsl:value-of select="contains(name($e/e/@*), ':')"/></xsl:template>`},
+		{name: "attribute prefix fixup reuses a bound prefix", want: `x:a`, sheet: `
+<xsl:template match="/"><xsl:variable name="e"><e xmlns:x="urn:x"><xsl:attribute name="a" namespace="urn:x">v</xsl:attribute></e></xsl:variable><xsl:value-of select="name($e/e/@*)"/></xsl:template>`},
+	})
 }

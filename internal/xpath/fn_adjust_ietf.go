@@ -67,7 +67,7 @@ func dtAdjustToTimezone(def AtomType) coreFunc {
 			y, mo, d := ntm.Date()
 			ntm = time.Date(y, mo, d, 0, 0, 0, 0, ntm.Location())
 		}
-		return NewDateTime(typ, ntm, nTZ), nil
+		return NewDateTime(dtPrim(typ), ntm, nTZ), nil // always xs:dateTime, never a TZ-less dateTimeStamp
 	}
 }
 

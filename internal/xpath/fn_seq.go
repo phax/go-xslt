@@ -335,12 +335,13 @@ func (d deepEq) node(a, b *xmltree.Node) bool {
 }
 
 // sqContentChildren returns the child nodes that participate in deep-equal
-// content comparison (elements, text, comments, PIs).
+// content comparison: $n/(*|text()) (F&O 3.1 §14.2.3) — comments and
+// processing instructions among the children are not compared.
 func sqContentChildren(n *xmltree.Node) []*xmltree.Node {
 	out := make([]*xmltree.Node, 0, len(n.Children))
 	for _, c := range n.Children {
 		switch c.Kind {
-		case xmltree.KindElement, xmltree.KindText, xmltree.KindComment, xmltree.KindPI:
+		case xmltree.KindElement, xmltree.KindText:
 			out = append(out, c)
 		}
 	}

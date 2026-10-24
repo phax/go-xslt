@@ -104,13 +104,11 @@ func TestInstrSpecDocumentTVTFork(t *testing.T) {
 // Behaviour that disagrees with the REC; kept as skipped tests naming the bug.
 func TestInstrSpecMiscKnownBugs(t *testing.T) {
 	t.Run("where-populated keeps each atomic item", func(t *testing.T) {
-		t.Skip("BUG: xsl:where-populated over ('', 'a', 'b') yields 1 item, §8.4.3 wants the 2 non-empty atomic values")
 		specCheck(t, "", specCase{name: "atomics", want: "2", sheet: `
 <xsl:function name="f:w" as="item()*"><xsl:param name="v" as="item()*"/><xsl:where-populated><xsl:sequence select="$v"/></xsl:where-populated></xsl:function>
 <xsl:template match="/"><xsl:value-of select="count(f:w(('', 'a', 'b')))"/></xsl:template>`})
 	})
 	t.Run("where-populated drops a childless document node", func(t *testing.T) {
-		t.Skip("BUG: a document node with no children is kept by xsl:where-populated, §8.4.1 deems it empty")
 		specCheck(t, "", specCase{name: "doc", want: "0", sheet: `
 <xsl:function name="f:w" as="item()*"><xsl:param name="v" as="item()*"/><xsl:where-populated><xsl:sequence select="$v"/></xsl:where-populated></xsl:function>
 <xsl:variable name="empty" as="document-node()"><xsl:document/></xsl:variable>

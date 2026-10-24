@@ -122,8 +122,13 @@ func TestEntityExpansionIsBounded(t *testing.T) {
 	} {
 		start := time.Now()
 		r := engine.EvalXPath(engine.XPathRequest{Expression: "string-length(/r)", Source: c.src})
-		if len(r.Diagnostics) == 0 || !strings.Contains(r.Diagnostics[0].Message, "entity expansion exceeds") {
-			t.Errorf("%s: want an entity-expansion error, got %q %+v", c.name, r.Value, r.Diagnostics)
+		want := "entity expansion exceeds"
+		if c.name == "recursive declarations" {
+			// Refused before any expansion (WFC: No Recursion).
+			want = "recursive reference to entity"
+		}
+		if len(r.Diagnostics) == 0 || !strings.Contains(r.Diagnostics[0].Message, want) {
+			t.Errorf("%s: want %q, got %q %+v", c.name, want, r.Value, r.Diagnostics)
 		}
 		if d := time.Since(start); d > 10*time.Second {
 			t.Errorf("%s: took %v", c.name, d)

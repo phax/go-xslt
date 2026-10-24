@@ -235,6 +235,11 @@ func itemPopulated(n *xmltree.Node) bool {
 			return v.Size() > 0
 		case *xpath.Array:
 			return arrayPopulated(v)
+		case *xmltree.Node:
+			// A node carried by reference (xsl:sequence into a discrete
+			// collector): judge the node itself (§8.4 — a childless
+			// document node is deemed empty).
+			return itemPopulated(v)
 		}
 		return true
 	}
@@ -350,7 +355,10 @@ func appendIfPopulated(out *xmltree.Node, ch *xmltree.Node) {
 		}
 		return
 	}
-	if ch.Kind == xmltree.KindText && ch.Atomic() && ch.RealItem() == nil {
+	// A discrete-sequence destination (an xsl:function or @as-typed body)
+	// keeps each surviving atomic value its own item (XSLT 3.0 §8.4: the
+	// result is $R[not(deemed-empty(.))], a filter, not a join).
+	if ch.Kind == xmltree.KindText && ch.Atomic() && ch.RealItem() == nil && !out.NoAtomicMerge() {
 		if n := len(out.Children); n > 0 {
 			if last := out.Children[n-1]; last.Kind == xmltree.KindText && last.Atomic() {
 				last.Value += " " + ch.Value

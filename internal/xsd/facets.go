@@ -301,34 +301,83 @@ func (f *facetSet) checkBounds(v string, prim xpath.AtomType) error {
 	if err != nil {
 		return invalidf("cvc-datatype-valid", "%q is not a valid %s", v, prim)
 	}
-	cmp := func(bound string) (int, bool) {
+	// cmp compares the value with a bound. ok=false means "not decided" and
+	// lets the bound pass; incomparable=true means the datatype's partial
+	// order holds no relation between the two, and the bound FAILS: a bound
+	// facet is satisfied only by a value that is less (greater) than or equal
+	// to it "according to the datatype's order relation" (Datatypes §4.3.7.3
+	// and siblings), and "Any value ·incomparable· with the value used for
+	// the four bounding facets … will be excluded".
+	cmp := func(bound string) (c int, ok, incomparable bool) {
 		b, err := xpath.CastTo(xpath.NewString(bound), prim)
 		if err != nil {
-			return 0, false
+			return 0, false, false
 		}
-		return xpath.CompareAtomic(val, b)
+		if isDateLike(prim) {
+			// Datatypes §D.2.1 (timeOnTimeline): with exactly one side
+			// timezoned, the other is compared with both extreme offsets
+			// imputed; if that changes the result, the pair is incomparable.
+			if vTZ, bTZ := lexicalHasTZ(v), lexicalHasTZ(bound); vTZ != bTZ {
+				var lo, hi int
+				var okLo, okHi bool
+				if vTZ {
+					lo, okLo = compareLexicals(v, bound+"+14:00", prim)
+					hi, okHi = compareLexicals(v, bound+"-14:00", prim)
+				} else {
+					lo, okLo = compareLexicals(v+"+14:00", bound, prim)
+					hi, okHi = compareLexicals(v+"-14:00", bound, prim)
+				}
+				if okLo && okHi {
+					if lo != hi {
+						return 0, false, true
+					}
+					return lo, true, false
+				}
+			}
+		}
+		c, ok = xpath.CompareAtomic(val, b)
+		if !ok && isNumericLike(prim) {
+			// Only NaN leaves two numeric values unordered (Datatypes
+			// §3.3.5.4: "NaN is ·incomparable· with any value in the
+			// ·value space· including itself").
+			return 0, false, true
+		}
+		return c, ok, false
 	}
 	if f.hasMinIncl {
-		if c, ok := cmp(f.minIncl); ok && c < 0 {
+		if c, ok, inc := cmp(f.minIncl); inc || ok && c < 0 {
 			return invalidf("cvc-minInclusive-valid", "%q < minInclusive %s", v, f.minIncl)
 		}
 	}
 	if f.hasMaxIncl {
-		if c, ok := cmp(f.maxIncl); ok && c > 0 {
+		if c, ok, inc := cmp(f.maxIncl); inc || ok && c > 0 {
 			return invalidf("cvc-maxInclusive-valid", "%q > maxInclusive %s", v, f.maxIncl)
 		}
 	}
 	if f.hasMinExcl {
-		if c, ok := cmp(f.minExcl); ok && c <= 0 {
+		if c, ok, inc := cmp(f.minExcl); inc || ok && c <= 0 {
 			return invalidf("cvc-minExclusive-valid", "%q <= minExclusive %s", v, f.minExcl)
 		}
 	}
 	if f.hasMaxExcl {
-		if c, ok := cmp(f.maxExcl); ok && c >= 0 {
+		if c, ok, inc := cmp(f.maxExcl); inc || ok && c >= 0 {
 			return invalidf("cvc-maxExclusive-valid", "%q >= maxExclusive %s", v, f.maxExcl)
 		}
 	}
 	return nil
+}
+
+// compareLexicals casts two lexicals to prim and compares them.
+func compareLexicals(a, b string, prim xpath.AtomType) (int, bool) {
+	x, err := xpath.CastTo(xpath.NewString(strings.TrimSpace(a)), prim)
+	if err != nil {
+		return 0, false
+	}
+	y, err := xpath.CastTo(xpath.NewString(strings.TrimSpace(b)), prim)
+	if err != nil {
+		return 0, false
+	}
+	return xpath.CompareAtomic(x, y)
 }
 
 func (f *facetSet) checkDigits(v string) error {

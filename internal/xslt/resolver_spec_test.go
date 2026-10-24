@@ -65,8 +65,9 @@ func TestResolverSpecCollections(t *testing.T) {
 	}
 }
 
-func TestResolverSpecKnownBugs(t *testing.T) {
-	t.Skip("BUG: fn:doc of a resource that is not well-formed XML (plain text) returns a document holding a text node, and doc-available() says true; F&O 3.1 §14.6.1 requires FODC0002 (and §14.6.4 false)")
+// F&O 3.1 §14.6.1/§14.6.4: a resource that cannot be parsed as XML is
+// FODC0002 for fn:doc, and doc-available() is false.
+func TestResolverSpecNonXMLResource(t *testing.T) {
 	dir := t.TempDir()
 	specWrite(t, dir, "skip.txt", `not xml`)
 	specCheck(t, dir, specCase{name: "doc of non-XML", code: "FODC0002", sheet: `<xsl:template match="/"><xsl:value-of select="count(doc('skip.txt'))"/></xsl:template>`})

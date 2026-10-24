@@ -184,7 +184,7 @@ func TestParticleRestriction(t *testing.T) {
 		// Choice restricting a sequence: forbidden by the 1.0 table, but in
 		// 1.1 L(choice(a,b)) = {a, b} ⊆ L(seq(a?, b?)).
 		{"choice-restricts-seq-1.0", ver10, seq(`<xs:element name="a" minOccurs="0"/>`, optB), choice(elA, elB), "", false},
-		{"choice-restricts-seq-1.1", ver11 + skipBug, seq(`<xs:element name="a" minOccurs="0"/>`, optB), choice(elA, elB), "", true},
+		{"choice-restricts-seq-1.1", ver11, seq(`<xs:element name="a" minOccurs="0"/>`, optB), choice(elA, elB), "", true},
 
 		// Empty base: only empty content restricts it.
 		{"empty-base-empty-derived", verBoth, ``, ``, "", true},
@@ -193,8 +193,7 @@ func TestParticleRestriction(t *testing.T) {
 		// Emptiable base, empty restriction (derivation-ok-restriction 5.3).
 		{"emptiable-base-empty-derived", verBoth, seq(`<xs:element name="a" minOccurs="0"/>`), ``, "", true},
 		{"non-emptiable-base-empty-derived", ver10, seq(elA), ``, "", false},
-		// BUG: Compile panics (nil particle dereference in particleRestrictsOK).
-		{"non-emptiable-base-empty-derived", ver11 + skipBug, seq(elA), ``, "", false},
+		{"non-emptiable-base-empty-derived", ver11, seq(elA), ``, "", false},
 
 		// Substitution groups: the head stands for a choice of itself and
 		// its members (1.0 §3.9.6 clause 2.2.1; 1.1 by language).

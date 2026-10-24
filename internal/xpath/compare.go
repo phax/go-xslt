@@ -579,9 +579,24 @@ func atomicCompare(a, b *Atomic) (int, bool) {
 			return -1, true
 		case av > bv:
 			return 1, true
-		default:
-			return 0, true
 		}
+		// op:duration-equal compares the months and the seconds components
+		// separately (F&O 3.1 §8.2.5): P1M ne PT2629746S although the folded
+		// values coincide. Only eq/ne can see this — an ordering of two
+		// durations exists only within one subtype, where one component is 0.
+		if am, bm := a.durv().Months, b.durv().Months; am != bm {
+			if am < bm {
+				return -1, true
+			}
+			return 1, true
+		}
+		if as, bs := a.durv().Secs, b.durv().Secs; as != bs {
+			if as < bs {
+				return -1, true
+			}
+			return 1, true
+		}
+		return 0, true
 	case (a.T == XSqname || a.T == XSnotation) && a.T == b.T:
 		// QNames — and xs:NOTATION, which shares their value space — support
 		// only eq/ne: equal iff namespace+local match. The prefix is not part

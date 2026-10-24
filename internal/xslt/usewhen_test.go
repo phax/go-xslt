@@ -287,6 +287,13 @@ func TestUseWhenStaticErrorsUncoded(t *testing.T) {
 		{"forward reference in select", `<xsl:variable name="a" static="yes" select="$b"/>
 			<xsl:variable name="b" static="yes" select="1"/>
 			<xsl:template match="/">x</xsl:template>`, "XPST0008"},
+		// "The static context for evaluation of a static expression only
+		// contains those static variables ... whose declarations occur prior
+		// to the element containing the static expression" (§9.6).
+		{"forward reference in use-when", `<xsl:template match="/" use-when="$late">x</xsl:template>
+			<xsl:variable name="late" static="yes" select="true()"/>`, "XPST0008"},
+		{"forward reference in a nested use-when", `<xsl:template match="/"><xsl:text use-when="$late">x</xsl:text></xsl:template>
+			<xsl:variable name="late" static="yes" select="true()"/>`, "XPST0008"},
 		{"excluded declaration", `<xsl:variable name="v" static="yes" select="1" use-when="false()"/>
 			<xsl:template match="/" use-when="$v">x</xsl:template>`, "XPST0008"},
 		// Stylesheet functions are not in the static context.
@@ -511,5 +518,34 @@ func TestUseWhenStaticTransform(t *testing.T) {
 	}
 	if got != "yes" {
 		t.Errorf("got %q, want yes", got)
+	}
+}
+
+// TestUseWhenOnPrincipalRoot: "If the xsl:package, xsl:stylesheet or
+// xsl:transform element itself is effectively excluded, the effect is to
+// exclude all the children of the xsl:stylesheet or xsl:transform element,
+// but not the xsl:stylesheet or xsl:transform element or its attributes"
+// (XSLT 3.0 §3.13.1) — for the principal module too. With every template
+// gone the built-in rules copy the text through.
+func TestUseWhenOnPrincipalRoot(t *testing.T) {
+	sheet := `<xsl:stylesheet version="3.0" use-when="false()" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+<xsl:output method="text"/>
+<xsl:template match="/">template</xsl:template>
+</xsl:stylesheet>`
+	ss, err := Compile(sheet)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	got, _, err := ss.Transform("<doc>text</doc>", nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.HasSuffix(got, "text") || strings.Contains(got, "template") {
+		t.Errorf("got %q, want the built-in rules' output \"text\"", got)
+	}
+	// A true use-when keeps the children.
+	got, err = swBRun(t, strings.Replace(swBSheet(`<xsl:template match="/">kept</xsl:template>`), `version="3.0"`, `version="3.0" use-when="true()"`, 1), nil)
+	if err != nil || got != "kept" {
+		t.Errorf("use-when=true(): got %q, %v; want kept", got, err)
 	}
 }

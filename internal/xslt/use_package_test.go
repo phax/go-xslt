@@ -264,7 +264,6 @@ func TestUsePackageHomonyms(t *testing.T) {
 // hidden from package b, a reference to l:f in the using package can only mean
 // a's (a hidden component "cannot be referenced", §3.5.3.2).
 func TestUsePackageHiddenHomonym(t *testing.T) {
-	t.Skip("engine bug: the hidden l:f of the later-used package b wins over the visible one of a (flattened import precedence)")
 	a := pkAPkg("urn:pkA:a", "", `<xsl:function name="l:f" visibility="public"><xsl:sequence select="'A'"/></xsl:function>`)
 	b := pkAPkg("urn:pkA:b", "", `<xsl:function name="l:f" visibility="public"><xsl:sequence select="'B'"/></xsl:function>`)
 	pkAWant(t, "one hidden", pkAMain(`<xsl:use-package name="urn:pkA:a"/>

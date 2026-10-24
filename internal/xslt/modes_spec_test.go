@@ -113,8 +113,9 @@ func TestModeSpecSelection(t *testing.T) {
 	})
 }
 
-func TestModeSpecKnownBugs(t *testing.T) {
-	t.Skip("BUG: with default-mode=\"m\" on xsl:stylesheet and no initial mode supplied, the run starts in the unnamed mode; XSLT 3.0 §2.3.3 makes the default-mode of the top-level package the initial mode")
+// §2.3.3: with no initial mode supplied, the initial mode is the
+// default-mode of the top-level package.
+func TestModeSpecInitialModeFromDefaultMode(t *testing.T) {
 	specCheck(t, "", specCase{name: "initial mode from default-mode", src: `<r><a/></r>`, want: "M", sheet: `<xsl:stylesheet version="3.0" ` + specNS + ` default-mode="m"><xsl:output method="text"/>
 <xsl:template match="/"><xsl:apply-templates select="r/a"/></xsl:template>
 <xsl:template match="a">M</xsl:template></xsl:stylesheet>`})

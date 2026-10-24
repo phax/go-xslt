@@ -72,9 +72,10 @@ func (c *compiler) walkStatics(root *xmltree.Node, baseDir string, owner *static
 	if err := c.expandShadowAttrs(root); err != nil {
 		return err
 	}
-	// use-when="false" on a SECONDARY module's root excludes the whole module,
-	// declarations included (use-when-0116).
-	if !isPrincipal {
+	// use-when="false" on a module's root excludes the whole module's
+	// declarations (use-when-0116; on the principal module XSLT 3.0 §3.13.1
+	// excludes all its children too, see applyStatic).
+	{
 		if uw, ok := useWhenAttr(root); ok {
 			env := &staticEnv{el: root, params: c.staticParams, resolver: c.staticResolver()}
 			v, err := env.eval(uw)

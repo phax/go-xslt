@@ -2541,6 +2541,7 @@ func (n *msgMessage) strmShape() strmShape {
 		ops: strmOp(xpath.UsageAbsorption,
 			strmOperandRef{expr: n.sel},
 			strmOperandRef{avt: n.terminate},
+			strmOperandRef{avt: n.errorCode},
 			strmOperandRef{body: n.body},
 		)}
 }

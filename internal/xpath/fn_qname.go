@@ -239,11 +239,10 @@ func qnFnNamespaceURIForPrefix(c *Context, a []Object) (Object, error) {
 		return nil, err
 	}
 	uri, ok := elem.LookupPrefix(prefix)
-	if !ok {
-		// The default (no-prefix) binding may simply be "no namespace".
-		if prefix == "" {
-			return Sequence{}, nil
-		}
+	if !ok || uri == "" {
+		// An undeclaration (xmlns="", or xmlns:p="" in XML 1.1) leaves no
+		// in-scope namespace for the prefix, so the result is the empty
+		// sequence (F&O 3.1 §10.2.5), never a zero-length URI.
 		return Sequence{}, nil
 	}
 	return NewAnyURI(uri), nil

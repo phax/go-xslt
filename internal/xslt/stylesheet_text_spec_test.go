@@ -72,13 +72,12 @@ func TestConstructSpecNamespaces(t *testing.T) {
 	})
 }
 
-func TestConstructSpecNamespacesKnownBugs(t *testing.T) {
+// Former BUG: entries (§11.1.3, §11.9.1), now checked against the REC.
+func TestConstructSpecNamespacesFixed(t *testing.T) {
 	t.Run("literal result element inherit-namespaces", func(t *testing.T) {
-		t.Skip("BUG: xsl:inherit-namespaces=\"no\" on a literal result element is ignored (it works on xsl:element); §11.1.? says children do not inherit its namespaces")
 		specCheck(t, "", specCase{name: "literal result element inherit-namespaces no", want: `x|`, sheet: `
 <xsl:template match="/"><xsl:variable name="v"><r xmlns:x="urn:x" xsl:inherit-namespaces="no"><xsl:element name="c"/></r></xsl:variable><xsl:value-of select="in-scope-prefixes($v/r)[. = 'x'], in-scope-prefixes($v/r/c)[. = 'x']" separator="|"/>|</xsl:template>`})
 	})
-	t.Skip("BUG: xsl:copy copy-namespaces=\"no\" also strips the namespace nodes of descendants copied by xsl:copy-of (copy-namespaces=\"yes\"); §11.9.1 limits it to the copied element itself")
 	specCheck(t, "", specCase{name: "copy-namespaces scope", src: `<p:a xmlns:p="urn:p" xmlns:q="urn:q"><q:b/><c/></p:a>`,
 		want: `<p:a xmlns:p="urn:p"><q:b xmlns:q="urn:q"/><c xmlns:q="urn:q"/></p:a>`, sheet: specXML(`
 <xsl:template match="/*"><xsl:copy copy-namespaces="no"><xsl:copy-of select="*"/></xsl:copy></xsl:template>`)})

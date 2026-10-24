@@ -113,7 +113,8 @@ func dtTZDuration(tm time.Time, hasTZ bool) Object {
 // --- current accessors ------------------------------------------------------
 
 func dtCurrentDateTime(c *Context, a []Object) (Object, error) {
-	return NewDateTime(XSdateTime, ctxNow(c), true), nil
+	// F&O 3.1 §15.3: fn:current-dateTime() as xs:dateTimeStamp.
+	return NewDateTime(XSdateTimeStamp, ctxNow(c), true), nil
 }
 
 func dtCurrentDate(c *Context, a []Object) (Object, error) {

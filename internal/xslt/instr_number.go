@@ -442,7 +442,9 @@ func (n *num2Number) countSingle(eng *engine, env *evalEnv, node *xmltree.Node) 
 // siblingIndex returns 1 + the number of preceding siblings of node that match
 // @count relative to target.
 func (n *num2Number) siblingIndex(env *evalEnv, node, target *xmltree.Node) (int64, error) {
-	if node.Parent == nil {
+	if node.Parent == nil || node.Kind == xmltree.KindAttribute || node.Kind == xmltree.KindNamespace {
+		// An attribute or namespace node is not among its parent's children:
+		// its preceding-sibling axis is empty, so it is number 1 (§12.2).
 		return 1, nil
 	}
 	var idx int64
@@ -553,15 +555,18 @@ func num2PreorderAll(node *xmltree.Node, out *[]*xmltree.Node) {
 	}
 }
 
-// num2SameName reports whether two element nodes share the same expanded name.
+// num2SameName is xsl:number's default @count (XSLT 3.0 §12.2): the same
+// node kind as b and, if b has an expanded QName (element, attribute,
+// processing instruction, namespace node), the same expanded QName.
 func num2SameName(a, b *xmltree.Node) bool {
 	if a.Kind != b.Kind {
 		return false
 	}
-	if a.Kind != xmltree.KindElement {
-		return true
+	switch a.Kind {
+	case xmltree.KindElement, xmltree.KindAttribute, xmltree.KindPI, xmltree.KindNamespace:
+		return a.Name.Local == b.Name.Local && a.Name.Space == b.Name.Space
 	}
-	return a.Name.Local == b.Name.Local && a.Name.Space == b.Name.Space
+	return true
 }
 
 // num2Val is one number in xsl:number's computed sequence: normally a plain

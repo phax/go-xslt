@@ -1,7 +1,6 @@
 package xslt
 
 import (
-	"math"
 	"sort"
 	"strings"
 
@@ -318,8 +317,15 @@ func mrgKeysConsistent(a, b *mrgKey) bool {
 type mrgItem struct {
 	node    *xmltree.Node
 	keys    []string       // stringified key values, one per merge-key
-	keyObjs []xpath.Object // raw key values (for current-merge-key)
-	source  *mrgSource
+	keyObjs []xpath.Object // raw key values
+	// typed holds each merge key's atomized value (nil when the key is the
+	// empty sequence), xs:untypedAtomic cast to xs:string — XSLT 3.0 §13.1.2
+	// ("Any values of type xs:untypedAtomic are cast to xs:string"), which
+	// §15.5 applies to merge keys. It decides the default comparison (by
+	// type, not by lexical shape) and is what current-merge-key() returns
+	// (§15.6.2).
+	typed  []xpath.Item
+	source *mrgSource
 }
 
 func (m *mrgInstr) exec(eng *engine, r rt, out *xmltree.Node) error {
@@ -350,7 +356,7 @@ func (m *mrgInstr) exec(eng *engine, r rt, out *xmltree.Node) error {
 			if err != nil {
 				return err
 			}
-			nodes := mrgToNodes(v)
+			nodes, origs := mrgToNodesOrig(v)
 			if src.streamable {
 				snap := make([]*xmltree.Node, len(nodes))
 				for i, n := range nodes {
@@ -373,6 +379,10 @@ func (m *mrgInstr) exec(eng *engine, r rt, out *xmltree.Node) error {
 				// collapsing every source into a single group).
 				_ = i
 				nr := rt{node: node, pos: 1, size: 1}
+				var orig xpath.Item
+				if i < len(origs) {
+					orig = origs[i]
+				}
 				for _, k := range src.keys {
 					var kv xpath.Object
 					switch {
@@ -408,6 +418,11 @@ func (m *mrgInstr) exec(eng *engine, r rt, out *xmltree.Node) error {
 					}
 					it.keyObjs = append(it.keyObjs, kv)
 					it.keys = append(it.keys, xpath.ToString(kv))
+					tk, err := mrgTypedKey(kv, node, orig)
+					if err != nil {
+						return err
+					}
+					it.typed = append(it.typed, tk)
 				}
 				items = append(items, it)
 			}
@@ -520,7 +535,7 @@ func (m *mrgInstr) exec(eng *engine, r rt, out *xmltree.Node) error {
 	var groups [][]*mrgItem
 	for i, n := 0, len(items); i < n; {
 		j := i + 1
-		for j < n && mrgSameKey(items[i], items[j]) {
+		for j < n && mrgSameKey(items[i], items[j], keySpecs, effDataType, effOrder, effColl, effCase) {
 			j++
 		}
 		groups = append(groups, items[i:j])
@@ -696,27 +711,76 @@ func mrgCheckComparable(items []*mrgItem) error {
 // mrgKeyValue returns the merge-key value reported by current-merge-key(): the
 // single key value when there is one merge key, otherwise the sequence of key
 // values.
+//
+// It is "the merge key of the first item in the group, after atomization and
+// casting of xs:untypedAtomic values to xs:string" (XSLT 3.0 §15.6.2), so
+// the typed keys, not the selected nodes.
 func mrgKeyValue(it *mrgItem) xpath.Object {
-	if len(it.keyObjs) == 1 {
-		return it.keyObjs[0]
-	}
 	var items []xpath.Item
-	for _, k := range it.keyObjs {
-		items = append(items, xpath.Items(k)...)
+	for _, k := range it.typed {
+		if k != nil {
+			items = append(items, k)
+		}
 	}
 	return xpath.FromItems(items)
 }
 
-func mrgToNodes(v xpath.Object) []*xmltree.Node {
-	if ns, ok := xpath.ToNodeSet(v); ok {
-		return []*xmltree.Node(ns)
+// mrgTypedKey atomizes one merge key value (at most one item: the caller has
+// already rejected more) and casts xs:untypedAtomic to xs:string (§13.1.2).
+// A key that is the merge item itself, when that item is a synthetic stand-in
+// for an atomic value (mrgToNodesOrig), is that atomic value — "." keeps the
+// item's own type rather than re-atomizing the stand-in to untyped text.
+func mrgTypedKey(kv xpath.Object, node *xmltree.Node, orig xpath.Item) (xpath.Item, error) {
+	its := xpath.Items(kv)
+	if len(its) == 0 {
+		return nil, nil
 	}
+	if nd, ok := its[0].(*xmltree.Node); ok && orig != nil && nd == node {
+		if a, ok := orig.(*xpath.Atomic); ok {
+			return a, nil
+		}
+	}
+	atoms, err := xpath.Atomize(xpath.FromItems(its[:1]))
+	if err != nil {
+		return nil, err
+	}
+	if len(atoms) == 0 {
+		return nil, nil
+	}
+	a := atoms[0]
+	if at, ok := a.(*xpath.Atomic); ok && at.T == xpath.XSuntypedAtomic {
+		return xpath.NewString(xpath.ToString(at)), nil
+	}
+	return a, nil
+}
+
+// mrgTypedObj wraps one typed key (nil = empty) as an Object.
+func mrgTypedObj(it xpath.Item) xpath.Object {
+	if it == nil {
+		return xpath.Sequence{}
+	}
+	return xpath.FromItems([]xpath.Item{it})
+}
+
+func mrgToNodes(v xpath.Object) []*xmltree.Node {
+	nodes, _ := mrgToNodesOrig(v)
+	return nodes
+}
+
+// mrgToNodesOrig is mrgToNodes that also returns, per node, the item a
+// synthetic stand-in represents (nil for a real node).
+func mrgToNodesOrig(v xpath.Object) ([]*xmltree.Node, []xpath.Item) {
+	if ns, ok := xpath.ToNodeSet(v); ok {
+		return []*xmltree.Node(ns), nil
+	}
+	var origs []xpath.Item
 	// Non-node items are modelled as synthetic text nodes so "." works.
 	items := xpath.Items(v)
 	nodes := make([]*xmltree.Node, 0, len(items))
 	for _, it := range items {
 		if nd, ok := it.(*xmltree.Node); ok {
 			nodes = append(nodes, nd)
+			origs = append(origs, nil)
 			continue
 		}
 		// Mark it as what it is — a SYNTHETIC stand-in for an atomic item,
@@ -741,8 +805,9 @@ func mrgToNodes(v xpath.Object) []*xmltree.Node {
 		nd.SetAtomic(true)
 		attachRealItem(nd, it)
 		nodes = append(nodes, nd)
+		origs = append(origs, it)
 	}
-	return nodes
+	return nodes, origs
 }
 
 // mrgLess orders two merged items by their key tuples per the merge-key specs.
@@ -776,7 +841,12 @@ func mrgLess(a, b *mrgItem, keys []*mrgKey, effDataType, effOrder []string, effC
 		if ki < len(effCase) {
 			caseOrder = effCase[ki]
 		}
-		cmp := compareKey(a.keys[ki], b.keys[ki], dataType, caseOrder, coll)
+		var cmp int
+		if dataType == sortValueDataType && ki < len(a.typed) && ki < len(b.typed) {
+			cmp = compareAtomicKey(mrgTypedObj(a.typed[ki]), mrgTypedObj(b.typed[ki]))
+		} else {
+			cmp = compareKey(a.keys[ki], b.keys[ki], dataType, caseOrder, coll)
+		}
 		if cmp == 0 {
 			continue
 		}
@@ -788,51 +858,53 @@ func mrgLess(a, b *mrgItem, keys []*mrgKey, effDataType, effOrder []string, effC
 	return false
 }
 
-// mrgEffectiveDataTypes auto-detects, for each merge-key position whose
-// data-type was not explicitly given (mirrors xsl:sort's own auto-detection
-// in sortNodes), "number" when every non-empty key value seen across ALL
-// items (from every source) at that position looks numeric — otherwise
-// "text". Checked against the already-stringified key (mrgItem.keys, the same
-// string compareKey's "number" mode itself parses via xpath.ToNumber) rather
-// than the atomic keyObjs: an atomic (non-node) merge-source item is
-// round-tripped through a synthetic text node (mrgToNodes) and its merge-key
-// "." re-atomizes to xs:untypedAtomic, which IsNumeric() never reports true
-// for, even though its string form is plainly numeric. A data-type given as
-// an attribute value template is left alone (neither this detection nor the
-// raw AVT text can be trusted statically).
+// mrgEffectiveDataTypes decides, for each merge-key position whose data-type
+// was not given, how the keys are compared. With no data-type, sort keys are
+// "compared using the rules appropriate to their datatype" after
+// xs:untypedAtomic is cast to xs:string (XSLT 3.0 §13.1.2, which §15.5 makes
+// the merge-key rule), so the decision rests on the keys' TYPES, as in
+// sortNodes: "number" when every non-empty key is numeric, value comparison
+// when every one is a date/time/duration, otherwise text. A numeric-looking
+// string or untyped key ("10", "9") is text. A data-type given as an
+// attribute value template is left alone.
 func mrgEffectiveDataTypes(items []*mrgItem, keySpecs []*mrgKey) []string {
 	eff := make([]string, len(keySpecs))
 	for ki, k := range keySpecs {
 		if _, ok := k.el.AttrLocal("data-type"); ok {
 			continue // explicit (including AVT) — leave as-is
 		}
-		allNum, anySeen := true, false
+		allNum, allOrd, anySeen := true, true, false
 		for _, it := range items {
-			if ki >= len(it.keys) || it.keys[ki] == "" {
+			if ki >= len(it.typed) || it.typed[ki] == nil {
 				continue
 			}
 			anySeen = true
-			if math.IsNaN(xpath.ToNumber(it.keys[ki])) {
+			a, ok := it.typed[ki].(*xpath.Atomic)
+			if !ok || !a.IsNumeric() {
 				allNum = false
 			}
+			if !ok || !a.IsOrderableNonString() {
+				allOrd = false
+			}
 		}
-		if allNum && anySeen {
+		switch {
+		case anySeen && allNum:
 			eff[ki] = "number"
+		case anySeen && allOrd:
+			eff[ki] = sortValueDataType
 		}
 	}
 	return eff
 }
 
-// mrgSameKey reports whether two items share the same merge-key tuple (by
-// stringified key value, the comparison basis for grouping).
-func mrgSameKey(a, b *mrgItem) bool {
+// mrgSameKey reports whether two items share the same merge-key tuple: keys
+// that "compare equal ... under the collating rules for the corresponding
+// merge key definition" form one group (XSLT 3.0 §15.7), so the comparison
+// is the ordering comparator's (collation, data-type), not string identity.
+func mrgSameKey(a, b *mrgItem, keys []*mrgKey, effDataType, effOrder []string, effColl []func(a, b string) int, effCase []string) bool {
 	if len(a.keys) != len(b.keys) {
 		return false
 	}
-	for i := range a.keys {
-		if a.keys[i] != b.keys[i] {
-			return false
-		}
-	}
-	return true
+	return !mrgLess(a, b, keys, effDataType, effOrder, effColl, effCase) &&
+		!mrgLess(b, a, keys, effDataType, effOrder, effColl, effCase)
 }

@@ -1083,10 +1083,10 @@ func (c *compiler) checkContentBaseKind(ct *ComplexType) error {
 		}
 		// src-ct.2.1.2: a RESTRICTION may also start from a mixed complex type
 		// whose particle is emptiable — restricting it away is exactly how such a
-		// type becomes simple-content. xs:anyType is mixed but never emptiable
-		// down to nothing in this sense, so it stays excluded.
+		// type becomes simple-content. xs:anyType qualifies too (mixed, its
+		// particle a sequence of one optional wildcard); the <simpleType>
+		// child src-ct.2.2 then demands is checked in schemavalid.go.
 		if ct.derivation == "restriction" && b.kind == contentMixed &&
-			b.name != (xname{xsNS, "anyType"}) &&
 			particleEmptiable(c.sch.effectiveParticle(b), 0) {
 			return nil
 		}

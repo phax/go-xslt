@@ -63,8 +63,9 @@ func TestApplyImportsSpecParams(t *testing.T) {
 	})
 }
 
-func TestApplyImportsSpecKnownBugs(t *testing.T) {
-	t.Skip("BUG: xsl:next-match inside a stylesheet function keeps the caller's current template rule; it is absent in a function (§6.8), so XTDE0560")
+// §6.8: the current template rule is cleared inside xsl:function, so
+// xsl:next-match there is XTDE0560.
+func TestApplyImportsSpecNextMatchInFunction(t *testing.T) {
 	specCheck(t, "", specCase{name: "next-match in a function", code: "XTDE0560", sheet: `
 <xsl:function name="f:n"><xsl:next-match/></xsl:function>
 <xsl:template match="/"><xsl:sequence select="f:n()"/></xsl:template>`})

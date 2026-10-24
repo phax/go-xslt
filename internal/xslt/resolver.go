@@ -144,7 +144,7 @@ func (r *fileResolver) resolveNetDoc(key string) (*xmltree.Node, bool) {
 		strip = r.ss.stripSpaceHook()
 	}
 	doc, err := xmltree.ParseLenient11WithBaseStripSpace(string(resp.Body), "", strip)
-	if err != nil {
+	if err != nil || !hasDocumentElement(doc) {
 		return nil, false
 	}
 	if r.ss != nil {
@@ -153,6 +153,26 @@ func (r *fileResolver) resolveNetDoc(key string) (*xmltree.Node, bool) {
 	doc.SetBase(key)
 	r.docs[key] = doc
 	return doc, true
+}
+
+// hasDocumentElement reports whether a parsed resource is a well-formed XML
+// document: exactly one element at the top level and no character data
+// outside it. The lenient parser accepts plain text, but fn:doc of a resource
+// that is not well-formed XML is FODC0002 and doc-available() is false
+// (F&O 3.1 §14.6.1, §14.6.4).
+func hasDocumentElement(doc *xmltree.Node) bool {
+	elems := 0
+	for _, c := range doc.Children {
+		switch c.Kind {
+		case xmltree.KindElement:
+			elems++
+		case xmltree.KindText:
+			if strings.TrimLeft(c.Value, " \t\r\n") != "" {
+				return false
+			}
+		}
+	}
+	return elems == 1
 }
 
 func (r *fileResolver) ResolveDoc(uri string) (*xmltree.Node, bool) {
@@ -185,7 +205,7 @@ func (r *fileResolver) ResolveDoc(uri string) (*xmltree.Node, bool) {
 		strip = r.ss.stripSpaceHook()
 	}
 	doc, err := xmltree.ParseLenient11WithBaseStripSpaceFS(string(b), filepath.Dir(p), r.files, strip)
-	if err != nil {
+	if err != nil || !hasDocumentElement(doc) {
 		return nil, false
 	}
 	// Validation first, whitespace stripping second — the same order (and for

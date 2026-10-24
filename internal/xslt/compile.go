@@ -370,6 +370,11 @@ type Stylesheet struct {
 	// hiddenAt: per package manifest root, the symbolic names of used-package
 	// components that code in that package may not reference (expose.go).
 	hiddenAt map[*xmltree.Node]map[string]bool
+	// pkgFuncs: per package root, a function of that package that lost the
+	// flattened ss.functions slot to a visible homonym from another used
+	// package (expose.go, loseHomonym). Code written in that package still
+	// calls its own (funcFor).
+	pkgFuncs map[*xmltree.Node]map[string]*FuncDef
 	// originalFuncs maps an overriding xsl:function declaration to the function
 	// it overrides, for xsl:original() calls written inside it.
 	originalFuncs map[*xmltree.Node]*FuncDef
@@ -482,6 +487,9 @@ type litElement struct {
 	// val is the xsl:validation / xsl:type request (XSLT 3.0 §24.4), nil
 	// unless this run is schema-aware — see schema_validation.go.
 	val *valRequest
+	// noInheritNS is xsl:inherit-namespaces="no" (XSLT 3.0 §11.1.3): the
+	// element children of the new element do not inherit its namespaces.
+	noInheritNS bool
 }
 type litAttr struct {
 	name  xmltree.Name
@@ -1459,6 +1467,9 @@ func (c *compiler) compileTopLevel(ss *Stylesheet, children []*xmltree.Node) err
 					}
 				}
 			}
+			if c.shadowedByVisibleHomonym(ss, key, fd, child) {
+				break
+			}
 			ss.functions[key] = fd
 		case "decimal-format":
 			name, ok := child.AttrLocal("name")
@@ -1542,6 +1553,11 @@ type compiler struct {
 	// from their using package (expose.go).
 	useVis   map[*xmltree.Node][]usedVisibility
 	hiddenAt map[*xmltree.Node]map[string]bool
+	// loseHomonym: per used package root, the symbolic names of components
+	// that a using package hides from that package while another used
+	// package makes a homonym visible — the visible one is the one a
+	// reference means (§3.5.3.2), so these must not win the flattened slot.
+	loseHomonym map[*xmltree.Node]map[string]bool
 	// incRoots: the included/imported module roots of each package module root.
 	incRoots map[*xmltree.Node][]*xmltree.Node
 	pkgOf    map[*xmltree.Node]*xmltree.Node
@@ -3421,6 +3437,9 @@ func (c *compiler) compileLiteralElement(el *xmltree.Node) (instruction, error) 
 		el:      el,
 		val:     leVal,
 	}
+	if v, ok := el.Attr(NS, "inherit-namespaces"); ok && !xsltBool(v) {
+		le.noInheritNS = true
+	}
 	for _, a := range el.Attrs {
 		// Skip attributes in the XSLT namespace on literal result elements.
 		if a.Name.Space == NS {
@@ -3746,6 +3765,18 @@ func noInheritNamespaces(el *xmltree.Node) bool {
 // names — actually requires; every other declaration it carried is dropped
 // (copy-0614/0615/0622/0623: an unused "s" prefix must not survive the copy).
 func pruneCopiedNamespaces(n *xmltree.Node) {
+	pruneOwnNamespaces(n)
+	for _, c := range n.Children {
+		pruneCopiedNamespaces(c)
+	}
+}
+
+// pruneOwnNamespaces is pruneCopiedNamespaces for n alone. xsl:copy
+// copy-namespaces="no" uses it: the attribute governs only the namespace
+// nodes of the copied element itself (XSLT 3.0 §11.9.1), not those of the
+// content its sequence constructor produced (an inner xsl:copy-of keeps its
+// own copy-namespaces).
+func pruneOwnNamespaces(n *xmltree.Node) {
 	if n.Kind == xmltree.KindElement && len(n.NSDecls()) > 0 {
 		need := map[string]bool{}
 		if n.Name.Space != "" {
@@ -3807,9 +3838,6 @@ func pruneCopiedNamespaces(n *xmltree.Node) {
 		for _, a := range n.Attrs {
 			addFixup(n, a.Name, need)
 		}
-	}
-	for _, c := range n.Children {
-		pruneCopiedNamespaces(c)
 	}
 }
 

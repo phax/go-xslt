@@ -104,6 +104,16 @@ func TestCaKindTestTypes(t *testing.T) {
 		{expr: "count(//@a)", want: "2"},
 		{expr: "count(//*)", want: "2"},
 	})
+	// Q{uri}* matches any local name in exactly that namespace, Q{}* only
+	// no-namespace names (XPath 3.1 §3.3.2.2), also on the attribute axis.
+	caRun(t, `<r><u:a xmlns:u="urn:u" u:x="1" y="2"/><b/><v:c xmlns:v="urn:v"/></r>`, nil, []caCase{
+		{expr: "count(/r/Q{urn:u}*)", want: "1"},
+		{expr: "count(/r/Q{}*)", want: "1"},
+		{expr: "count(/r/Q{urn:w}*)", want: "0"},
+		{expr: "count(//@Q{urn:u}*)", want: "1"},
+		{expr: "count(//@Q{}*)", want: "1"},
+		{expr: "local-name(/r/Q{urn:v}*)", want: "c"},
+	})
 }
 
 // TestCaKindTestAnnotated checks the type part of element/attribute tests

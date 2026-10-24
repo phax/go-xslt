@@ -159,7 +159,7 @@ func TestFacetValidation(t *testing.T) {
 		{"minExclusive-double", verBoth, `<xs:restriction base="xs:double"><xs:minExclusive value="0"/></xs:restriction>`, "1E-300", true, "", false},
 		{"minExclusive-double-zero", verBoth, `<xs:restriction base="xs:double"><xs:minExclusive value="0"/></xs:restriction>`, "-0", false, "", false},
 		{"maxInclusive-double-inf", verBoth, `<xs:restriction base="xs:double"><xs:maxInclusive value="1E10"/></xs:restriction>`, "INF", false, "", false},
-		{"maxInclusive-double-nan", verBoth + skipBug, `<xs:restriction base="xs:double"><xs:maxInclusive value="1E10"/></xs:restriction>`, "NaN", false, "", false},
+		{"maxInclusive-double-nan", verBoth, `<xs:restriction base="xs:double"><xs:maxInclusive value="1E10"/></xs:restriction>`, "NaN", false, "", false},
 		{"totalDigits-ok", verBoth, `<xs:restriction base="xs:decimal"><xs:totalDigits value="3"/></xs:restriction>`, "12.3", true, "", false},
 		{"totalDigits-trailing-zeros", verBoth, `<xs:restriction base="xs:decimal"><xs:totalDigits value="3"/></xs:restriction>`, "12.300", true, "", false},
 		{"totalDigits-leading-zeros", verBoth, `<xs:restriction base="xs:decimal"><xs:totalDigits value="2"/></xs:restriction>`, "0012", true, "", false},
@@ -172,7 +172,7 @@ func TestFacetValidation(t *testing.T) {
 		{"dateTime-timezone-compare-bad", verBoth, `<xs:restriction base="xs:dateTime"><xs:maxInclusive value="2020-01-01T12:00:00Z"/></xs:restriction>`, "2020-01-01T13:00:00+00:30", false, "", false},
 		// An indeterminate comparison (no timezone vs timezone ±14h) fails
 		// the facet (Datatypes §3.3.8.4 order relation is partial).
-		{"dateTime-indeterminate", verBoth + skipBug, `<xs:restriction base="xs:dateTime"><xs:maxInclusive value="2020-01-01T12:00:00Z"/></xs:restriction>`, "2020-01-01T12:00:00", false, "", false},
+		{"dateTime-indeterminate", verBoth, `<xs:restriction base="xs:dateTime"><xs:maxInclusive value="2020-01-01T12:00:00Z"/></xs:restriction>`, "2020-01-01T12:00:00", false, "", false},
 		{"time-minExclusive", verBoth, `<xs:restriction base="xs:time"><xs:minExclusive value="10:00:00"/></xs:restriction>`, "10:00:01", true, "", false},
 		{"gYear-maxExclusive", verBoth, `<xs:restriction base="xs:gYear"><xs:maxExclusive value="2000"/></xs:restriction>`, "1999", true, "", false},
 		{"gYearMonth-bound-bad", verBoth, `<xs:restriction base="xs:gYearMonth"><xs:minInclusive value="2000-05"/></xs:restriction>`, "2000-04", false, "", false},
@@ -186,7 +186,7 @@ func TestFacetValidation(t *testing.T) {
 		{"list-length-items", verBoth, `<xs:restriction><xs:simpleType><xs:list itemType="xs:int"/></xs:simpleType><xs:length value="2"/></xs:restriction>`, " 1   2 ", true, "", false},
 		{"list-length-items-bad", verBoth, `<xs:restriction><xs:simpleType><xs:list itemType="xs:int"/></xs:simpleType><xs:length value="2"/></xs:restriction>`, "1 2 3", false, "", false},
 		{"list-item-invalid", verBoth, `<xs:list itemType="xs:int"/>`, "1 x", false, "", false},
-		{"list-enumeration-whole-list", verBoth + skipBug, `<xs:restriction><xs:simpleType><xs:list itemType="xs:int"/></xs:simpleType><xs:enumeration value="1 2"/></xs:restriction>`, "01 2", true, "", false},
+		{"list-enumeration-whole-list", verBoth, `<xs:restriction><xs:simpleType><xs:list itemType="xs:int"/></xs:simpleType><xs:enumeration value="1 2"/></xs:restriction>`, "01 2", true, "", false},
 		{"list-pattern-whole-string", verBoth, `<xs:restriction><xs:simpleType><xs:list itemType="xs:int"/></xs:simpleType><xs:pattern value="\d( \d)*"/></xs:restriction>`, "1 2", true, "", false},
 		{"list-of-union", verBoth, `<xs:list><xs:simpleType><xs:union memberTypes="xs:int xs:boolean"/></xs:simpleType></xs:list>`, "1 true 3", true, "", false},
 		{"list-of-union-bad", verBoth, `<xs:list><xs:simpleType><xs:union memberTypes="xs:int xs:boolean"/></xs:simpleType></xs:list>`, "1 maybe", false, "", false},

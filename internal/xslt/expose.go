@@ -314,6 +314,8 @@ type usedVisibility struct {
 	// explicit: components some xsl:accept names explicitly or by a wildcard
 	// that applies, i.e. whose visibility here was stated rather than defaulted.
 	abstract, explicit map[string]bool
+	// root is the used package's root element.
+	root *xmltree.Node
 }
 
 // noteUsedVisibility records the hidden/visible split of the package usedRoot
@@ -328,7 +330,7 @@ func (c *compiler) noteUsedVisibility(use, usedRoot *xmltree.Node, exports []pkg
 		c.usesOf = map[*xmltree.Node][]*xmltree.Node{}
 	}
 	c.usesOf[using] = append(c.usesOf[using], usedRoot)
-	uv := usedVisibility{hidden: map[string]bool{}, visible: map[string]bool{}, abstract: map[string]bool{}, explicit: map[string]bool{}}
+	uv := usedVisibility{hidden: map[string]bool{}, visible: map[string]bool{}, abstract: map[string]bool{}, explicit: map[string]bool{}, root: usedRoot}
 	exported := map[string]bool{}
 	for _, comp := range exports {
 		exported[comp.symbolic()] = true
@@ -359,6 +361,36 @@ func (c *compiler) noteUsedVisibility(use, usedRoot *xmltree.Node, exports []pkg
 		}
 		if !exported[comp.symbolic()] {
 			uv.hidden[comp.symbolic()] = true
+		}
+	}
+	// So is what the used package itself accepts from the packages IT uses
+	// without re-exposing it: a component accepted as private (or hidden) is
+	// not in its manifest (§3.5.3.2), so the using package cannot see it. A
+	// component the used package redeclares in an xsl:override is its own
+	// declaration, left to its own visibility.
+	overridden := map[string]bool{}
+	for _, up := range elementChildren(usedRoot) {
+		if up.Name.Space != NS || up.Name.Local != "use-package" {
+			continue
+		}
+		for _, ov := range elementChildren(up) {
+			if ov.Name.Space != NS || ov.Name.Local != "override" {
+				continue
+			}
+			for _, d := range elementChildren(ov) {
+				if comp, ok := componentOf(d); ok {
+					overridden[comp.symbolic()] = true
+				}
+			}
+		}
+	}
+	for _, inner := range c.useVis[usedRoot] {
+		for _, set := range []map[string]bool{inner.visible, inner.hidden} {
+			for sym := range set {
+				if !exported[sym] && !overridden[sym] {
+					uv.hidden[sym] = true
+				}
+			}
 		}
 	}
 	if c.useVis == nil {
@@ -432,6 +464,22 @@ func (c *compiler) finishHidden(root *xmltree.Node, own, incRoots []*xmltree.Nod
 			}
 		}
 	}
+	// A name hidden from one used package but made visible by another means
+	// the visible one; the hidden declaration must not take the flattened
+	// slot (see shadowedByVisibleHomonym).
+	for _, uv := range infos {
+		for sym := range uv.hidden {
+			if visible[sym] && uv.root != nil {
+				if c.loseHomonym == nil {
+					c.loseHomonym = map[*xmltree.Node]map[string]bool{}
+				}
+				if c.loseHomonym[uv.root] == nil {
+					c.loseHomonym[uv.root] = map[string]bool{}
+				}
+				c.loseHomonym[uv.root][sym] = true
+			}
+		}
+	}
 	final := map[string]bool{}
 	for _, uv := range infos {
 		for sym := range uv.hidden {
@@ -467,6 +515,63 @@ func mergeUseVis(m map[*xmltree.Node][]usedVisibility, root, sub *xmltree.Node) 
 	}
 	m[root] = append(m[root], m[sub]...)
 	return m
+}
+
+// pkgRootOf returns the root of the package el is written in.
+func pkgRootOf(pkgOf map[*xmltree.Node]*xmltree.Node, el *xmltree.Node) *xmltree.Node {
+	top := topElement(el)
+	if p, ok := pkgOf[top]; ok {
+		return p
+	}
+	return top
+}
+
+// shadowedByVisibleHomonym decides the flattened function slot key when two
+// used packages declare homonymous functions and the using package hides one
+// of them (xsl:accept visibility="hidden") while accepting the other: a
+// reference from the using package means the visible one (§3.5.3.2, a hidden
+// component "cannot be referenced"), whatever the packages' order. The
+// losing declaration is kept in ss.pkgFuncs for its own package's code. It
+// reports true when fd itself loses (and must not be stored).
+func (c *compiler) shadowedByVisibleHomonym(ss *Stylesheet, key string, fd *FuncDef, el *xmltree.Node) bool {
+	if len(c.loseHomonym) == 0 || c.overrideNodes[el] {
+		return false
+	}
+	prev, ok := ss.functions[key]
+	if !ok || prev.el == nil {
+		return false
+	}
+	sym := "function#" + key
+	stash := func(pkg *xmltree.Node, f *FuncDef) {
+		if ss.pkgFuncs == nil {
+			ss.pkgFuncs = map[*xmltree.Node]map[string]*FuncDef{}
+		}
+		if ss.pkgFuncs[pkg] == nil {
+			ss.pkgFuncs[pkg] = map[string]*FuncDef{}
+		}
+		ss.pkgFuncs[pkg][key] = f
+	}
+	if p := pkgRootOf(c.pkgOf, el); c.loseHomonym[p][sym] {
+		stash(p, fd)
+		return true
+	}
+	if p := pkgRootOf(c.pkgOf, prev.el); c.loseHomonym[p][sym] {
+		stash(p, prev)
+	}
+	return false
+}
+
+// funcFor resolves the function key for code written at el: its own
+// package's declaration when that one lost the flattened slot to a visible
+// homonym (pkgFuncs), otherwise ss.functions.
+func (ss *Stylesheet) funcFor(el *xmltree.Node, key string) (*FuncDef, bool) {
+	if len(ss.pkgFuncs) > 0 && el != nil {
+		if fd, ok := ss.pkgFuncs[pkgRootOf(ss.pkgOf, el)][key]; ok {
+			return fd, true
+		}
+	}
+	fd, ok := ss.functions[key]
+	return fd, ok
 }
 
 // hiddenRef reports whether the symbolic name sym is hidden from code written

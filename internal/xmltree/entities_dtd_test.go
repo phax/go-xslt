@@ -82,9 +82,46 @@ func TestEntityWellFormedness(t *testing.T) {
 // WFC: No Recursion (XML 1.0 §4.1) — indirect recursion makes the document
 // not well-formed.
 func TestEntityIndirectRecursion(t *testing.T) {
-	t.Skip("BUG: indirectly recursive internal entities are accepted")
-	if _, err := Parse(`<!DOCTYPE r [<!ENTITY a "&b;"><!ENTITY b "&a;">]><r>&a;</r>`); err == nil {
-		t.Error("accepted")
+	for _, src := range []string{
+		`<!DOCTYPE r [<!ENTITY a "&b;"><!ENTITY b "&a;">]><r>&a;</r>`,
+		`<!DOCTYPE r [<!ENTITY a "x&a;">]><r>&a;</r>`,
+		// c is not on the cycle but expands into it.
+		`<!DOCTYPE r [<!ENTITY a "&b;"><!ENTITY b "&a;"><!ENTITY c "y&a;">]><r>&c;</r>`,
+		`<!DOCTYPE r [<!ENTITY a "&b;"><!ENTITY b "&a;">]><r x="&b;"/>`,
+	} {
+		if _, err := Parse(src); err == nil {
+			t.Errorf("accepted %q", src)
+		}
+		if streamAccepts(src) {
+			t.Errorf("stream reader accepted %q", src)
+		}
+	}
+	// The constraint is on the reference: an unreferenced recursive
+	// declaration leaves the rest usable.
+	doc, err := Parse(`<!DOCTYPE r [<!ENTITY a "&b;"><!ENTITY b "&a;"><!ENTITY ok "fine">]><r>&ok;</r>`)
+	if err != nil {
+		t.Fatalf("unreferenced recursion rejected: %v", err)
+	}
+	if got := doc.StringValue(); got != "fine" {
+		t.Errorf("string value %q, want %q", got, "fine")
+	}
+}
+
+// streamAccepts reports whether the incremental reader reads src to the end
+// without an error.
+func streamAccepts(src string) bool {
+	r, err := NewStreamReader(strings.NewReader(src))
+	if err != nil {
+		return false
+	}
+	for {
+		ev, err := r.Advance()
+		if err != nil {
+			return false
+		}
+		if ev.Kind == StreamEOF {
+			return true
+		}
 	}
 }
 

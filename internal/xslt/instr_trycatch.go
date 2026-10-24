@@ -212,7 +212,7 @@ func (t *tryCatch) exec(eng *engine, r rt, out *xmltree.Node) error {
 	eng.pushScope()
 	defer eng.popScope()
 	eng.bindVar(xmltree.Name{Space: tcErrNS, Local: "code", Prefix: "err"}, xpath.NewQName(code))
-	eng.bindVar(xmltree.Name{Space: tcErrNS, Local: "description", Prefix: "err"}, xpath.NewString(tryErr.Error()))
+	eng.bindVar(xmltree.Name{Space: tcErrNS, Local: "description", Prefix: "err"}, xpath.NewString(tcErrorDescription(tryErr)))
 	eng.bindVar(xmltree.Name{Space: tcErrNS, Local: "value", Prefix: "err"}, value)
 	module, line, col := tcErrorLocation(tryErr, errEl, t.el)
 	eng.bindVar(xmltree.Name{Space: tcErrNS, Local: "module", Prefix: "err"}, module)
@@ -246,6 +246,17 @@ func tcErrorParts(err error) (xmltree.Name, xpath.Object) {
 		code = "FOER0000"
 	}
 	return xmltree.Name{Space: tcErrNS, Local: code, Prefix: "err"}, xpath.Sequence{}
+}
+
+// tcErrorDescription is $err:description (XSLT 3.0 §8.3): for a structured
+// error raised with a description (fn:error's second argument) it is that
+// description itself, not the flat "err:CODE: description" message.
+func tcErrorDescription(err error) string {
+	var xe *xpath.Error
+	if errors.As(err, &xe) && xe.Desc != "" {
+		return xe.Desc
+	}
+	return err.Error()
 }
 
 // tcErrorLocation reports $err:module / $err:line-number / $err:column-number.

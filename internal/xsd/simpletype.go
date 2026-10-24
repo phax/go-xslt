@@ -88,6 +88,32 @@ func (st *SimpleType) atomicEqual(a, b string) bool {
 	return ok && c == 0
 }
 
+// listEnumMatch reports whether the list value items equals one of the
+// enumerated lists item by item in the value space of the ATOMIC item type
+// (any other item type keeps the lexical comparison of the caller).
+func (f *facetSet) listEnumMatch(items []string, item *SimpleType) bool {
+	if item == nil || item.variety != vAtomic {
+		return false
+	}
+	for _, e := range f.enumeration {
+		ev := xmlFields(e)
+		if len(ev) != len(items) {
+			continue
+		}
+		eq := true
+		for i := range ev {
+			if ev[i] != items[i] && !item.atomicEqual(ev[i], items[i]) {
+				eq = false
+				break
+			}
+		}
+		if eq {
+			return true
+		}
+	}
+	return false
+}
+
 // check validates an already-whiteSpace-processed value.
 // xmlFields splits a list value on XML whitespace ONLY (space/tab/CR/LF).
 // strings.Fields would also split on Unicode spaces like U+000C, NEL, and
@@ -122,7 +148,15 @@ func (st *SimpleType) checkIn(v string, at *xmltree.Node) error {
 				return err
 			}
 			if err := s.facets.checkPatternEnumIn(v, xpath.XSstring, at); err != nil {
-				return err
+				// The patterns passed (they are checked first); the
+				// enumeration compares VALUES — "Two lists A and B are equal
+				// if and only if they have the same length and their items
+				// are pairwise equal" (Datatypes §2.2.3) — so "01 2" is the
+				// enumerated "1 2" of an xs:int list.
+				if e, ok := err.(*Error); !ok || e.Code != "cvc-enumeration-valid" ||
+					!s.facets.listEnumMatch(items, st.item) {
+					return err
+				}
 			}
 			if len(s.assertions) > 0 {
 				hasAsserts = true

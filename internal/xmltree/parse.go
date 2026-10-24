@@ -341,9 +341,10 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	src = normalizeAttrWhitespace(src)
 	lines := newLinePos(src)
 	var ents map[string]string
+	var recursiveEnts map[string]bool
 	if hasDTD {
 		var err error
-		ents, err = documentEntities(src, baseDir, files)
+		ents, recursiveEnts, err = documentEntitiesRec(src, baseDir, files)
 		if err != nil {
 			return nil, err
 		}
@@ -510,7 +511,16 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 		}
 		if err != nil {
 			line, col := lines.at(tz.pos)
-			return nil, &ParseError{Line: line, Col: col, Msg: err.Error()}
+			msg := err.Error()
+			// A reference to an entity dropped as recursive fails in the
+			// tokenizer like an undeclared one; name the real reason.
+			if i := strings.Index(msg, "invalid character entity &"); i >= 0 && len(recursiveEnts) > 0 {
+				name := strings.TrimSuffix(msg[i+len("invalid character entity &"):], ";")
+				if recursiveEnts[name] {
+					msg = "recursive reference to entity &" + name + "; (WFC: No Recursion)"
+				}
+			}
+			return nil, &ParseError{Line: line, Col: col, Msg: msg}
 		}
 		line, col := lines.at(startOff)
 		top := stack[len(stack)-1]
@@ -701,6 +711,22 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 		return nil, &ParseError{Msg: "unexpected end of document: unclosed elements"}
 	}
 	closeChildren(doc)
+	// XML 1.0 §2.1 [1]: document ::= prolog element Misc* — a root element,
+	// and no character data beside it (white space there was dropped above).
+	// More than one root element is still accepted: callers parse external
+	// parsed entities (multi-root catalogs) through this entry point.
+	hasRoot := false
+	for _, ch := range doc.Children {
+		switch ch.Kind {
+		case KindElement:
+			hasRoot = true
+		case KindText:
+			return nil, &ParseError{Line: int(ch.Line), Col: int(ch.Col), Msg: "character data outside the root element"}
+		}
+	}
+	if !hasRoot {
+		return nil, &ParseError{Msg: "no root element"}
+	}
 	assignOrder(doc)
 	if len(entSpans) > 0 {
 		// Only an external-parsed-entity document needs the reverse (line,col)

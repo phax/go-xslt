@@ -121,7 +121,7 @@ func (rc *restrictionChecker) particleRestrictsOK(r, b *particle) bool {
 	// = {ε} ∪ L(R{min:1}) and ε ∈ L(B) — so R fits iff its min:1 twin does
 	// (particlesHa161, addB118; in 1.0 the same pairs stay invalid under the
 	// clause tables — Ha162 pins that).
-	if rc.sch != nil && rc.sch.version == Version11 && r.min == 0 && emptiable(b) {
+	if r != nil && rc.sch != nil && rc.sch.version == Version11 && r.min == 0 && emptiable(b) {
 		r1 := *r
 		r1.min = 1
 		if rc.particleRestrictsOKRaw(&r1, b) {
@@ -210,14 +210,16 @@ func (rc *restrictionChecker) particleRestrictsOKRaw(r, b *particle) bool {
 			if occ && rc.groupRestrictsGroup(rt, bt) {
 				return true
 			}
-			// XSD 1.1 subsumption, choice over an all: L(choice) = ∪ L(branch),
-			// so a 1..1 choice fits iff EVERY branch restricts the whole base
-			// all on its own (all231/232 valid; all233.n's a{1,8} branch still
-			// fails; the route stays out of 1.0 — particlesHb009). Gated on
-			// exact 1..1 occurs: a repeating choice concatenates branch picks
-			// and cannot be decomposed per branch.
+			// XSD 1.1 subsumption, choice over an all or a sequence: L(choice)
+			// = ∪ L(branch), so a 1..1 choice fits iff EVERY branch restricts
+			// the whole base group on its own (all231/232 valid; all233.n's
+			// a{1,8} branch still fails; choice(a,b) restricts seq(a?,b?) by
+			// §3.4.6.4's language inclusion; the route stays out of 1.0 —
+			// particlesHb009, where the case table forbids choice:seq). Gated
+			// on exact 1..1 occurs: a repeating choice concatenates branch
+			// picks and cannot be decomposed per branch.
 			if rc.sch != nil && rc.sch.version == Version11 &&
-				rt.compositor == cChoice && bt.compositor == cAll &&
+				rt.compositor == cChoice && (bt.compositor == cAll || bt.compositor == cSeq) &&
 				r.min == 1 && r.max == 1 && len(rt.particles) > 0 {
 				ok := true
 				for _, br := range rt.particles {

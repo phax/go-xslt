@@ -66,7 +66,7 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 				return eng.callUserFunc(fd, args, env)
 			}
 		}
-		if fd, ok := eng.sheet.functions[funcKey(uri, local, len(args))]; ok {
+		if fd, ok := eng.sheet.funcFor(env.el, funcKey(uri, local, len(args))); ok {
 			if eng.sheet.hiddenRef(env.el, "function#"+clark(uri, local)+"#"+itoa(len(args))) {
 				return nil, false, nil // hidden by the used package: undeclared here (XPST0017)
 			}
@@ -801,7 +801,13 @@ func (eng *engine) callUserFunc(fd *FuncDef, args []xpath.Object, env *evalEnv) 
 	// to be running in (mode-1401).
 	savedMode := eng.curMode
 	eng.curMode = ""
+	// The current template rule is cleared inside xsl:function (XSLT 3.0
+	// §6.8), so xsl:next-match / xsl:apply-imports in a function body is
+	// XTDE0560 rather than a continuation of the caller's rule.
+	savedApply := eng.applyStack
+	eng.applyStack = nil
 	result, confident, err := eng.evalFuncBody(fd, r)
+	eng.applyStack = savedApply
 	eng.curMode = savedMode
 	eng.regexGroups = savedGroups
 	if err != nil {

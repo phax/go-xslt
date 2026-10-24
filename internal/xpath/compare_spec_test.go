@@ -50,6 +50,13 @@ func TestCaValueComparison(t *testing.T) {
 		{expr: "xs:yearMonthDuration('P0M') eq xs:dayTimeDuration('PT0S')", want: "true"},
 		{expr: "xs:duration('P1Y') eq xs:yearMonthDuration('P12M')", want: "true"},
 		{expr: "xs:yearMonthDuration('P12M') eq xs:dayTimeDuration('P365D')", want: "false"},
+		// op:duration-equal (F&O 3.1 §8.2.5): months and seconds compared
+		// separately, never folded into one another.
+		{expr: "xs:duration('P1M') eq xs:duration('PT2629746S')", want: "false"},
+		{expr: "xs:duration('P1M') ne xs:duration('PT2629746S')", want: "true"},
+		{expr: "xs:yearMonthDuration('P1M') = xs:dayTimeDuration('PT2629746S')", want: "false"},
+		{expr: "count(distinct-values((xs:duration('P1M'), xs:duration('PT2629746S'))))", want: "2"},
+		{expr: "xs:duration('P1M1D') eq xs:duration('P1MT24H')", want: "true"},
 		{expr: "xs:duration('P1Y') lt xs:duration('P2Y')", code: "XPTY0004"},
 		{expr: "xs:yearMonthDuration('P1Y') lt xs:dayTimeDuration('P1D')", code: "XPTY0004"},
 		{expr: "xs:dayTimeDuration('P1D') eq 'P1D'", code: "XPTY0004"},

@@ -336,7 +336,7 @@ func contextItemPattern(e Expr) (*PathExpr, bool) {
 	if _, ok := e.(*ContextItemExpr); !ok {
 		return nil, false
 	}
-	return &PathExpr{predPattern: len(preds) > 0, Steps: []*Step{{
+	return &PathExpr{predPattern: len(preds) > 0, dotPattern: len(preds) == 0, Steps: []*Step{{
 		Axis:  "self",
 		Test:  NodeTest{Kind: testNode},
 		Preds: preds,
@@ -730,14 +730,44 @@ func (p *Pattern) DefaultPriority() float64 {
 			best, first = pr, false
 		}
 	}
-	if len(p.exprAlts) > 0 && (first || best < 0.5) {
-		// Expression-based patterns default to priority 0.5.
-		best, first = 0.5, false
+	for _, ex := range p.exprAlts {
+		pr := exprPatternDefaultPriority(ex)
+		if first || pr > best {
+			best, first = pr, false
+		}
 	}
 	if first {
 		return 0
 	}
 	return best
+}
+
+// exprPatternDefaultPriority is the default priority of an expression-based
+// pattern alternative: 0.5, except that an IntersectExceptExprP takes "that
+// of the first PathExprP" (XSLT 3.0 §6.5), so "a except b" ranks like "a".
+func exprPatternDefaultPriority(ex Expr) float64 {
+	ie, ok := ex.(*IntersectExceptExpr)
+	if !ok {
+		return 0.5
+	}
+	first := ie.L
+	for {
+		l, ok := first.(*IntersectExceptExpr)
+		if !ok {
+			break
+		}
+		first = l.L
+	}
+	pe, ok := first.(*PathExpr)
+	if !ok || pe.Start != nil {
+		return 0.5
+	}
+	for _, st := range pe.Steps {
+		if st.Postfix != nil {
+			return 0.5 // a parenthesized operand: no specific form applies
+		}
+	}
+	return pathDefaultPriority(pe)
 }
 
 func pathDefaultPriority(pe *PathExpr) float64 {
@@ -748,6 +778,11 @@ func pathDefaultPriority(pe *PathExpr) float64 {
 		// carries (match-131: it must rank between explicit priorities
 		// 0.999999 and 1.0000001; match-132: one and two predicates tie).
 		return 1
+	}
+	if pe.dotPattern {
+		// XSLT 3.0 §6.5: a PredicatePattern's priority is 1 "unless the
+		// PredicateListXP30 is empty, in which case the priority is -1".
+		return -1
 	}
 	if pe.Start != nil {
 		// A pattern with a leading primary expression (IdKeyPattern, $var,

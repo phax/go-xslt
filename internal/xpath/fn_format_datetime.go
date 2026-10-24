@@ -269,6 +269,9 @@ func formatComponent(at *Atomic, tm time.Time, marker string, opts *dtOptions) (
 		wd := (int(tm.Weekday()) + 6) % 7 // Go Sunday=0 → ISO Monday=1
 		num = wd + 1
 		name = weekdays[wd]
+		if mod == "" {
+			mod = "n" // F&O 3.1 §9.8.4.1: the default presentation of F is n (a lower-case name)
+		}
 	case 'H':
 		num = tm.Hour()
 	case 'h':
@@ -419,6 +422,14 @@ func presentNumberOrName(comp rune, num int, name, mod string, wmin, wmax int, o
 			}
 			s = string([]rune(s)[:cut])
 		}
+		// §9.8.4.3: "If FN is shorter than the minimum width, then it is
+		// padded by appending spaces to the end of the name." That section
+		// covers the integer-valued components only ("specifically M D d F
+		// W w H h m s"), so of the named ones M and F — not the am/pm
+		// marker P ([PNn,3-3] stays "Am": date-064).
+		if comp == 'M' || comp == 'F' {
+			s = padRightSpaces(s, wmin)
+		}
 		return s, nil
 	case mod == "I" || mod == "i":
 		if num > 0 {
@@ -458,8 +469,11 @@ func presentNumberOrName(comp rune, num int, name, mod string, wmin, wmax int, o
 		a = -a
 	}
 	s := strconv.Itoa(a)
-	if max > 0 && len(s) > max {
-		s = s[len(s)-max:] // truncate to low-order digits ([Y01] → last two)
+	// Only the year is cut to its low-order digits (§9.8.4.4, [Y01] → last
+	// two); for every other numeric component "The maximum width, if
+	// specified, is ignored" (§9.8.4.3: [D,1-1] of day 31 is 31).
+	if comp == 'Y' && max > 0 && len(s) > max {
+		s = s[len(s)-max:]
 	}
 	if len(s) < min {
 		s = strings.Repeat("0", min-len(s)) + s

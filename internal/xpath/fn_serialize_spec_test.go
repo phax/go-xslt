@@ -84,7 +84,6 @@ func TestSerializeJSONMethodErrorCodes(t *testing.T) {
 func TestSerializeJSONControlEscape(t *testing.T) {
 	// Serialization 3.1 §9: "any other codepoint in the range 1-31 or 127-159
 	// [is replaced] by an escape in the form \uHHHH".
-	t.Skip("BUG: the JSON output method emits U+007F..U+009F unescaped")
 	jsnRun(t, "", nil, []jsnCase{
 		{`upper-case(serialize(codepoints-to-string((127,128,159)), map{'method':'json'}))`, `"\U007F\U0080\U009F"`},
 	})
@@ -153,10 +152,15 @@ func TestSerializeAdaptiveAtomicForms(t *testing.T) {
 	// converting the value to a string using the fn:string function"; "An
 	// atomic value of any other type is serialized using the syntax of a
 	// constructor function: xs:TYPE("VAL")".
-	t.Skip("BUG: adaptive method writes xs:decimal('5') as 5.0 and xs:date as its bare lexical form")
 	jsnRun(t, "", nil, []jsnCase{
 		{`serialize(xs:decimal('5'), map{'method':'adaptive'})`, `5`},
 		{`serialize(xs:date('2015-07-17'), map{'method':'adaptive'})`, `xs:date("2015-07-17")`},
+		{`serialize(xs:decimal('1.50'), map{'method':'adaptive'})`, `1.5`},
+		{`serialize(xs:byte(3), map{'method':'adaptive'})`, `3`},
+		{`serialize(xs:float(1), map{'method':'adaptive'})`, `xs:float("1")`},
+		{`serialize(xs:yearMonthDuration('P1Y2M'), map{'method':'adaptive'})`, `xs:duration("P1Y2M")`},
+		{`serialize(xs:dateTimeStamp('2011-07-28T12:34:56-08:00'), map{'method':'adaptive'})`, `xs:dateTime("2011-07-28T12:34:56-08:00")`},
+		{`serialize(xs:hexBinary('0a'), map{'method':'adaptive'})`, `xs:hexBinary("0A")`},
 	})
 }
 
@@ -246,7 +250,6 @@ func TestSerializeArrayFlattening(t *testing.T) {
 	// Serialization 3.1 §2: "Each item in the sequence that is an array is
 	// flattened by calling the function array:flatten() before being
 	// copied."
-	t.Skip("BUG: fn:serialize with the xml/text method rejects an array (SENR0001) instead of flattening it")
 	jsnRun(t, "", nil, []jsnCase{
 		{`serialize([1, [2, 3]])`, `1 2 3`},
 		{`serialize(['a', 'b'], map{'method':'text'})`, `a b`},

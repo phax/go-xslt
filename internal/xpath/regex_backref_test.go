@@ -122,9 +122,12 @@ func TestRxBackrefMatching(t *testing.T) {
 // TestRxBackrefDotAll: under 's' the '.' matches every character, #xA
 // included (F&O 3.1 §5.6.2), also in a pattern that uses a back-reference.
 func TestRxBackrefDotAll(t *testing.T) {
-	t.Skip("BUG: with a back-reference the 's' flag is ignored — the matcher's '.' leaf is compiled without dot-all, so it never matches #xA")
 	rxRun(t, []rxCase{
 		{`matches(codepoints-to-string((10, 10)), '^(.)\1$', 's')`, "true"},
+		// '.' stays a wildcard under 's', not a literal full stop.
+		{`matches('qq', '^(.)\1$', 's')`, "true"},
+		{`matches('qr', '^(.)\1$', 's')`, "false"},
+		{`matches('..', '^(.)\1$', 's')`, "true"},
 	})
 }
 
@@ -150,7 +153,6 @@ func TestRxBackrefMultiDigit(t *testing.T) {
 // back-reference" (F&O 3.1 §5.6.1.4) — group 10 opens after "\10" here, so
 // it is \1 followed by the literal '0'.
 func TestRxBackrefMultiDigitOpenAfter(t *testing.T) {
-	t.Skip("BUG: the digit run is resolved against every group in the pattern, so \\10 picks group 10 (opening after the reference) and fails with FORX0002")
 	rxRun(t, []rxCase{
 		{`matches('abcdefghia0j', '^(a)(b)(c)(d)(e)(f)(g)(h)(i)\10(j)$')`, "true"},
 	})

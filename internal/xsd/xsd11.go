@@ -401,12 +401,18 @@ func (s *Schema) selectAlternativeType(decl *ElementDecl, el *xmltree.Node) (Typ
 	// CTA tests see the element's INHERITED attributes too (§3.4.4.1 —
 	// cta0009/cta0014: @type declared inheritable on an ancestor); asserts do
 	// not, so the merged view exists only here.
+	// The test sees E's attributes "but not its [children]": in the copy,
+	// "The [children] property is modified to have the empty list as its
+	// value" (Part 1 §3.12.4 clause 1.1.2/1.2), so test="a" is false even
+	// when E has an <a> child. (The parent is kept: the element's in-scope
+	// namespaces are resolved through it.)
+	cp := *el
+	cp.CloneExt()
+	cp.Children = nil
 	if inh := s.inheritedAttrs(el); len(inh) > 0 {
-		cp := *el
-		cp.CloneExt()
 		cp.Attrs = append(append([]*xmltree.Node{}, el.Attrs...), inh...)
-		el = &cp
 	}
+	el = &cp
 	for _, alt := range decl.alternatives {
 		if alt.test == nil {
 			return alt.typ, nil // default alternative

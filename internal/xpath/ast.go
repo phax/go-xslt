@@ -49,6 +49,10 @@ type PathExpr struct {
 	// It exists only so the XSLT default-priority table can give that pattern
 	// its own value; it is never set by ordinary expression parsing.
 	predPattern bool
+	// dotPattern marks the same synthetic path built for a bare "." pattern
+	// (a PredicatePattern with an empty predicate list), whose default
+	// priority is -1 (XSLT 3.0 §6.5). Never set by expression parsing.
+	dotPattern bool
 }
 
 // FilterExpr is a primary expression with trailing predicates.

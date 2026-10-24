@@ -76,8 +76,8 @@ type brParser struct {
 	// fn-matches-37/38).
 	closed map[int]bool
 	// total is the number of capturing groups in the WHOLE pattern, counted
-	// up front: F&O resolves "\NN" to the largest group number the pattern
-	// has, independently of where the reference appears.
+	// up front: a single digit naming no group at all is reported as such.
+	// A multi-digit "\NN" additionally needs group NN opened before it.
 	total int
 }
 
@@ -231,6 +231,12 @@ func (p *brParser) parseAtom() (brNode, error) {
 		return p.leaf(string(p.src[start:end]))
 	case '\\':
 		return p.parseEscape()
+	case '.':
+		// Outside dot-all the translator already wrote '.' as [^\n\r], so a
+		// bare '.' only survives under 's', where it matches every character
+		// (F&O 3.1 §5.6.2) — it is a wildcard, not a literal '.'.
+		p.pos++
+		return p.leaf(`(?s:.)`)
 	case ')':
 		return nil, fmt.Errorf("err:FORX0002: unbalanced ')' in regular expression")
 	case '*', '+', '?':
@@ -297,8 +303,8 @@ func (p *brParser) parseEscape() (brNode, error) {
 	n := p.src[p.pos+1]
 	if n >= '1' && n <= '9' {
 		// A back-reference. The digit run is resolved greedily against the
-		// groups closed SO FAR — "\11" is group 11 when that group is already
-		// closed, else group 1 followed by a literal '1'.
+		// groups OPENED so far — "\11" is group 11 when that group's '(' is
+		// already behind, else group 1 followed by a literal '1'.
 		j := p.pos + 1
 		for j < len(p.src) && p.src[j] >= '0' && p.src[j] <= '9' {
 			j++
@@ -311,7 +317,10 @@ func (p *brParser) parseEscape() (brNode, error) {
 			if err != nil {
 				break
 			}
-			if v >= 1 && v <= p.total {
+			// A further digit joins the reference only if group NN's opening
+			// parenthesis precedes it (F&O 3.1 §5.6.1.4); p.ngroup counts
+			// the groups opened so far.
+			if v >= 1 && v <= p.total && (n == 1 || v <= p.ngroup) {
 				num, k = v, n
 				break
 			}

@@ -117,7 +117,6 @@ func TestRxClassSubtraction(t *testing.T) {
 // single-character escape denotes that character (XSD Part 2 §G.4.2.4,
 // seRange ::= charOrEsc '-' charOrEsc), so [\t-\r] is #x9..#xD.
 func TestRxClassSubtractionEscapedRangeEnd(t *testing.T) {
-	t.Skip("BUG: parseClassRanges reads an escaped range endpoint as the escape letter, so [\\t-\\r-[\\n]] covers #x9..'r' and matches 'a'")
 	rxRunRunes(t, []rxRuneCase{
 		{`[\t-\r-[\n]]`, '\t', true},
 		{`[\t-\r-[\n]]`, '\r', true},
@@ -130,7 +129,6 @@ func TestRxClassSubtractionEscapedRangeEnd(t *testing.T) {
 // NameStartChar and NameChar, XSD Part 2 §G.4.2.5) are valid operands of a
 // subtraction too.
 func TestRxClassSubtractionComplementEscapes(t *testing.T) {
-	t.Skip("BUG: a subtraction whose base is \\I or \\C matches nothing at all ([\\I-[a]] rejects '1' and '-')")
 	rxRunRunes(t, []rxRuneCase{
 		{`[\I-[a]]`, '1', true},
 		{`[\I-[a]]`, '-', true},

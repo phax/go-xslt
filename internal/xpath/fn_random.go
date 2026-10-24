@@ -54,10 +54,12 @@ func makeRNG(seed uint64) *Map {
 	m := NewMap()
 	m.Put(NewString("number"), NewDouble(unitFloat(r)))
 	next := seed + 0x9e3779b97f4a7c15
-	m.Put(NewString("next"), &Function{Arity: 0, Name: "next", Call: func(_ []Object) (Object, error) {
+	// next and permute are anonymous functions: "name: absent" (F&O 3.1
+	// §4.9.1), so fn:function-name returns () for them.
+	m.Put(NewString("next"), &Function{Arity: 0, Call: func(_ []Object) (Object, error) {
 		return makeRNG(next), nil
 	}})
-	m.Put(NewString("permute"), &Function{Arity: 1, Name: "permute", Call: func(a []Object) (Object, error) {
+	m.Put(NewString("permute"), &Function{Arity: 1, Call: func(a []Object) (Object, error) {
 		items := append([]Item(nil), Items(arg(a, 0))...)
 		// Fisher–Yates using a PRNG stream seeded from this generator.
 		state := seed

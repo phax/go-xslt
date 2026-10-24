@@ -103,16 +103,25 @@ func TestNumberSpecLevels(t *testing.T) {
 	})
 }
 
+// §12.2: an omitted @count matches nodes of the same kind as the selected
+// node and, if it has an expanded QName, the same expanded QName.
+func TestNumberSpecDefaultCount(t *testing.T) {
+	specRunAll(t, "", []specCase{
+		// An attribute matches itself; it has no preceding siblings.
+		{name: "attribute", src: `<r a="1" b="2"/>`, want: "1", sheet: `<xsl:template match="/"><xsl:for-each select="/r/@b"><xsl:number/></xsl:for-each></xsl:template>`},
+		{name: "attribute level any", src: `<r a="1" b="2"><s b="3"/></r>`, want: "1", sheet: `<xsl:template match="/"><xsl:for-each select="//s/@b"><xsl:number level="any"/></xsl:for-each></xsl:template>`},
+		// A processing instruction counts only those with its own name.
+		{name: "pi", src: `<r><?p?><?q?><?p?></r>`, want: "2", sheet: `<xsl:template match="/"><xsl:for-each select="/r/processing-instruction('p')[2]"><xsl:number/></xsl:for-each></xsl:template>`},
+		{name: "pi level any", src: `<r><?p?><x><?q?></x><?p?></r>`, want: "2", sheet: `<xsl:template match="/"><xsl:for-each select="/r/processing-instruction('p')[2]"><xsl:number level="any"/></xsl:for-each></xsl:template>`},
+	})
+}
+
 // Behaviour that disagrees with the REC; kept as skipped tests naming the bug.
 func TestNumberSpecKnownBugs(t *testing.T) {
 	cases := []struct {
 		bug string
 		c   specCase
 	}{
-		{"BUG: xsl:number on an attribute with default @count yields \"\", §12.2 counts the attribute itself (1)",
-			specCase{name: "attribute", src: `<r a="1" b="2"/>`, want: "1", sheet: `<xsl:template match="/"><xsl:for-each select="/r/@b"><xsl:number/></xsl:for-each></xsl:template>`}},
-		{"BUG: default @count for a processing instruction ignores its name (same kind AND expanded name, §12.2)",
-			specCase{name: "pi", src: `<r><?p?><?q?><?p?></r>`, want: "2", sheet: `<xsl:template match="/"><xsl:for-each select="/r/processing-instruction('p')[2]"><xsl:number/></xsl:for-each></xsl:template>`}},
 		{"BUG: invalid start-at AVT value has no error code, XTDE0030 expected",
 			specCase{name: "start-at", code: "XTDE0030", sheet: `<xsl:template match="/"><xsl:number value="1" start-at="{'x'}"/></xsl:template>`}},
 		{"BUG: an invalid AVT-valued @lang raises XTTE0990; XTDE0030 is the code for an invalid AVT value (the W3C case number-0826 expects it too)",
