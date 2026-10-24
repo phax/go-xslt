@@ -325,9 +325,6 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	}
 	src = normalizeAttrWhitespace(src)
 	lines := newLinePos(src)
-	dec := xml.NewDecoder(strings.NewReader(downgradeXMLVersion(src)))
-	dec.Strict = true
-	dec.CharsetReader = charsetReader
 	ents, err := documentEntities(src, baseDir, files)
 	if err != nil {
 		return nil, err
@@ -337,7 +334,7 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	if limit := expansionLimit(inputLen); len(ents) > 0 && entityRefVolume(src[doctypeEnd(src):], ents, limit) > limit {
 		return nil, errEntityExpansion(limit)
 	}
-	dec.Entity = ents
+	tz := newTokenizer(downgradeXMLVersion(src), ents)
 	idKinds := idAttrKinds(src)
 	attrDefaults := attlistDefaults(src)
 	elemOnly := elementOnlyDecls(src, baseDir, files)
@@ -385,16 +382,12 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 		"":    "",
 	}}
 	// rawNames holds each open element's name AS WRITTEN (prefix in Space),
-	// for the end-tag check RawToken leaves to its caller.
+	// for the end-tag check the tokenizer leaves to its caller.
 	var rawNames []xml.Name
-	// nameIntern dedupes element Local/Prefix strings across the document: the
-	// decoder hands back a freshly allocated string for every single tag, but
-	// a structured document typically has only a handful of DISTINCT element
-	// names repeated many thousands of times (a UBL invoice's cac:InvoiceLine,
-	// cbc:ID, ...). Scoped to this one parse, not a package-level table —
-	// each parse gets its own, so there's no cross-document retention and no
-	// concurrency concern.
-	nameIntern := make(map[string]string)
+	// Element and attribute names are not interned (they were, while every
+	// tag's name was a fresh string from encoding/xml): the tokenizer hands
+	// them out as substrings of the source, which cost nothing, and the map
+	// lookups cost ~4% of a whole identity transform.
 	// preserveSpace mirrors stack 1:1 (one entry per open element, plus the
 	// document-level seed): xml:space="preserve" on an element forces true
 	// for it and every descendant until overridden; any other explicit
@@ -425,16 +418,25 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	// flush; whitespace-only runs (the indentation between elements, the bulk
 	// of a pretty-printed document's text nodes) are interned so identical
 	// "\n    " runs share one backing string.
+	// A run that is a single token taken verbatim from the source (no
+	// reference, no CR — by far the common case) stays that substring
+	// (pendingStr, pendingIsStr) and is never copied at all.
 	var pendingBuf []byte
 	wsRuns := map[string]string{}
-	var pendingOpen bool
+	var pendingOpen, pendingIsStr bool
+	var pendingStr string
 	var pendingLine, pendingCol int
 	flushPending := func() {
 		if !pendingOpen {
 			return
 		}
 		pendingOpen = false
-		s := internText(&pendingBuf, wsRuns)
+		var s string
+		if pendingIsStr {
+			s, pendingStr, pendingIsStr = pendingStr, "", false
+		} else {
+			s = internText(&pendingBuf, wsRuns)
+		}
 		top := stack[len(stack)-1]
 		// Whitespace outside the document element (prolog/epilog "Misc") is
 		// not character data in the infoset: a document node has no
@@ -470,40 +472,33 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	}
 
 	for {
-		startOff := dec.InputOffset()
-		// RawToken rather than Token: Token resolves every name to its
-		// namespace URI and discards the prefix the author wrote, so a copied
-		// element could only ever be given SOME prefix bound to its URI —
-		// <Part> under xmlns="some1" plus xmlns:ns1="some1" came out as
-		// ns1:Part (copy-4901), and two prefixes sharing one URI collapsed
-		// into one (output-0138). The namespace frame stack below already
-		// does the resolution; Token's other two services — end-tag matching
-		// and no autoclose (Strict) — are re-established here.
-		tok, err := dec.RawToken()
+		startOff := tz.pos
+		// The tokenizer reports names as written (the prefix in Space), like
+		// encoding/xml's RawToken and unlike its Token: Token resolves every
+		// name to its namespace URI and discards the prefix the author wrote,
+		// so a copied element could only ever be given SOME prefix bound to
+		// its URI — <Part> under xmlns="some1" plus xmlns:ns1="some1" came
+		// out as ns1:Part (copy-4901), and two prefixes sharing one URI
+		// collapsed into one (output-0138). The namespace frame stack below
+		// does the resolution, and end tags are matched here.
+		kind, err := tz.next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			line, col := lines.at(int(dec.InputOffset()))
+			line, col := lines.at(tz.pos)
 			return nil, &ParseError{Line: line, Col: col, Msg: err.Error()}
 		}
-		line, col := lines.at(int(startOff))
+		line, col := lines.at(startOff)
 		top := stack[len(stack)-1]
 
-		switch t := tok.(type) {
-		case xml.StartElement:
+		switch kind {
+		case tokStart:
+			t := xml.StartElement{Name: tz.name, Attr: tz.attrs}
 			// A new child starting is a run boundary: any pending text run
 			// belongs to the PARENT (top, before this element is pushed) and
 			// must close now, not merge with anything that follows.
 			flushPending()
-			// Intern the tag's own name before anything retains it: Local and
-			// the written prefix (Space, in RawToken's naming) both end up
-			// stored verbatim into the element's Name by resolveRawName below,
-			// and interning here is what makes every occurrence of the same
-			// name across the document share one backing byte array instead
-			// of each tag paying for its own copy.
-			t.Name.Local = intern(nameIntern, t.Name.Local)
-			t.Name.Space = intern(nameIntern, t.Name.Space)
 			// Build this element's namespace frame from the parent's, applying
 			// its own xmlns decls if any — but most elements in a real document
 			// declare none, so cloning the parent's map unconditionally (the
@@ -558,10 +553,6 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				if a.Name.Space == "xmlns" || (a.Name.Space == "" && a.Name.Local == "xmlns") {
 					continue
 				}
-				// Attribute names repeat across the document exactly like
-				// element names do; intern them the same way.
-				a.Name.Local = intern(nameIntern, a.Name.Local)
-				a.Name.Space = intern(nameIntern, a.Name.Space)
 				an := newNode()
 				*an = Node{
 					Kind:  KindAttribute,
@@ -628,7 +619,8 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 			}
 			preserveSpace = append(preserveSpace, preserve)
 
-		case xml.EndElement:
+		case tokEnd:
+			t := xml.EndElement{Name: tz.name}
 			// The closing element's own pending text run must close before
 			// it does — flushPending reads stack's CURRENT top, so this must
 			// run before stack/preserveSpace are popped below.
@@ -645,27 +637,39 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 			nsStack = nsStack[:len(nsStack)-1]
 			preserveSpace = preserveSpace[:len(preserveSpace)-1]
 
-		case xml.CharData:
+		case tokText:
 			// Accumulate; the decision of whether/how this becomes a Node is
 			// deferred to flushPending, called at the next run boundary (see
 			// its own doc comment on pendingText above for why eagerly
 			// deciding per-token would be wrong).
-			if !pendingOpen {
+			switch {
+			case !pendingOpen && tz.raw:
+				pendingOpen, pendingIsStr, pendingStr = true, true, tz.str
+				pendingLine, pendingCol = line, col
+				continue
+			case !pendingOpen:
 				pendingOpen = true
 				pendingLine, pendingCol = line, col
+			case pendingIsStr: // a second token: the run moves to the buffer
+				pendingBuf = append(pendingBuf, pendingStr...)
+				pendingStr, pendingIsStr = "", false
 			}
-			pendingBuf = append(pendingBuf, t...)
+			if tz.raw {
+				pendingBuf = append(pendingBuf, tz.str...)
+			} else {
+				pendingBuf = append(pendingBuf, tz.textBytes()...)
+			}
 
-		case xml.Comment:
+		case tokComment:
 			flushPending()
-			addChild(top, &Node{Kind: KindComment, Value: string(t), Line: int32(line), Col: int32(col)})
+			addChild(top, &Node{Kind: KindComment, Value: tz.str, Line: int32(line), Col: int32(col)})
 
-		case xml.ProcInst:
+		case tokPI:
 			flushPending()
-			if t.Target == "xml" {
+			if tz.target == "xml" {
 				continue // XML declaration, not a PI node
 			}
-			addChild(top, &Node{Kind: KindPI, Name: Name{Local: t.Target}, Value: string(t.Inst), Line: int32(line), Col: int32(col)})
+			addChild(top, &Node{Kind: KindPI, Name: Name{Local: tz.target}, Value: tz.str, Line: int32(line), Col: int32(col)})
 		}
 	}
 	flushPending()

@@ -38,8 +38,15 @@ dragging in the GUI's Wails/CGo dependencies:
   serializes that element out of the source with its inherited namespaces;
   `href="#id"` only; the harness maps `defines-stylesheet="true"` to it). The `engine/` re-export, GUI, and tests depend only on this;
   rewrite anything behind it freely.
-- `internal/xmltree` — own XML node tree (parser on `encoding/xml`), document
-  order, line/col, and a serializer for xml/html/text (`serialize.go`, plus an
+- `internal/xmltree` — own XML node tree, document order, line/col. The
+  parser (`parse.go`) runs on its own string tokenizer (`tokenizer.go`): a
+  step-for-step reimplementation of `encoding/xml`'s `RawToken` (same tokens,
+  offsets, accept/reject and error text — `FuzzTokenizer` and
+  `TestTokenizerMatchesEncodingXMLOnSuites` diff it against encoding/xml,
+  `TestXMLConf` records the W3C XML suite's verdicts) that hands out
+  substrings of the source instead of copies. Change it only together with
+  those gates; where encoding/xml is laxer than XML 1.0, it stays as lax.
+  Also a serializer for xml/html/text (`serialize.go`, plus an
   `io.Writer`-based `WriteTo`/`ChunkWriter` for bounded-memory output);
   `stream.go` is the incremental pull-reader behind XSLT streaming (pull-style
   over `xml.Decoder.RawToken()`, builds ordinary `*Node`s one record at a
