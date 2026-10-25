@@ -1550,6 +1550,13 @@ type engine struct {
 	bcScopes map[*xmltree.Node]bool
 	// patCtx is the minimal match Context of staticMatchCtx.
 	patCtx *xpath.Context
+	// selBufs holds spare node lists for staticSelect, taken and given back
+	// around one xsl:apply-templates (see execApplyTemplates).
+	selBufs []xpath.NodeSet
+	// nodes hands out the nodes xsl:copy builds, lists the room for their
+	// attributes and children (nodeList).
+	nodes xmltree.NodeAlloc
+	lists []*xmltree.Node
 	// accApplicable restricts, per document root, the accumulators
 	// applicable to that tree (XSLT 3.0 §18.2.4): the Clark names listed by
 	// the xsl:source-document / xsl:merge-source use-accumulators attribute
@@ -2810,10 +2817,15 @@ func (eng *engine) execInstrRaw(in instruction, r rt, out *xmltree.Node) error {
 		// silent "" that the general lenient ToString/joinSeq machinery
 		// (shared with attribute/simple-content construction elsewhere)
 		// otherwise produces (maps-907).
-		for _, it := range xpath.Flatten(xpath.Items(v)) {
-			switch it.(type) {
-			case *xpath.Map, *xpath.Function:
-				return errAt(n.el, "err:FOTY0013: xsl:value-of cannot compute the string value of a map or function item")
+		switch v.(type) {
+		case string, float64, bool, *xpath.Atomic:
+			// One atomic value: nothing to flatten, nothing to reject.
+		default:
+			for _, it := range xpath.Flatten(xpath.Items(v)) {
+				switch it.(type) {
+				case *xpath.Map, *xpath.Function:
+					return errAt(n.el, "err:FOTY0013: xsl:value-of cannot compute the string value of a map or function item")
+				}
 			}
 		}
 		// XSLT 1.0 backwards-compatible processing: xsl:value-of/@select
@@ -3166,9 +3178,28 @@ func (eng *engine) forEachItems(n *forEach, items []xpath.Item, out *xmltree.Nod
 }
 
 func (eng *engine) execApplyTemplates(n *applyTemplates, r rt, out *xmltree.Node) error {
-	var nodes xpath.NodeSet
-	if ns, ok := eng.staticSelect(n.sel, n.el, r); ok {
-		nodes = ns
+	var nodes, buf xpath.NodeSet
+	if k := len(eng.selBufs); k > 0 && len(n.sorts) == 0 {
+		buf, eng.selBufs = eng.selBufs[k-1], eng.selBufs[:k-1]
+	}
+	static, isStatic := eng.staticSelect(n.sel, n.el, r, buf)
+	if isStatic && len(n.sorts) == 0 {
+		// Unsorted, the list a static select builds lives exactly as long as
+		// this instruction — applyToNodes only walks it, and the templates it
+		// invokes see a position and a size, never the list — so it is built
+		// in a spare one, cleared and kept for the next (one allocation per
+		// apply-templates was the largest malloc count of an identity
+		// transform).
+		err := eng.applyToNodes(static, eng.resolveMode(n.mode), out, n.params, r)
+		clear(static)
+		eng.selBufs = append(eng.selBufs, static[:0])
+		return err
+	}
+	if buf != nil {
+		eng.selBufs = append(eng.selBufs, buf)
+	}
+	if isStatic {
+		nodes = static
 	} else if n.sel != nil {
 		v, err := eng.eval(n.sel, n.el, r)
 		if err != nil {
@@ -3206,7 +3237,9 @@ func (eng *engine) execApplyTemplates(n *applyTemplates, r rt, out *xmltree.Node
 // exactly as evalWith takes it), and cannot fail; and it steps aside whenever
 // eval would answer differently for reasons of its own — the recursion guard
 // about to trip, or an error already pending for eval to surface.
-func (eng *engine) staticSelect(p *xpath.Parsed, el *xmltree.Node, r rt) (xpath.NodeSet, bool) {
+//
+// The list is built in buf's array when that has room (buf must be unused).
+func (eng *engine) staticSelect(p *xpath.Parsed, el *xmltree.Node, r rt, buf xpath.NodeSet) (xpath.NodeSet, bool) {
 	if p == nil || r.node == nil || eng.pendingErr != nil {
 		return nil, false
 	}
@@ -3220,7 +3253,7 @@ func (eng *engine) staticSelect(p *xpath.Parsed, el *xmltree.Node, r rt) (xpath.
 	if eng.sheet.hasXPathDefaultNS {
 		dns = xpathDefaultNSWalk(el)
 	}
-	return p.EvalStaticStepUnion(r.node, eng.staticMatchCtx(dns))
+	return p.EvalStaticStepUnionInto(r.node, eng.staticMatchCtx(dns), buf)
 }
 
 // itemsAsNodes models a general sequence as the node list apply-templates
@@ -3982,7 +4015,14 @@ func (eng *engine) copyNodeInstr(n *copyInstr, node *xmltree.Node, r rt, out *xm
 	}
 	switch node.Kind {
 	case xmltree.KindElement:
-		el := xmltree.NewElement(node.Name)
+		// The copy's nodes come from the run's slabs (eng.nodes): a result
+		// tree is built and dropped as a whole, like a parsed one.
+		el := eng.nodes.New()
+		el.Kind, el.Name = xmltree.KindElement, node.Name
+		// Room for as many attributes and children as the original has (what
+		// an identity-style body copies), carved from a shared slab.
+		el.Attrs = eng.nodeList(len(node.Attrs))
+		el.Children = eng.nodeList(len(node.Children))
 		for _, ns := range copiedNamespaceNodes(node) {
 			ns.Parent = el
 			el.AddNS(ns)
@@ -4026,7 +4066,9 @@ func (eng *engine) copyNodeInstr(n *copyInstr, node *xmltree.Node, r rt, out *xm
 			appendAtomicText(out, node.Value)
 			return nil
 		}
-		out.Append(xmltree.NewText(node.Value))
+		t := eng.nodes.New()
+		t.Kind, t.Value = xmltree.KindText, node.Value
+		out.Append(t)
 	case xmltree.KindAttribute:
 		// An attribute copied after non-attribute/non-namespace content has
 		// already been added to the current element is XTDE0410 (copy-4701:
@@ -4035,7 +4077,7 @@ func (eng *engine) copyNodeInstr(n *copyInstr, node *xmltree.Node, r rt, out *xm
 		if out.Kind == xmltree.KindElement && len(out.Children) > 0 {
 			return errAt(n.el, "err:XTDE0410: cannot copy an attribute after non-attribute content")
 		}
-		cp := appendAttrItem(out, node.Name, node.Value)
+		cp := appendAttrItemFrom(&eng.nodes, out, node.Name, node.Value)
 		// §24.4.1.1, preserve: "Where the node being copied is an attribute,
 		// the copied attribute will retain its type annotation". appendAttrItem
 		// builds a fresh node from name+value, so the annotation has to be
@@ -4939,6 +4981,33 @@ func appendAttrItem(out *xmltree.Node, name xmltree.Name, value string) *xmltree
 	return out.SetAttr(attrFixupName(out, name), value)
 }
 
+// nodeList returns an empty node list with room for k nodes (nil for none):
+// small ones are carved from a shared slab, capacity exactly k, so appending
+// past it reallocates just as it would from make.
+func (eng *engine) nodeList(k int) []*xmltree.Node {
+	switch {
+	case k == 0:
+		return nil
+	case k > 32:
+		return make([]*xmltree.Node, 0, k)
+	}
+	if cap(eng.lists) < k {
+		eng.lists = make([]*xmltree.Node, 0, 512)
+	}
+	s := eng.lists[:0:k]
+	eng.lists = eng.lists[k:cap(eng.lists)]
+	return s
+}
+
+// appendAttrItemFrom is appendAttrItem taking a new attribute node of an
+// element from alloc.
+func appendAttrItemFrom(alloc *xmltree.NodeAlloc, out *xmltree.Node, name xmltree.Name, value string) *xmltree.Node {
+	if out.NoAtomicMerge() || (out.Kind == xmltree.KindDocument && out.KeepDocItems()) {
+		return appendAttrItem(out, name, value)
+	}
+	return out.SetAttrFrom(alloc, attrFixupName(out, name), value)
+}
+
 // attrFixupName applies XSLT namespace fixup (§5.7.3) to an attribute being
 // added to a constructed element: when its prefix is already bound on that
 // element to a DIFFERENT namespace URI, the attribute gets a fresh prefix so
@@ -5574,8 +5643,8 @@ func (eng *engine) sortKeyValue(sk sortKey, outerEl *xmltree.Node, ctx rt) (xpat
 		// of a multi-item sort key instead of raising XTTE1020
 		// (backwards-012: select="(-., 'banana')" sorts by -POSITION alone).
 		if eng.bc10At(sk.el) {
-			if items := xpath.Items(v); len(items) > 1 {
-				v = xpath.FromItems(items[:1])
+			if xpath.ItemCount(v) > 1 {
+				v = xpath.FromItems(xpath.Items(v)[:1])
 			}
 		}
 		return v, xpath.ToString(v), nil

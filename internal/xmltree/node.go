@@ -72,17 +72,12 @@ type Node struct {
 	order     int32 // document order, assigned during parse/build
 	Line, Col int32
 
-	Name     Name
-	Value    string
-	Parent   *Node
-	Children []*Node
-	Attrs    []*Node // attribute nodes
-
-	// extPtr holds every rarely-used field (see nodeext.go) behind one
-	// lazily allocated pointer — nil for a node that never sets any of them.
-	// Accessed through the ext()/Field()/SetField() methods in nodeext.go,
-	// never directly (kept unexported so nothing outside this package can).
-	extPtr *nodeExt
+	// The fields almost every visit of a node reads — its kind, document
+	// order (order, tree), the side-struct pointer behind SynthCtx/RealItem/
+	// NSDecls, its parent and name — come first, together: a node is 152
+	// bytes, more than two cache lines, and a walk over a large tree (or a
+	// sorted node list, which visits it in no memory order at all) pays a
+	// miss for every line of a node it touches.
 
 	// tree identifies the tree the node was numbered in: a creation-ordered
 	// stamp every node of one parse/AssignOrder walk shares (0 = never
@@ -91,6 +86,18 @@ type Node struct {
 	// (evaluate-002: $settings1 | $settings2 sorts the earlier-built tree
 	// first), where comparing the per-tree order indices interleaved them.
 	tree uint64
+
+	// extPtr holds every rarely-used field (see nodeext.go) behind one
+	// lazily allocated pointer — nil for a node that never sets any of them.
+	// Accessed through the ext()/Field()/SetField() methods in nodeext.go,
+	// never directly (kept unexported so nothing outside this package can).
+	extPtr *nodeExt
+
+	Parent   *Node
+	Name     Name
+	Value    string
+	Children []*Node
+	Attrs    []*Node // attribute nodes
 }
 
 // DTD attribute-type kinds for Node.IDKind.
@@ -347,6 +354,13 @@ func (n *Node) StringValue() string {
 	case KindPI:
 		return n.Value
 	case KindElement, KindDocument:
+		if len(n.Children) == 1 {
+			// One text child (the common leaf element): its value is the
+			// string value, as appendText would copy it.
+			if c := n.Children[0]; c.Kind == KindText && c.RealItem() == nil {
+				return c.Value
+			}
+		}
 		var b []byte
 		b = appendText(b, n)
 		return string(b)

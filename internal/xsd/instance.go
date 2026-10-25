@@ -1650,8 +1650,24 @@ func isNilled(el *xmltree.Node) bool {
 	return ok && (v == "true" || v == "1")
 }
 
+// childElements returns el's element children, in order. The result is
+// read-only (validateChildren copies it before probing a child
+// out, see pinned): when every child is an element it is el.Children itself,
+// capped so an append could not write into it; otherwise one exact-size copy.
 func childElements(el *xmltree.Node) []*xmltree.Node {
-	var out []*xmltree.Node
+	n := 0
+	for _, ch := range el.Children {
+		if ch.Kind == xmltree.KindElement {
+			n++
+		}
+	}
+	switch n {
+	case 0:
+		return nil
+	case len(el.Children):
+		return el.Children[:n:n]
+	}
+	out := make([]*xmltree.Node, 0, n)
 	for _, ch := range el.Children {
 		if ch.Kind == xmltree.KindElement {
 			out = append(out, ch)
@@ -1679,6 +1695,9 @@ func hasNonWSText(el *xmltree.Node) bool {
 }
 
 func elementText(el *xmltree.Node) string {
+	if len(el.Children) == 1 && el.Children[0].Kind == xmltree.KindText {
+		return el.Children[0].Value // the common leaf: no copy needed
+	}
 	var b strings.Builder
 	for _, ch := range el.Children {
 		if ch.Kind == xmltree.KindText {

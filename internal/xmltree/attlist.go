@@ -145,6 +145,7 @@ func scanElementOnlyDecls(sub string, out map[string]bool) {
 type attlistDefault struct {
 	value string
 	fixed bool // #FIXED "value" vs a plain default "value" (both supply value; unused here beyond documentation)
+	seq   int  // declaration order within the element, so defaults are added in it
 }
 
 // attlistDefaults scans the DOCTYPE internal subset for <!ATTLIST> declared
@@ -281,11 +282,30 @@ func withNSDefaults(attrs []xml.Attr, defaults map[string]attlistDefault) []xml.
 	return out
 }
 
+// The first declaration of an attribute is binding (XML 1.0 §3.3: "the first
+// declaration is binding and later declarations are ignored").
 func recordAttlistDefault(out map[string]map[string]attlistDefault, elem, attr string, d attlistDefault) {
 	if out[elem] == nil {
 		out[elem] = map[string]attlistDefault{}
 	}
+	if _, seen := out[elem][attr]; seen {
+		return
+	}
+	d.seq = len(out[elem])
 	out[elem][attr] = d
+}
+
+// defaultNames returns the attribute names of an element's defaults in
+// declaration order. Ranging over the map directly gave the defaulted
+// attributes a different order from one parse of the same document to the
+// next, and with it different serialized output.
+func defaultNames(defaults map[string]attlistDefault) []string {
+	names := make([]string, 0, len(defaults))
+	for name := range defaults {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool { return defaults[names[i]].seq < defaults[names[j]].seq })
+	return names
 }
 
 // unquoteAttlist strips a '...'/"..." literal's quotes, reporting ok=false for

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("<?xml encoding=\"EUC-JP\"?><a>\xa4\x90\x93\xa2<!0>")

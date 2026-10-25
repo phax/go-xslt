@@ -725,12 +725,12 @@ func fnConcat(c *Context, a []Object) (Object, error) {
 		// Each argument is xs:anyAtomicType?: a plural sequence is XPTY0004
 		// (K2-ConcatFunc-1..3), a map or function item cannot be atomized
 		// (fn-concat-18: FOTY0013), and an array atomizes to its members.
-		items := Items(x)
-		if len(items) > 1 {
-			return nil, fmt.Errorf("err:XPTY0004: concat: argument is a sequence of %d items", len(items))
+		n := itemCount(x)
+		if n > 1 {
+			return nil, fmt.Errorf("err:XPTY0004: concat: argument is a sequence of %d items", n)
 		}
-		if len(items) == 1 {
-			switch v := items[0].(type) {
+		if n == 1 {
+			switch v := itemAt(x, 0).(type) {
 			case *Array:
 				atoms, err := Atomize(v)
 				if err != nil {

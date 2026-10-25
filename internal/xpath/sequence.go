@@ -20,6 +20,43 @@ type Sequence []Item
 // Item is a single member of a sequence.
 type Item = any
 
+// itemCount is len(Items(o)), and itemAt(o, i) is Items(o)[i], without
+// building the slice — for the hot callers that look at one or two items of
+// what is mostly a single value.
+func itemCount(o Object) int {
+	switch v := o.(type) {
+	case nil:
+		return 0
+	case Sequence:
+		return len(v)
+	case NodeSet:
+		return len(v)
+	default:
+		return 1
+	}
+}
+
+// ItemCount is len(Items(o)) without building the slice.
+func ItemCount(o Object) int { return itemCount(o) }
+
+func itemAt(o Object, i int) Item {
+	switch v := o.(type) {
+	case Sequence:
+		return v[i]
+	case NodeSet:
+		// As Items: a carrier node unwraps to the item it stands for.
+		if n := v[i]; n != nil && n.RealItem() != nil {
+			return n.RealItem()
+		}
+		return v[i]
+	default:
+		if i != 0 {
+			panic("itemAt: index out of range")
+		}
+		return v
+	}
+}
+
 // Items flattens any Object into a slice of items.
 func Items(o Object) []Item {
 	switch v := o.(type) {

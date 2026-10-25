@@ -445,7 +445,8 @@ func (s *StreamReader) startElement(t xml.StartElement) *Node {
 		el.Attrs = append(el.Attrs, an)
 	}
 	if defaults := s.attrDefaults[t.Name.Local]; len(defaults) > 0 {
-		for name, d := range defaults {
+		for _, name := range defaultNames(defaults) {
+			d := defaults[name]
 			if isNSDecl(name) {
 				continue
 			}

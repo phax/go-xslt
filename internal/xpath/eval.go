@@ -317,10 +317,10 @@ func firstItem(o Object) Item {
 // silently fall through to an always-true effective-boolean-value test
 // (format-date-en-013/014).
 func asPositionalInt(o Object) (int, bool) {
-	items := Items(o)
-	if len(items) != 1 {
+	if itemCount(o) != 1 {
 		return 0, false
 	}
+	item := itemAt(o, 0)
 	// "If the value of the predicate expression is a singleton ATOMIC VALUE
 	// of a numeric type ... otherwise the effective boolean value"
 	// (XPath 3.1 §3.3.3). A NODE is not an atomic value, however its typed
@@ -331,13 +331,19 @@ func asPositionalInt(o Object) (int, bool) {
 	// @b as xs:integer, $d[self::node()] silently became "position() eq 8"
 	// (import-schema-026/027/028). The same trap reaches a SynthCtx wrapper
 	// node standing for an atomic for-each item.
-	if _, isNode := items[0].(*xmltree.Node); isNode {
+	if _, isNode := item.(*xmltree.Node); isNode {
 		return 0, false
 	}
 	// Bare Go scalars still reach here as items (the engine's XPath-1.0-era
 	// representation of a number), so atomize the single non-node item rather
-	// than requiring an *Atomic outright.
-	a, err := toAtomic(items[0])
+	// than requiring an *Atomic outright. A bare boolean or string (the
+	// value of most predicates) would atomize to a non-numeric value: no
+	// need to build it.
+	switch item.(type) {
+	case bool, string:
+		return 0, false
+	}
+	a, err := toAtomic(item)
 	if err != nil || !a.IsNumeric() {
 		return 0, false
 	}
@@ -1470,9 +1476,18 @@ func unionStep(e Expr) *Step {
 // treat specially (no context node, an atomic one, a PatternTop, the
 // nesting limit its two nested evalExpr calls would reach).
 func evalStepUnion(ls, rs *Step, ctx *Context) (Object, error) {
+	return evalStepUnionInto(ls, rs, ctx, nil)
+}
+
+// evalStepUnionInto is evalStepUnion building its result in buf's array when
+// that has room for every candidate.
+func evalStepUnionInto(ls, rs *Step, ctx *Context, buf NodeSet) (Object, error) {
 	cn := ctx.Node
 	lc, rc := axisNodes(ls.Axis, cn), axisNodes(rs.Axis, cn)
-	u := make(NodeSet, 0, len(lc)+len(rc))
+	u := buf[:0]
+	if cap(u) < len(lc)+len(rc) {
+		u = make(NodeSet, 0, len(lc)+len(rc))
+	}
 	var pc prefixCache
 	u, err := appendMatches(u, lc, ls, ctx, &pc)
 	if err != nil {
@@ -1514,12 +1529,18 @@ func staticStepUnion(e Expr) (ls, rs *Step, ok bool) {
 // nothing but that DefaultElemNS; its Node is set for the call and cleared
 // again. ok is false, and nothing evaluated, when p is not of that shape.
 func (p *Parsed) EvalStaticStepUnion(n *xmltree.Node, scratch *Context) (NodeSet, bool) {
+	return p.EvalStaticStepUnionInto(n, scratch, nil)
+}
+
+// EvalStaticStepUnionInto is EvalStaticStepUnion building the result in
+// buf's array when that has room; buf's contents are overwritten.
+func (p *Parsed) EvalStaticStepUnionInto(n *xmltree.Node, scratch *Context, buf NodeSet) (NodeSet, bool) {
 	ls, rs, ok := staticStepUnion(p.root)
 	if !ok || n == nil || n.SynthCtx() {
 		return nil, false
 	}
 	scratch.Node = n
-	v, err := evalStepUnion(ls, rs, scratch)
+	v, err := evalStepUnionInto(ls, rs, scratch, buf)
 	scratch.Node = nil
 	if err != nil {
 		return nil, false

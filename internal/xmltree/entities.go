@@ -281,7 +281,7 @@ func scanEntityDecls(text string, ents map[string]string) {
 // accompanying system literal is used, matching how browsers/processors
 // commonly fall back for a PUBLIC id they don't otherwise recognize.
 func externalDTDSystemID(src string) (string, bool) {
-	d := strings.Index(src, "<!DOCTYPE")
+	d := indexDoctype(src)
 	if d < 0 {
 		return "", false
 	}
@@ -517,11 +517,28 @@ func substituteEntities(s string, ents map[string]string, max int) (out string, 
 	return b.String(), hit, true
 }
 
+// indexDoctype is strings.Index(src, "<!DOCTYPE"). It looks for the '!'
+// rather than the '<': in markup '<' is everywhere, which keeps the generic
+// search stopping at false starts, while '!' is rare.
+func indexDoctype(src string) int {
+	for off := 0; ; {
+		i := strings.IndexByte(src[off:], '!')
+		if i < 0 {
+			return -1
+		}
+		i += off
+		if i > 0 && src[i-1] == '<' && strings.HasPrefix(src[i+1:], "DOCTYPE") {
+			return i - 1
+		}
+		off = i + 1
+	}
+}
+
 // internalSubset returns the text between the '[' and matching ']' of a DOCTYPE
 // declaration, skipping over comments and quoted strings so a ']' inside either
 // does not end the subset early.
 func internalSubset(src string) (string, bool) {
-	d := strings.Index(src, "<!DOCTYPE")
+	d := indexDoctype(src)
 	if d < 0 {
 		return "", false
 	}
@@ -768,7 +785,7 @@ type entitySpan struct {
 // doctypeEnd returns the index just past a document's DOCTYPE declaration
 // (0 when there is none), so entity expansion never touches the DTD itself.
 func doctypeEnd(src string) int {
-	d := strings.Index(src, "<!DOCTYPE")
+	d := indexDoctype(src)
 	if d < 0 {
 		return 0
 	}

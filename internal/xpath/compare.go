@@ -677,9 +677,11 @@ func generalComparisonBC10(op string, l, r Object) (Object, error) {
 	if rn, ok := ToNodeSet(r); ok && bc10ObjIsBoolean(l) {
 		return bc10BoolCompare(bc10FlipOp(op), len(rn) > 0, ToBool(l)), nil
 	}
-	for _, li := range Items(l) {
-		for _, ri := range Items(r) {
-			if bc10ItemCompare(op, li, ri) {
+	nl, nr := itemCount(l), itemCount(r)
+	for i := 0; i < nl; i++ {
+		li := itemAt(l, i)
+		for j := 0; j < nr; j++ {
+			if bc10ItemCompare(op, li, itemAt(r, j)) {
 				return true, nil
 			}
 		}
@@ -691,11 +693,10 @@ func generalComparisonBC10(op string, l, r Object) (Object, error) {
 // first-item classification, matching every other conversion in this file)
 // is boolean-kind.
 func bc10ObjIsBoolean(o Object) bool {
-	items := Items(o)
-	if len(items) == 0 {
+	if itemCount(o) == 0 {
 		return false
 	}
-	return bc10ItemKind(items[0]) == "bool"
+	return bc10ItemKind(itemAt(o, 0)) == "bool"
 }
 
 // bc10ItemCompare implements the XPath 1.0 rule table (§3.4) for one pair of

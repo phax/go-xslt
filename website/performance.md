@@ -11,12 +11,12 @@ Apple M4, macOS, libxml2 2.9.13 / libxslt 1.1.35; input 200,000 records,
 
 | Workload | go-xslt | libxslt / libxml2 | ratio | peak memory go-xslt | peak memory libxml2 |
 |---|---|---|---|---|---|
-| copy the whole document | 0.60 s | 0.74 s | 0.81× | 1,108 MB | 1,067 MB |
-| recursive apply-templates, rebuilding every node | 1.13 s | 1.33 s | 0.85× | 1,180 MB | 1,074 MB |
-| sort all records by two keys, text output | 0.77 s | 20.89 s * | — | 822 MB | 587 MB |
-| Muenchian grouping with `xsl:key` | 0.71 s | 0.91 s | 0.78× | 845 MB | 538 MB |
-| predicates, string and number functions | 0.62 s | 0.87 s | 0.72× | 778 MB | 590 MB |
-| XSD 1.0 validation | 0.60 s | 0.53 s | 1.13× | 622 MB | 539 MB |
+| copy the whole document | 0.43 s | 0.69 s | 0.62× | 1,106 MB | 1,067 MB |
+| recursive apply-templates, rebuilding every node | 0.84 s | 1.23 s | 0.68× | 1,134 MB | 1,074 MB |
+| sort all records by two keys, text output | 0.54 s | 18.66 s * | — | 761 MB | 587 MB |
+| Muenchian grouping with `xsl:key` | 0.51 s | 0.87 s | 0.59× | 784 MB | 538 MB |
+| predicates, string and number functions | 0.44 s | 0.83 s | 0.53× | 712 MB | 590 MB |
+| XSD 1.0 validation | 0.42 s | 0.51 s | 0.81× | 593 MB | 539 MB |
 
 \* Not a sorting measurement. Almost all of libxslt's time here goes into
 building the 5.6 MB text output: the libxslt 1.1.35 that macOS ships appends
@@ -31,9 +31,8 @@ ratios are what carries over.
 
 ## Reading the numbers
 
-- go-xslt is faster than the C libraries at copying, template rules,
-  grouping and XPath, and about 1.1 times slower at validation. It needs
-  somewhat more memory for the document tree.
+- go-xslt is faster than the C libraries on every workload both can run,
+  validation included. It needs somewhat more memory for the document tree.
 - The comparison is limited to what both can do. go-xslt also implements
   XSLT 3.0, XPath 3.1 and XSD 1.1, which libxslt and libxml2 do not.
 - For documents too large for memory, XSLT 3.0
@@ -45,7 +44,7 @@ ratios are what carries over.
 
 ## Where the time goes
 
-Four rounds of profiling and measurement brought go-xslt from 1.5–4.5 times
+Five rounds of profiling and measurement brought go-xslt from 1.5–4.5 times
 libxslt's time to where it is now:
 
 - reusing evaluation contexts (per predicate, key walk, template match and
@@ -60,7 +59,11 @@ libxslt's time to where it is now:
   allocations per template call, and serializing without building strings;
 - matching simple patterns such as `node()` and `@*` without a full
   evaluation context, keeping `defer` out of the hottest functions, and a
-  faster sort where the result is provably the same.
+  faster sort where the result is provably the same;
+- normalizing whitespace in attribute values only where an attribute value
+  actually contains a tab or line break, writing parsed nodes straight into
+  their blocks, numbering document order while parsing, and building
+  copies from per-run blocks.
 
 An earlier version of this page put a third of the time into the operating
 system's memory calls. That came from the CPU profiler on macOS, which books

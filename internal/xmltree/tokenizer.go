@@ -55,6 +55,8 @@ type tokenizer struct {
 	target string     // tokPI
 
 	buf []byte
+	// nameASCII: the name the last successful readName took is all ASCII.
+	nameASCII bool
 }
 
 type tokKind uint8
@@ -755,6 +757,15 @@ func (t *tokenizer) nameStr() (string, bool) {
 		return "", false
 	}
 	s := t.s[start:t.pos]
+	// readName took only name bytes; when they were all ASCII, isXMLName's
+	// verdict comes down to the first one.
+	if t.nameASCII {
+		if c := s[0]; c == '-' || c == '.' || '0' <= c && c <= '9' {
+			t.err = t.syntaxError("invalid XML name: " + s)
+			return "", false
+		}
+		return s, true
+	}
 	if !isXMLName(s) {
 		t.err = t.syntaxError("invalid XML name: " + s)
 		return "", false
@@ -773,9 +784,13 @@ func (t *tokenizer) readName() bool {
 		t.ungetc()
 		return false
 	}
+	ascii := b < utf8.RuneSelf
 	for p := t.pos; p < len(t.s); p++ {
-		if c := t.s[p]; c < utf8.RuneSelf && !nameByte[c] {
+		if c := t.s[p]; c >= utf8.RuneSelf {
+			ascii = false
+		} else if !nameByte[c] {
 			t.pos = p
+			t.nameASCII = ascii
 			return true
 		}
 	}

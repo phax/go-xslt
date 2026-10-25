@@ -31,17 +31,18 @@ type NodeSet []*xmltree.Node
 // QName/date/duration/binary/map/array/function — raise err:FORG0006
 // (boolean-004../K-QuantExprWithout-28).
 func EffectiveBoolErr(o Object) (bool, error) {
-	items := Items(o)
-	if len(items) == 0 {
+	n := itemCount(o)
+	if n == 0 {
 		return false, nil
 	}
-	if _, isNode := items[0].(*xmltree.Node); isNode {
+	first := itemAt(o, 0)
+	if _, isNode := first.(*xmltree.Node); isNode {
 		return true, nil
 	}
-	if len(items) > 1 {
-		return false, fmt.Errorf("err:FORG0006: effective boolean value of a %d-item sequence", len(items))
+	if n > 1 {
+		return false, fmt.Errorf("err:FORG0006: effective boolean value of a %d-item sequence", n)
 	}
-	switch v := items[0].(type) {
+	switch v := first.(type) {
 	case bool:
 		return v, nil
 	case string:

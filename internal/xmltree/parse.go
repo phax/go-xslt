@@ -2,6 +2,7 @@ package xmltree
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"github.com/tim-riep/go-xslt/internal/fileuri"
 	"github.com/tim-riep/go-xslt/internal/fsaccess"
@@ -66,6 +67,9 @@ func downgradeXMLVersion(src string) string {
 const MaxDepth = 10000
 
 var errTooDeep = fmt.Errorf("elements nested more than %d levels deep (implementation limit)", MaxDepth)
+
+// errLazyAttrNorm makes parseRaw redo a parse the eager way (see parseDecoded).
+var errLazyAttrNorm = errors.New("attribute whitespace: parse again eagerly")
 
 // Parse parses an XML document into a tree. The returned node is a Document
 // node whose single element child is the root element. XML 1.1 documents are
@@ -311,6 +315,35 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	// the root element, which then rides through the transform into the result
 	// (conflict-resolution-1701: a BOM-prefixed source document).
 	src = decodeBOM(src)
+	doc, err := parseDecoded(src, baseDir, files, strip, false)
+	if err != nil && indexDoctype(src) < 0 {
+		// The lazy run (see parseDecoded) failed: parse again exactly the old
+		// way, attribute whitespace normalized up front, so an error — its
+		// message, line and column — cannot depend on how far that run got.
+		doc, err = parseDecoded(src, baseDir, files, strip, true)
+	}
+	return doc, err
+}
+
+// parseDecoded is parseRaw after the byte-order mark. With eager, or with a
+// DOCTYPE, the attribute whitespace pre-pass (normalizeAttrWhitespace) runs
+// over the whole source first, as it always did. Otherwise it is deferred:
+// the pre-pass changes only tab/LF/CR bytes inside the quoted values of what
+// it sees as tags, so as long as no start tag so far had such a byte in an
+// attribute value (checked on the tokenizer's value, which has one wherever
+// the source did — references and line-end handling never turn one into
+// anything else) and no directive came by (the one construct the pre-pass
+// and the tokenizer delimit differently), the pre-pass would have changed
+// nothing before the current token. At the first start tag or directive that
+// breaks this, the source from that token on is normalized — the pre-pass
+// starts afresh at every '<' it reaches outside a construct, so normalizing
+// the suffix there gives exactly the suffix of normalizing the whole — and
+// the token is read again from the normalized source. The common document,
+// with no such attribute value anywhere, is never pre-scanned at all. Any
+// error makes parseRaw redo the parse eagerly — and so does a document the
+// tokenizer re-reads in a declared encoding other than UTF-8 (its offsets
+// are then not src's), through errLazyAttrNorm.
+func parseDecoded(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook, eager bool) (*Node, error) {
 	// Undeclaring a prefix (xmlns:p="") is legal only in XML 1.1 (Namespaces
 	// 1.1); in a 1.0 document it breaks the Namespaces 1.0 constraint "No
 	// Prefix Undeclaring" (addB139: such a schema document is no schema).
@@ -328,7 +361,7 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	// expandExternalEntities, which changes nothing without a DOCTYPE, nor
 	// normalizeAttrWhitespace, which only turns tab/LF/CR bytes into spaces,
 	// can make a "<!DOCTYPE" appear or disappear.)
-	hasDTD := strings.Contains(src, "<!DOCTYPE")
+	hasDTD := indexDoctype(src) >= 0
 	inputLen := len(src)
 	var entSpans []entitySpan
 	if hasDTD {
@@ -338,7 +371,10 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 			return nil, err
 		}
 	}
-	src = normalizeAttrWhitespace(src)
+	lazyAttrNorm := !eager && !hasDTD
+	if !lazyAttrNorm {
+		src = normalizeAttrWhitespace(src)
+	}
 	lines := newLinePos(src)
 	var ents map[string]string
 	var recursiveEnts map[string]bool
@@ -359,6 +395,22 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	var attrDefaults map[string]map[string]attlistDefault
 	var elemOnly map[string]bool
 	doc := &Node{Kind: KindDocument}
+	// Nodes are numbered in document order as they are made — an element,
+	// then its namespace nodes, its attributes, then its content, exactly
+	// assignOrder's walk — instead of by that walk over the finished tree,
+	// which visited every node a second time. With a DTD, defaulted
+	// attributes join an element after the fact, so assignOrder still
+	// renumbers that tree at the end.
+	var orderSeq int32
+	var treeID uint64
+	if !hasDTD {
+		treeID = atomic.AddUint64(&treeSeq, 1)
+	}
+	stamp := func(n *Node) {
+		n.order, n.tree = orderSeq, treeID
+		orderSeq++
+	}
+	stamp(doc)
 	if hasDTD {
 		idKinds = idAttrKinds(src)
 		attrDefaults = attlistDefaults(src)
@@ -371,15 +423,32 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	// Nodes are carved from slabs rather than allocated one by one: a parsed
 	// tree lives and dies as a whole, so individual collectability buys
 	// nothing, while one allocation per node was ~a third of the parser's
-	// malloc count. 186 nodes fill a 32 KB allocator size class exactly.
+	// malloc count. 215 nodes (152 bytes each) all but fill the 32 KB size class.
 	var slab []Node
 	newNode := func() *Node {
 		if len(slab) == 0 {
-			slab = make([]Node, 186)
+			slab = make([]Node, 215)
 		}
 		n := &slab[0]
 		slab = slab[1:]
 		return n
+	}
+	// Children and attribute slices are carved from slabs too (len <= cap
+	// == the exact size, so an append beyond it reallocates exactly as it
+	// would from a make of that size): most elements have one to a few
+	// children or attributes, and their own allocation each was more than
+	// half of the parser's remaining malloc count. Large ones get their own.
+	var ptrSlab []*Node
+	ptrSlice := func(n int) []*Node {
+		if n > 64 {
+			return make([]*Node, n)
+		}
+		if len(ptrSlab) < n {
+			ptrSlab = make([]*Node, 1024)
+		}
+		s := ptrSlab[:n:n]
+		ptrSlab = ptrSlab[n:]
+		return s
 	}
 	// Children are collected on one shared stack (childBuf; marks[i] is where
 	// stack[i]'s children start) and copied into an exact-size slice when the
@@ -395,7 +464,7 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 		m := marks[len(marks)-1]
 		marks = marks[:len(marks)-1]
 		if n := len(childBuf) - m; n > 0 {
-			parent.Children = make([]*Node, n)
+			parent.Children = ptrSlice(n)
 			copy(parent.Children, childBuf[m:])
 			childBuf = childBuf[:m]
 		}
@@ -490,8 +559,13 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				return
 			}
 		}
+		// Slab nodes are fresh zeroed memory, so setting the fields one by
+		// one is the same as assigning a composite literal — without the
+		// whole-struct copy (and its bulk write barrier while the GC runs)
+		// that the literal compiles to.
 		tn := newNode()
-		*tn = Node{Kind: KindText, Value: s, Line: int32(pendingLine), Col: int32(pendingCol)}
+		tn.Kind, tn.Value, tn.Line, tn.Col = KindText, s, int32(pendingLine), int32(pendingCol)
+		stamp(tn)
 		addChild(top, tn)
 	}
 
@@ -521,6 +595,21 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				}
 			}
 			return nil, &ParseError{Line: line, Col: col, Msg: msg}
+		}
+		if lazyAttrNorm && (kind == tokDirective || kind == tokStart && attrsHaveTabOrNewline(tz.attrs)) {
+			// See parseDecoded: from here on, the source is the normalized one.
+			// Unless the tokenizer no longer reads src itself — an encoding
+			// declaration other than UTF-8 makes it re-read the rest decoded,
+			// so its offsets are not src's: then the eager parse decides.
+			if tz.s != downgradeXMLVersion(src) {
+				return nil, errLazyAttrNorm
+			}
+			lazyAttrNorm = false
+			src = src[:startOff] + normalizeAttrWhitespace(src[startOff:])
+			lines.src = src
+			tz.s = downgradeXMLVersion(src)
+			tz.pos, tz.err, tz.needClose = startOff, nil, false
+			continue
 		}
 		line, col := lines.at(startOff)
 		top := stack[len(stack)-1]
@@ -569,30 +658,24 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				frame[local] = a.Value
 				decls = append(decls, &Node{Kind: KindNamespace, Name: Name{Local: local}, Value: a.Value})
 			}
-			el := newNode()
-			*el = Node{
-				Kind: KindElement,
-				Name: resolveRawName(frame, t.Name, false),
-				Line: int32(line), Col: int32(col),
-			}
+			el := newNode() // zeroed: see flushPending
+			el.Kind, el.Name, el.Line, el.Col = KindElement, resolveRawName(frame, t.Name, false), int32(line), int32(col)
 			el.SetNSDecls(decls)
+			stamp(el)
 			for _, d := range decls {
 				d.Parent = el
+				stamp(d)
 			}
 			if n := len(t.Attr) - len(decls); n > 0 {
-				el.Attrs = make([]*Node, 0, n)
+				el.Attrs = ptrSlice(n)[:0]
 			}
 			for _, a := range t.Attr {
 				if a.Name.Space == "xmlns" || (a.Name.Space == "" && a.Name.Local == "xmlns") {
 					continue
 				}
-				an := newNode()
-				*an = Node{
-					Kind:  KindAttribute,
-					Name:  resolveRawName(frame, a.Name, true),
-					Value: a.Value,
-					Line:  int32(line), Col: int32(col),
-				}
+				an := newNode() // zeroed: see flushPending
+				an.Kind, an.Name, an.Value = KindAttribute, resolveRawName(frame, a.Name, true), a.Value
+				an.Line, an.Col = int32(line), int32(col)
 				if m := idKinds[t.Name.Local]; m != nil {
 					if k := m[a.Name.Local]; k != 0 {
 						an.SetIDKind(k)
@@ -600,6 +683,7 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				}
 				normalizeIDAttr(an)
 				an.Parent = el
+				stamp(an)
 				el.Attrs = append(el.Attrs, an)
 			}
 			if defaults := attrDefaults[t.Name.Local]; len(defaults) > 0 {
@@ -607,7 +691,8 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 				// them for any declared attribute absent from the instance —
 				// per the XML infoset, such an attribute IS present with its
 				// declared default, exactly as if the author had typed it.
-				for name, d := range defaults {
+				for _, name := range defaultNames(defaults) {
+					d := defaults[name]
 					if isNSDecl(name) {
 						continue // bound above, not an attribute
 					}
@@ -695,15 +780,25 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 
 		case tokComment:
 			flushPending()
-			addChild(top, &Node{Kind: KindComment, Value: tz.str, Line: int32(line), Col: int32(col)})
+			c := &Node{Kind: KindComment, Value: tz.str, Line: int32(line), Col: int32(col)}
+			stamp(c)
+			addChild(top, c)
 
 		case tokPI:
 			flushPending()
 			if tz.target == "xml" {
 				continue // XML declaration, not a PI node
 			}
-			addChild(top, &Node{Kind: KindPI, Name: Name{Local: tz.target}, Value: tz.str, Line: int32(line), Col: int32(col)})
+			pi := &Node{Kind: KindPI, Name: Name{Local: tz.target}, Value: tz.str, Line: int32(line), Col: int32(col)}
+			stamp(pi)
+			addChild(top, pi)
 		}
+	}
+	if lazyAttrNorm && tz.s != downgradeXMLVersion(src) {
+		// The tokenizer re-read the input in a declared encoding: the
+		// argument of parseDecoded is about src's bytes, so let the eager
+		// parse, which normalizes them before decoding, give the result.
+		return nil, errLazyAttrNorm
 	}
 	flushPending()
 
@@ -727,7 +822,9 @@ func parseRaw(src, baseDir string, files *fsaccess.Guard, strip StripSpaceHook) 
 	if !hasRoot {
 		return nil, &ParseError{Msg: "no root element"}
 	}
-	assignOrder(doc)
+	if hasDTD {
+		assignOrder(doc) // see stamp
+	}
 	if len(entSpans) > 0 {
 		// Only an external-parsed-entity document needs the reverse (line,col)
 		// -> offset lookup applyEntityBases does, so only build its line-start
@@ -768,6 +865,19 @@ func cloneNS(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// attrsHaveTabOrNewline reports whether any attribute value holds a tab, LF
+// or CR — what normalizeAttrWhitespace would have rewritten in the source.
+func attrsHaveTabOrNewline(attrs []xml.Attr) bool {
+	for _, a := range attrs {
+		for i := 0; i < len(a.Value); i++ {
+			if c := a.Value[i]; c == '\t' || c == '\n' || c == '\r' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // normalizeAttrWhitespace applies the XML attribute-value normalization step
@@ -1001,11 +1111,14 @@ func (p *linePos) at(off int) (int, int) {
 		off = len(p.src)
 	}
 	for p.scanned < off {
-		if p.src[p.scanned] == '\n' {
-			p.line++
-			p.lineStart = p.scanned + 1
+		i := strings.IndexByte(p.src[p.scanned:off], '\n')
+		if i < 0 {
+			p.scanned = off
+			break
 		}
-		p.scanned++
+		p.scanned += i + 1
+		p.line++
+		p.lineStart = p.scanned
 	}
 	return p.line, off - p.lineStart + 1
 }

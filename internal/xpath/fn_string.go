@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"github.com/tim-riep/go-xslt/internal/xmltree"
 	"golang.org/x/text/unicode/norm"
@@ -277,15 +278,16 @@ func fnGenerateID(c *Context, a []Object) (Object, error) {
 		}
 		n = c.Node
 	} else {
-		items := Items(arg(a, 0))
-		if len(items) == 0 {
+		v := arg(a, 0)
+		count := itemCount(v)
+		if count == 0 {
 			return NewString(""), nil
 		}
-		nd, ok := items[0].(*xmltree.Node)
+		nd, ok := itemAt(v, 0).(*xmltree.Node)
 		if !ok {
 			return nil, fmt.Errorf("err:XPTY0004: generate-id argument must be a node")
 		}
-		if len(items) > 1 && !(c != nil && c.BC10) {
+		if count > 1 && !(c != nil && c.BC10) {
 			return nil, fmt.Errorf("err:XPTY0004: generate-id argument must be a node")
 		}
 		n = nd
@@ -300,12 +302,20 @@ func fnGenerateID(c *Context, a []Object) (Object, error) {
 	// node's address, stable for the process's lifetime) so generate-id()
 	// stays unique across every tree reachable in one execution, not just
 	// within one.
-	tag := fmt.Sprintf("t%p", n.Root())
+	//
+	// The id is "d", "t" and the root's address as fmt's %p writes it ("0x"
+	// and lowercase hex), "n" and the order — built in one buffer rather
+	// than through Sprintf and three concatenations.
+	var buf [48]byte
+	b := append(buf[:0], "dt0x"...)
+	b = strconv.AppendUint(b, uint64(uintptr(unsafe.Pointer(n.Root()))), 16)
+	b = append(b, 'n')
+	b = strconv.AppendInt(b, int64(n.Order()), 10)
 	if n.Kind == xmltree.KindNamespace {
 		// An in-scope namespace node inherited from an ancestor shares its
 		// element's document-order slot (xmltree.NewInheritedNamespace), so the
 		// prefix is needed to keep IDs unique (generate-id-011).
-		return NewString("d" + tag + "n" + strconv.Itoa(n.Order()) + "ns" + n.Name.Local), nil
+		b = append(append(b, "ns"...), n.Name.Local...)
 	}
-	return NewString("d" + tag + "n" + strconv.Itoa(n.Order())), nil
+	return NewString(string(b)), nil
 }
