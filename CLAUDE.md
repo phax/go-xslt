@@ -127,6 +127,12 @@ dragging in the GUI's Wails/CGo dependencies:
   `xs:attribute` (use, else declaration) and are all reported (`attributes.go`).
   **Gotcha**: `Compile` returns `ErrUnsupported` (not a verdict) for anything
   beyond what's implemented — keep that discipline so the pass rate stays honest.
+  A compiled simple type never reaches itself: `visitST` rejects a named
+  cycle through a restriction/list (and any cycle in 1.1), `compiler.open`
+  catches an inline type naming the enclosing one, and `closeUnion` collapses
+  the pure-union cycle XSD 1.0 tolerates (stE110) to the members that do not
+  lead back — so walks over `members`/`base`/`item` need no visited set
+  (issue #12 was a stack overflow in one of them).
 - `desktop/main.go`, `desktop/xsltservice.go`, `desktop/projectservice.go` —
   Wails app + two bound services: `XsltService` (`RunTransform`/`RunValidate`/
   `RunXPath`, engine-only) and `ProjectService` (project registry/CRUD, file

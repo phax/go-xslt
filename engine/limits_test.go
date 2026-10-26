@@ -90,6 +90,18 @@ func TestNoStackOverflow(t *testing.T) {
 	if r := engine.Validate(engine.ValidateRequest{Schemas: []string{`<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="a"/></xs:schema>`}, Instance: deep}); r.Valid {
 		t.Error("validate: a document nested a million levels deep must be refused")
 	}
+	// A union that lists itself as a member type (issue #12): XSD 1.0 lets it
+	// compile, with the members that do not lead back as its value space.
+	selfUnion := `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="u"><xs:union memberTypes="u xs:int"/></xs:simpleType>
+  <xs:simpleType name="v"><xs:restriction base="u"/></xs:simpleType>
+  <xs:element name="e" type="v"/>
+</xs:schema>`
+	for inst, want := range map[string]bool{"<e>7</e>": true, "<e>x</e>": false} {
+		if r := engine.Validate(engine.ValidateRequest{Schemas: []string{selfUnion}, Instance: inst}); r.Valid != want || len(r.Diagnostics) > 0 && want {
+			t.Errorf("self-member union, %s: valid=%v %+v, want valid=%v", inst, r.Valid, r.Diagnostics, want)
+		}
+	}
 	// Just under the limit still works.
 	ok := strings.Repeat("<a>", 9999) + strings.Repeat("</a>", 9999)
 	if res := engine.Transform(engine.Request{Stylesheet: copyAll, Source: ok}); res.HasErrors() {
