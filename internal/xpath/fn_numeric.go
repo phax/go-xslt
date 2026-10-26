@@ -963,8 +963,13 @@ func init() {
 	mathFuncs["acos"] = math1(math.Acos)
 	mathFuncs["atan"] = math1(math.Atan)
 	mathFuncs["atan2"] = func(c *Context, a []Object) (Object, error) {
-		if numIsEmpty(arg(a, 0)) || numIsEmpty(arg(a, 1)) {
-			return Sequence{}, nil
+		// math:atan2($y as xs:double, $x as xs:double): neither parameter is
+		// optional, so an empty argument is XPTY0004, not an empty result
+		// (F&O 3.1 §4.8.14 — issue #9).
+		for i, name := range []string{"$y", "$x"} {
+			if err := requireOne(a, i, "math:atan2", name); err != nil {
+				return nil, err
+			}
 		}
 		return NewDouble(math.Atan2(ToNumber(arg(a, 0)), ToNumber(arg(a, 1)))), nil
 	}

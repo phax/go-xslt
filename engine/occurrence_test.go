@@ -36,14 +36,24 @@ func TestOperatorAfterOccurrenceIndicator(t *testing.T) {
 		"() instance of xs:integer* and not(() instance of xs:integer+)":  "true",
 		"(1, 2) instance of xs:string* or (1, 2) instance of xs:integer*": "true",
 		"(1,2) instance of xs:integer* eq true()":                         "true",
-		"(1,2) instance of xs:integer* div 2":                             "0.5",
-		"(1,2) instance of xs:integer* mod 2":                             "1",
 		"(1,2) treat as xs:integer* instance of xs:integer+":              "true",
 		"count((1,2) treat as xs:integer*)":                               "2",
 	} {
 		got, diag := xpathStrings(t, expr)
 		if len(got) != 1 || got[0] != want || diag != "" {
 			t.Errorf("%s -> %v %q, want %s", expr, got, diag, want)
+		}
+	}
+	// "div" and "mod" after the indicator are operators too. Their left
+	// operand is then an xs:boolean, which arithmetic does not accept: the
+	// type error (not a syntax error) shows the operator was parsed.
+	for _, expr := range []string{
+		"(1,2) instance of xs:integer* div 2",
+		"(1,2) instance of xs:integer* mod 2",
+	} {
+		r := engine.EvalXPath(engine.XPathRequest{Expression: expr})
+		if len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "XPTY0004" {
+			t.Errorf("%s -> %q %+v, want XPTY0004", expr, r.Value, r.Diagnostics)
 		}
 	}
 }

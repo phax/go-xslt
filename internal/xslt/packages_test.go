@@ -70,3 +70,33 @@ func TestPackageVersionRanges(t *testing.T) {
 		}
 	}
 }
+
+// A VersionPrefix may be the upper bound of a range (XSLT 3.0 §3.5.1:
+// VersionTo ::= "to" S (PackageVersion | VersionPrefix), and the same for
+// VersionFromTo); the cases are the REC's own examples (issue #8).
+func TestPackageVersionRangeToPrefix(t *testing.T) {
+	check := func(spec string, yes, no []string) {
+		t.Helper()
+		rs, err := parsePkgRanges(spec)
+		if err != nil {
+			t.Fatalf("parsePkgRanges(%q): %v", spec, err)
+		}
+		for _, list := range [][]string{yes, no} {
+			for _, s := range list {
+				v, ok := parsePkgVersion(s)
+				if !ok {
+					t.Fatalf("parsePkgVersion(%q) failed", s)
+				}
+				if got, want := matchesAnyPkgRange(rs, v), &list[0] == &yes[0]; got != want {
+					t.Errorf("%q matches %q = %v, want %v", spec, s, got, want)
+				}
+			}
+		}
+	}
+	// "to 3.3.* matches 1.5 or 2.0.6 or 3.3.4621, but not 3.4.0 or 3.4.0-beta"
+	check("to 3.3.*", []string{"1.5", "2.0.6", "3.3.4621", "3.3", "3.3-beta"}, []string{"3.4.0", "3.4.0-beta"})
+	// "1 to 5 matches 1.1, 2.1, 3.1, or 5.0 (but not 5.1), while 1 to 5.*
+	// matches all of these, plus versions such as 5.7.2 (but not 6.0 or 6.0-beta)"
+	check("1 to 5", []string{"1.1", "2.1", "3.1", "5.0"}, []string{"5.1", "5.7.2"})
+	check("1 to 5.*", []string{"1.1", "2.1", "3.1", "5.0", "5.1", "5.7.2"}, []string{"6.0", "6.0-beta", "0.9"})
+}

@@ -106,7 +106,7 @@ func TestErrorTraceSpec(t *testing.T) {
 		{`error(QName('http://www.example.com/HR', 'myerr:toohighsal'), 'Does not apply because salary is too high')`,
 			"http://www.example.com/HR", "toohighsal", "Does not apply because salary is too high", "-"},
 		{`error(QName('urn:e', 'E1'), 'd', (1, 2))`, "urn:e", "E1", "d", "1|2"},
-		{`error(QName('urn:e', 'E1'), (), 'v')`, "urn:e", "E1", "", "v"},
+		{`error(QName('urn:e', 'E1'), 'd', 'v')`, "urn:e", "E1", "d", "v"},
 	} {
 		_, err := ev(c.expr)
 		var xe *Error

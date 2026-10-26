@@ -263,7 +263,7 @@ func TestSpPatternDefaultPriority(t *testing.T) {
 		{`element()`, -0.5}, {`element(*)`, -0.5}, {`attribute()`, -0.5}, {`attribute(*)`, -0.5},
 		{`element(a)`, 0}, {`element(*, xs:integer)`, 0}, {`attribute(a)`, 0},
 		{`attribute(*, xs:integer)`, 0},
-		{`element(a, xs:integer)`, 0.25}, {`attribute(a, xs:integer?)`, 0.25},
+		{`element(a, xs:integer)`, 0.25}, {`attribute(a, xs:integer)`, 0.25},
 		{`document-node()`, -0.5}, {`document-node(element(a))`, 0},
 		{`document-node(element(a, xs:integer))`, 0.25},
 		{`document-node(element(*))`, -0.5},

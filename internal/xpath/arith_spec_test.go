@@ -100,7 +100,14 @@ func TestCaNumericArithmetic(t *testing.T) {
 		{expr: "xs:hexBinary('01') + 1", code: "XPTY0004"},
 		{expr: "1 + xs:base64Binary('AQ==')", code: "XPTY0004"},
 		{expr: "QName('', 'a') + 1", code: "XPTY0004"},
-		{expr: "r/a + 1 instance of xs:double and r/a + 1 eq 4", want: "true"},
+		{expr: "(r/a + 1) instance of xs:double and r/a + 1 eq 4", want: "true"},
+		// A boolean is no arithmetic operand either (B.2 Operator Mapping), and
+		// "instance of" binds tighter than "+": 1 + 1 instance of xs:double is
+		// 1 + false() (issue #10).
+		{expr: "1 + true()", code: "XPTY0004"},
+		{expr: "false() * 2", code: "XPTY0004"},
+		{expr: "-true()", code: "XPTY0004"},
+		{expr: "1 + 1 instance of xs:double", code: "XPTY0004"},
 		// xs:integer × xs:integer.
 		{expr: "(1 + 2) instance of xs:integer and 1 + 2 eq 3", want: "true"},
 		{expr: "(xs:short(2) + xs:byte(3)) instance of xs:integer and not((xs:short(2) + xs:byte(3)) instance of xs:short)", want: "true"},

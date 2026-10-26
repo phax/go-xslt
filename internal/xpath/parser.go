@@ -1027,7 +1027,10 @@ func (p *parser) parseKindTest() (NodeTest, error) {
 
 func (p *parser) isRParen() bool { return p.cur().kind == tRParen }
 
-// parseElemAttrTestBody parses (NameOrWildcard ("," TypeName "?"?)?).
+// parseElemAttrTestBody parses (NameOrWildcard ("," TypeName "?"?)?). The
+// nillable "?" belongs to ElementTest only (XPath 3.1 A.1: AttributeTest ::=
+// "attribute" "(" (AttribNameOrWildcard ("," TypeName)?)? ")"): after an
+// attribute test's type name it is a syntax error (XPST0003).
 func (p *parser) parseElemAttrTestBody(nt *NodeTest) error {
 	if p.isStarTok() {
 		p.next()
@@ -1058,6 +1061,9 @@ func (p *parser) parseElemAttrTestBody(nt *NodeTest) error {
 			}
 		}
 		if p.cur().kind == tQuestion {
+			if nt.Kind != testElement {
+				return fmt.Errorf("err:XPST0003: an attribute() test takes no nillable \"?\" after its type name")
+			}
 			p.next()
 			nt.Nillable = true
 		}

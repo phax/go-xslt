@@ -84,12 +84,13 @@ func arithOperand(ctx *Context, o Object) (*Atomic, error) {
 	if a.T == XSuntypedAtomic {
 		return castToDouble(a, XSdouble)
 	}
-	// A typed STRING/anyURI/QName/binary operand is a type error — only
-	// untypedAtomic coerces ("3" + "3" is XPTY0004, K-NumericAdd-43/44). XSLT
-	// values now arrive coerced to their @as type (evalVarDef), so this no
-	// longer trips proper stylesheets.
-	if isStringType(a.T) || a.T == XSanyURI ||
-		a.T == XShexBinary || a.T == XSbase64Binary || a.T == XSqname {
+	// Only numeric, date/time and duration values take part in arithmetic
+	// (XPath 3.1 §3.5 and B.2 Operator Mapping); anything else is a type
+	// error — a typed string ("3" + "3", K-NumericAdd-43/44), a boolean
+	// (1 + true(), issue #10), a QName, a binary value. Only untypedAtomic
+	// coerces, above. XSLT values arrive coerced to their @as type
+	// (evalVarDef), and XSLT 1.0 processing takes bc10ArithOperand instead.
+	if !a.IsNumeric() && !isDateTimeType(a.T) && !isDurationType(a.T) {
 		return nil, fmt.Errorf("err:XPTY0004: %s is not a valid arithmetic operand", a.T)
 	}
 	return a, nil

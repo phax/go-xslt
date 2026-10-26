@@ -214,7 +214,9 @@ func TestPeBindingsAndFunctions(t *testing.T) {
 		{"error() = 1", "err:FOER0000"},
 		{"1 eq error()", "err:FOER0000"},
 		{"(1, error())", "err:FOER0000"},
-		{"'a' => error()", "err:FOER0000"},
+		// error($code as xs:QName?): a string is not converted to a QName
+		// (§3.1.5.2 casts only untypedAtomic) — issue #9.
+		{"'a' => error()", "err:XPTY0004"},
 		{"error() => string()", "err:FOER0000"},
 		// Arguments not matching a declared parameter type, or a result not
 		// matching the declared return type, are XPTY0004.

@@ -194,7 +194,11 @@ func TestNumAtan2Spec(t *testing.T) {
 		{"math:atan2(-0.0e0, +1)", "-0"},
 		{"math:atan2(+0.0e0, +1)", "0"},
 		{"math:atan2(xs:double('NaN'), 1)", "NaN"},
-		{"empty(math:atan2((), 1))", "true"},
+	}, nil)
+	// Neither parameter is optional (issue #9).
+	numRunErr(t, []numErrCase{
+		{"math:atan2((), 1)", "XPTY0004"},
+		{"math:atan2(1, ())", "XPTY0004"},
 	}, nil)
 }
 

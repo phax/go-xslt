@@ -12,7 +12,10 @@ func TestStrContainsToken(t *testing.T) {
 		{expr: `contains-token("red, green, blue", "red")`, want: "false"},
 		{expr: `contains-token("red green blue", "RED", "` + strHTMLCI + `")`, want: "true"},
 		{expr: `contains-token("red green blue", "RED")`, want: "false"},
-		{expr: `contains-token("red green blue", "RED", ())`, want: "false"},
+		// $collation as xs:string and $token as xs:string are not optional
+		// (issue #9).
+		{expr: `contains-token("red green blue", "RED", ())`, err: "XPTY0004"},
+		{expr: `contains-token("red green blue", ())`, err: "XPTY0004"},
 		// Only XML whitespace separates tokens; an all-blank token never matches.
 		{expr: `contains-token("a` + " " + `b", "a")`, want: "false"},
 		{expr: `contains-token("a b", "  ")`, want: "false"},

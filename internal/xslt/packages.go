@@ -143,14 +143,19 @@ type pkgRange struct {
 	lo     *pkgVersion // "X to Y", "X+", "to Y" (nil = unbounded)
 	hi     *pkgVersion
 	ranged bool
+	// hiPrefix is set for "to 3.3.*" / "1 to 3.3.*": the upper bound is a
+	// VersionPrefix, and hi holds its version part.
+	hiPrefix bool
 }
 
 // parsePkgRanges parses the package-version-ranges production:
 //
 //	PackageVersionRanges ::= PackageVersionRange ("," PackageVersionRange)*
 //	PackageVersionRange  ::= "*" | PackageVersion | PackageVersion ".*"
-//	                       | PackageVersion "to" PackageVersion
-//	                       | "to" PackageVersion | PackageVersion "+"
+//	                       | PackageVersion "to" (PackageVersion | VersionPrefix)
+//	                       | "to" (PackageVersion | VersionPrefix)
+//	                       | PackageVersion "+"
+//	VersionPrefix        ::= PackageVersion ".*"
 //
 // An unparseable range is a static error (XTSE0020) — use-package-291..294.
 func parsePkgRanges(s string) ([]pkgRange, error) {
@@ -199,11 +204,22 @@ func parsePkgRange(tok string) (pkgRange, error) {
 			r.lo = &v
 		}
 		if hi != "" {
-			v, ok := parsePkgVersion(hi)
-			if !ok {
-				return bad()
+			// XSLT 3.0 §3.5.1: VersionTo ::= "to" S (PackageVersion |
+			// VersionPrefix), and the same for VersionFromTo. A prefix with an
+			// NCName part is refused here as it is on its own (below).
+			if strings.HasSuffix(hi, ".*") {
+				v, ok := parsePkgVersion(strings.TrimSuffix(hi, ".*"))
+				if !ok || v.suffix != "" {
+					return bad()
+				}
+				r.hi, r.hiPrefix = &v, true
+			} else {
+				v, ok := parsePkgVersion(hi)
+				if !ok {
+					return bad()
+				}
+				r.hi = &v
 			}
-			r.hi = &v
 		}
 		if r.lo == nil && r.hi == nil {
 			return bad()
@@ -263,7 +279,13 @@ func (r pkgRange) matches(v pkgVersion) bool {
 			return false
 		}
 		if r.hi != nil && comparePkgVersion(v, *r.hi) > 0 {
-			return false
+			// "to P.*" matches "any version that is less than or equal to
+			// some version that matches the VersionPrefix" (§3.5.1): every
+			// version at or below P, and every version that starts with P's
+			// parts, however long (to 3.3.* admits 3.3.4621, not 3.4.0-beta).
+			if !r.hiPrefix || !(pkgRange{prefix: r.hi.parts}).matches(v) {
+				return false
+			}
 		}
 		return true
 	}
