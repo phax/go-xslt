@@ -60,7 +60,7 @@ type SimpleType struct {
 	docs        []Documentation // CompileWithDocs only
 
 	item    *SimpleType   // list
-	members []*SimpleType // union
+	members []*SimpleType // union; never leads back to this type (closeUnion)
 
 	// declared marks a USER-DEFINED type (global or inline) as opposed to the
 	// sentinel a bare builtin reference materializes: an anonymous facet-less

@@ -554,6 +554,12 @@ type compiler struct {
 	// notationLocals holds the local names of every declared xs:notation, for
 	// the NOTATION-enumeration-must-name-a-declared-notation rule.
 	notationLocals map[string]bool
+	// open holds every simpleType whose definition is being parsed, with its
+	// derivation kind ("restriction"/"list"/"union"): a reference to one from
+	// inside its own definition (an inline type naming the enclosing one,
+	// which visitST's QName ordering cannot see) is a circular derivation —
+	// tolerated only as a union member in XSD 1.0, see closeUnion.
+	open map[*SimpleType]string
 	// tnsByPath caches each schema document's targetNamespace by resolved path,
 	// so an include/import directive reaching an already-collected document
 	// still has its namespace-consistency rules checked (schF6).
@@ -1372,16 +1378,86 @@ func (c *compiler) parseSimpleTypeInto(st *SimpleType, node *xmltree.Node) error
 	} else if c.finalDefault != "" {
 		st.final = parseBlockSet(c.finalDefault)
 	}
+	if c.open == nil {
+		c.open = map[*SimpleType]string{}
+	}
+	defer delete(c.open, st)
 	if r := firstXSChild(node, "restriction"); r != nil {
+		c.open[st] = "restriction"
 		return c.parseRestriction(st, r)
 	}
 	if l := firstXSChild(node, "list"); l != nil {
+		c.open[st] = "list"
 		return c.parseList(st, l)
 	}
 	if u := firstXSChild(node, "union"); u != nil {
+		c.open[st] = "union"
 		return c.parseUnion(st, u)
 	}
 	return invalidf("", "simpleType without restriction/list/union")
+}
+
+// errCircularST is the verdict on a simpleType that derives from itself.
+func errCircularST() error { return invalidf("", "circular simpleType derivation") }
+
+// closeUnion ends the construction of union st's member list. XSD 1.0 does not
+// forbid a cycle of unions: the ordering pass (visitST) tolerates one through
+// named types (the suite's stE110), and one through an inline union naming an
+// enclosing type never reaches that pass at all. Left in the component graph,
+// such a cycle makes every later walk over members — validation, derivation
+// checks, the model view — recurse until the stack overflows (a fatal error
+// no recover catches; issue #12). A union's value space is the union of its
+// members' value spaces, so the least fixed point of a cycle is simply the
+// members from which st is NOT reachable, collected in member order through
+// the cyclic ones: st takes those as its members, and the invariant that no
+// cycle runs through a finished union holds, since a cycle closes at the
+// union finished last, whose check sees every edge of it. XSD 1.1 forbids
+// the cycle outright (cos-no-circular-unions), as visitST does for named ones.
+func (c *compiler) closeUnion(st *SimpleType) error {
+	if !unionReaches(st.members, st, map[*SimpleType]bool{st: true}) {
+		return nil
+	}
+	if c.sch.version == Version11 {
+		return errCircularST()
+	}
+	var members []*SimpleType
+	seen := map[*SimpleType]bool{st: true}
+	var collect func(ms []*SimpleType)
+	collect = func(ms []*SimpleType) {
+		for _, m := range ms {
+			if m == nil || seen[m] {
+				continue
+			}
+			seen[m] = true
+			if unionReaches(m.members, st, map[*SimpleType]bool{m: true}) {
+				collect(m.members)
+				continue
+			}
+			members = append(members, m)
+		}
+	}
+	collect(st.members)
+	st.members = members
+	return nil
+}
+
+// unionReaches reports whether target is reachable from ms along union
+// membership (a restriction of a union carries its base's members, so that
+// edge is covered too); seen holds the types already entered.
+func unionReaches(ms []*SimpleType, target *SimpleType, seen map[*SimpleType]bool) bool {
+	for _, m := range ms {
+		if m == target {
+			return true
+		}
+		if m == nil || seen[m] {
+			continue
+		}
+		seen[m] = true
+		if unionReaches(m.members, target, seen) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *compiler) parseRestriction(st *SimpleType, r *xmltree.Node) error {
@@ -1390,6 +1466,9 @@ func (c *compiler) parseRestriction(st *SimpleType, r *xmltree.Node) error {
 		base, err := c.resolveSimpleType(r, baseRef)
 		if err != nil {
 			return err
+		}
+		if _, open := c.open[base]; open {
+			return errCircularST()
 		}
 		if err := checkSimpleFinal(base, "restriction"); err != nil {
 			return err
@@ -1412,6 +1491,11 @@ func (c *compiler) parseRestriction(st *SimpleType, r *xmltree.Node) error {
 		case vUnion:
 			st.variety = vUnion
 			st.members = st.base.members
+			// The inline base union(st, …) of a type still being parsed
+			// just handed st itself back as a member.
+			if err := c.closeUnion(st); err != nil {
+				return err
+			}
 		}
 	}
 	if err := c.parseFacets(st, r); err != nil {
@@ -1772,6 +1856,9 @@ func (c *compiler) parseList(st *SimpleType, l *xmltree.Node) error {
 			return invalidf("", "expected a simple type, got complex %s", itemRef)
 		}
 		if it != absentType {
+			if _, open := c.open[it]; open {
+				return errCircularST()
+			}
 			if err := c.checkNotationUsable(it); err != nil {
 				return err
 			}
@@ -1821,6 +1908,12 @@ func (c *compiler) parseUnion(st *SimpleType, u *xmltree.Node) error {
 			if err != nil {
 				return err
 			}
+			// A member still being parsed is an enclosing type: through a
+			// restriction or list that is a circular derivation; a pure-union
+			// cycle is cos-no-circular-unions in 1.1 and closeUnion's in 1.0.
+			if kind, open := c.open[m]; open && (kind != "union" || c.sch.version == Version11) {
+				return errCircularST()
+			}
 			// XSD 1.1: xs:anySimpleType / xs:anyAtomicType may not be a union
 			// member type (Part 2 §2.4.1 note; stE053 — 1.0 tolerates it).
 			if c.sch.version == Version11 && isURTypeSimple(m) {
@@ -1847,7 +1940,7 @@ func (c *compiler) parseUnion(st *SimpleType, u *xmltree.Node) error {
 	if len(st.members) == 0 {
 		return invalidf("", "union without members")
 	}
-	return nil
+	return c.closeUnion(st)
 }
 
 func (c *compiler) parseFacets(st *SimpleType, r *xmltree.Node) error {
