@@ -77,6 +77,37 @@ argument that defaults to the context item, use the context node/item.
 Return errors with the spec error code in the message, e.g.
 `fmt.Errorf("err:FORG0001: invalid value")`.
 
+## Signature and argument checking (REQUIRED for every function)
+
+Every built-in needs its F&O signature, one line per arity, in
+`builtinCatalogSrc` (`fn_catalog.go`), e.g.
+
+```
+fn:substring($sourceString as xs:string?, $start as xs:double) as xs:string
+fn:substring($sourceString as xs:string?, $start as xs:double, $length as xs:double) as xs:string
+```
+
+`dispatchFunc` looks the function up there and applies the function conversion
+rules (XPath 3.1 §3.1.5.2) to the arguments BEFORE calling you (`fn_argcheck.go`),
+for a direct call, a named reference, `fn:function-lookup`, a partial
+application and a dynamic call alike. So your function can rely on its
+declared types: an atomic parameter holds atomic values of the declared type
+(or a subtype; a numeric may be any numeric type where `xs:double` is declared
+— promotion is a validity check, read it with `ToNumber`/`Float`; an
+`xs:string` parameter may be an `xs:anyURI` or `xs:untypedAtomic`, or an
+untyped node, read it with `ToString`/`Lexical`), a parameter with no
+occurrence indicator holds exactly one item, `?` at most one. A mismatch is
+XPTY0004 (an `xs:untypedAtomic` for `xs:QName`: XPTY0117), an `xs:untypedAtomic`
+that cannot be cast to the declared type is the cast's error (FORG0001). Do not
+repeat these checks in the implementation. Exceptions: a function-typed
+parameter is checked as `function(*)` (check its arity and convert what you pass
+and get back yourself), and XSLT 1.0 compatibility mode (`Context.BC10`) skips
+the check entirely, so never crash on an argument of the wrong shape.
+`TestBuiltinCatalogComplete` fails for a registered function without a line.
+
+The XSLT-defined functions (`current`, `key`, `document`, …) are declared the
+same way in `xsltSigSrc` (`internal/xslt/functions.go`).
+
 ## Tests
 
 Use the shared helper (defined in `helpers_test.go` — do not redefine):
@@ -99,7 +130,7 @@ tree using `xpStrCtx(t, expr, xmlString)` (also in helpers_test.go).
 
 ## Rules to avoid breaking the shared package
 
-1. ONE new file `fn_<family>.go` + ONE `fn_<family>_test.go`. Do not edit other files.
+1. ONE new file `fn_<family>.go` + ONE `fn_<family>_test.go`. Do not edit other files, except to add your signature lines to `fn_catalog.go`.
 2. Prefix all your private helper funcs/vars with your family initials
    (e.g. `dt`, `uri`, `qn`, `sq`) to avoid name clashes with other agents.
 3. Do NOT redefine anything listed above or any already-registered function.
