@@ -33,3 +33,19 @@ export function formatXml(xml: string): string {
   }
   return head + out.join("\n");
 }
+
+// formatJson pretty-prints a JSON string for display with two-space
+// indentation, or returns null when the text is not valid JSON (the caller then
+// shows the raw text unchanged). It goes through JSON.parse, so it is for
+// display only: integers beyond 2^53 lose precision, a number's spelling is
+// normalised (1.0 becomes 1, 1e2 becomes 100), and duplicate object keys
+// collapse to the last one (keys otherwise keep their insertion order, except
+// that integer-like keys are listed first, ascending).
+export function formatJson(text: string): string | null {
+  if (!text.trim()) return null;
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return null;
+  }
+}
