@@ -22,9 +22,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # setup-go's go-version-file reads only the `go` directive (the minimum
+      # for library users, 1.25.0), not the `toolchain` line, so it installed
+      # 1.25.0 and only commands run inside the module switched to the
+      # toolchain's Go (GOTOOLCHAIN=auto). Tools built outside the module
+      # (the wails3 CLI, govulncheck) were compiled with 1.25.0 and then
+      # analysed code whose standard library is 1.26.x: "file requires newer
+      # Go version go1.26 (application built with go1.25)". So install the
+      # toolchain line's version; go.mod stays the single source for it.
+      - name: Read the Go version from the toolchain line
+        id: gover
+        shell: bash
+        run: |
+          v=$(sed -n 's/^toolchain go//p' go.mod)
+          test -n "$v" || { echo "no toolchain line in go.mod" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.gover.outputs.version }}
 
       - name: go build
         run: go build ./...
@@ -73,9 +89,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Read the Go version from the toolchain line
+        id: gover
+        shell: bash
+        run: |
+          v=$(sed -n 's/^toolchain go//p' go.mod)
+          test -n "$v" || { echo "no toolchain line in go.mod" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.gover.outputs.version }}
 
       - name: go build
         run: go build ./...

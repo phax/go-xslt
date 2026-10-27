@@ -226,7 +226,12 @@ Desktop GUI (**run from `desktop/`**):
 - **CI/CD** (`.github/workflows/`): `ci.yml` runs library build/vet/test and
   `govulncheck` on push/PR to `main`. Both `go.mod` files keep `go 1.25.0`
   (the minimum for library users) plus a `toolchain` line, which is what
-  CI and the release builds actually use (setup-go reads it): keep it on
+  CI and the release builds actually use: setup-go's `go-version-file`
+  reads only the `go` line, so each job first extracts the `toolchain`
+  version with `sed` and passes it as `go-version` (otherwise 1.25.0 is
+  installed, and tools built outside the module — the wails3 CLI,
+  govulncheck — are compiled with it and warn "file requires newer Go
+  version go1.26"; the wails3 cache key carries the Go version). Keep it on
   the latest patch release — the published binaries were built with a
   year-old go1.25.0 until v0.3.5. `release.yml` triggers on any `v*` tag push — builds all
   5 desktop binaries (macOS arm64+amd64 and Windows amd64+arm64 natively on
