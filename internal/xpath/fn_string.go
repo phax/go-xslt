@@ -34,17 +34,9 @@ func fnContainsToken(c *Context, a []Object) (Object, error) {
 	// Unicode spaces such as U+00A0 do NOT separate (fn-contains-token-21/51).
 	// $token is whitespace-trimmed; a token comparison honours the optional
 	// collation (fn-contains-token-70/71 use the case-insensitive collation).
-	// $token and $collation are each exactly one xs:string (F&O 3.1 §5.3.9;
-	// an empty sequence for either is XPTY0004 by the function conversion
-	// rules, XPath 3.1 §3.1.5.2 — issue #9).
-	if err := requireOne(a, 1, "contains-token", "$token"); err != nil {
-		return nil, err
-	}
-	if len(a) > 2 {
-		if err := requireOne(a, 2, "contains-token", "$collation"); err != nil {
-			return nil, err
-		}
-	}
+	// $token and $collation are each exactly one xs:string (F&O 3.1 §5.3.9):
+	// the function conversion rules reject an empty one (XPTY0004,
+	// fn_argcheck.go) before this runs.
 	token := strings.TrimFunc(itemString(firstItem(arg(a, 1))), isXMLSpaceRune)
 	if token == "" {
 		return NewBool(false), nil

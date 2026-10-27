@@ -88,6 +88,15 @@ func (eng *engine) callFunc(prefix, local string, args []xpath.Object, env *eval
 	if eng.evaluateDepth > 0 && evNotAvailable[local] {
 		return nil, true, errAt(nil, "err:XTDE3160: %s() is not available in the static context of xsl:evaluate", local)
 	}
+	// The arguments of an XSLT-defined function meet the function
+	// conversion rules (XPath 3.1 §3.1.5.2) like those of any built-in.
+	if known, arityOK := xsltSigs.Has(local, len(args)); known && !arityOK {
+		return nil, true, errAt(nil, "err:XPST0017: %s() does not accept %d arguments", local, len(args))
+	}
+	args, err := xsltSigs.Check(local, args, ctx)
+	if err != nil {
+		return nil, true, err
+	}
 	// Registry-based XSLT context functions (current-group, current-merge-*,
 	// accumulator-before/after, …) registered by instr_*.go via init().
 	if fn, ok := xsltFuncs[local]; ok {
@@ -1138,33 +1147,57 @@ func fragHasMarkup(frag *xmltree.Node) bool {
 	return false
 }
 
-// xsltExtraArity catalogs the [min,max] arity of the XSLT-defined functions
-// in the standard function namespace that are not part of the core F&O
-// catalog tracked by package xpath (current, document, key, …), for
-// fn:function-available's arity-qualified form.
-var xsltExtraArity = map[string][2]int{
-	"current":                     {0, 0},
-	"document":                    {1, 2},
-	"key":                         {2, 3},
-	"current-output-uri":          {0, 0},
-	"copy-of":                     {0, 1},
-	"snapshot":                    {0, 1},
-	"system-property":             {1, 1},
-	"function-available":          {1, 2},
-	"element-available":           {1, 1},
-	"type-available":              {1, 1},
-	"current-group":               {0, 0},
-	"current-grouping-key":        {0, 0},
-	"current-merge-group":         {0, 1},
-	"current-merge-key":           {0, 0},
-	"regex-group":                 {1, 1},
-	"stream-available":            {1, 1},
-	"accumulator-before":          {1, 1},
-	"accumulator-after":           {1, 1},
-	"unparsed-entity-uri":         {1, 2},
-	"unparsed-entity-public-id":   {1, 2},
-	"available-system-properties": {0, 0},
-}
+// xsltSigSrc declares the XSLT-defined functions in the standard function
+// namespace that are not part of the core F&O catalog tracked by package
+// xpath (current, document, key, …), in the notation of that package's
+// builtinCatalogSrc. callFunc checks their arguments by the function
+// conversion rules (XPath 3.1 §3.1.5.2) like any other built-in, and the
+// arities drive fn:function-available's arity-qualified form. A function
+// registered in xsltFuncs, or named in a case of callFunc, needs a line here
+// (TestXSLTFunctionCatalogComplete).
+const xsltSigSrc = `
+fn:current() as item()
+fn:document($uri-sequence as item()*) as node()*
+fn:document($uri-sequence as item()*, $base-node as node()) as node()*
+fn:key($key-name as xs:string, $key-value as xs:anyAtomicType*) as node()*
+fn:key($key-name as xs:string, $key-value as xs:anyAtomicType*, $top as node()) as node()*
+fn:current-output-uri() as xs:anyURI?
+fn:copy-of() as item()*
+fn:copy-of($input as item()*) as item()*
+fn:snapshot() as item()*
+fn:snapshot($input as item()*) as item()*
+fn:system-property($property-name as xs:string) as xs:string
+fn:function-available($function-name as xs:string) as xs:boolean
+fn:function-available($function-name as xs:string, $arity as xs:integer) as xs:boolean
+fn:element-available($element-name as xs:string) as xs:boolean
+fn:type-available($type-name as xs:string) as xs:boolean
+fn:current-group() as item()*
+fn:current-grouping-key() as xs:anyAtomicType*
+fn:current-merge-group() as item()*
+fn:current-merge-group($source-name as xs:string) as item()*
+fn:current-merge-key() as xs:anyAtomicType*
+fn:regex-group($group-number as xs:integer) as xs:string
+fn:stream-available($uri as xs:string?) as xs:boolean
+fn:accumulator-before($name as xs:string) as item()*
+fn:accumulator-after($name as xs:string) as item()*
+fn:unparsed-entity-uri($entity-name as xs:string) as xs:anyURI
+fn:unparsed-entity-uri($entity-name as xs:string, $doc as node()) as xs:anyURI
+fn:unparsed-entity-public-id($entity-name as xs:string) as xs:string
+fn:unparsed-entity-public-id($entity-name as xs:string, $doc as node()) as xs:string
+fn:available-system-properties() as xs:QName*
+`
+
+// xsltSigs is xsltSigSrc, parsed.
+var xsltSigs = func() *xpath.SigCatalog {
+	c, err := xpath.NewSigCatalog(xsltSigSrc)
+	if err != nil {
+		panic("xslt: function catalogue: " + err.Error())
+	}
+	return c
+}()
+
+// xsltExtraArity is the [min,max] arity of each function in xsltSigSrc.
+var xsltExtraArity = xsltSigs.ArityRanges()
 
 // elementAvailableExtra names XSLT elements this processor implements that
 // have no entry in xsltElemSpecs (whose purpose is STATIC validation, which

@@ -21,30 +21,20 @@ func init() {
 func fnError(_ *Context, args []Object) (Object, error) {
 	qn := xmltree.Name{Space: nsErr, Local: "FOER0000", Prefix: "err"}
 	code := "err:FOER0000"
-	// fn:error($code as xs:QName?, $description as xs:string, …): the code is
-	// an xs:QName or nothing — a string is not converted to one, only an
-	// untypedAtomic would be cast, and xs:QName is namespace-sensitive
-	// (XPath 3.1 §3.1.5.2) — and the description is exactly one string
-	// (issue #9).
+	// The arguments arrive checked against fn:error($code as xs:QName?,
+	// $description as xs:string, $error-object as item()*) by the function
+	// conversion rules (fn_argcheck.go): a string $code is XPTY0004, an
+	// untypedAtomic one XPTY0117, an empty or plural $description XPTY0004
+	// (issue #9). Under XSLT 1.0 compatibility the check is skipped and a
+	// $code that is not a QName is simply ignored.
 	if len(args) >= 1 && !numIsEmpty(arg(args, 0)) {
-		items := Items(arg(args, 0))
-		q, ok := items[0].(*Atomic)
-		if len(items) != 1 || !ok || q.T != XSqname {
-			if ok && q.T == XSuntypedAtomic && len(items) == 1 {
-				return nil, fmt.Errorf("err:XPTY0117: fn:error: an untypedAtomic $code cannot be cast to the namespace-sensitive xs:QName")
-			}
-			return nil, fmt.Errorf("err:XPTY0004: fn:error: $code must be an xs:QName or the empty sequence")
-		}
-		if q.qnv().Local != "" {
+		if q, ok := firstItem(arg(args, 0)).(*Atomic); ok && q.T == XSqname && q.qnv().Local != "" {
 			qn = q.qnv()
 			code = "err:" + q.qnv().Local
 		}
 	}
 	desc := ""
-	if len(args) >= 2 {
-		if err := requireOne(args, 1, "fn:error", "$description"); err != nil {
-			return nil, err
-		}
+	if len(args) >= 2 && !numIsEmpty(arg(args, 1)) {
 		desc = ": " + itemString(firstItem(arg(args, 1)))
 	}
 	var value Object
@@ -52,16 +42,6 @@ func fnError(_ *Context, args []Object) (Object, error) {
 		value = arg(args, 2)
 	}
 	return nil, &Error{Code: qn, Desc: strings.TrimPrefix(desc, ": "), Value: value, msg: code + desc}
-}
-
-// requireOne reports XPTY0004 unless argument i holds exactly one item: the
-// function conversion rules' verdict for a parameter whose declared type has
-// no occurrence indicator (XPath 3.1 §3.1.5.2).
-func requireOne(args []Object, i int, fn, param string) error {
-	if n := itemCount(arg(args, i)); n != 1 {
-		return fmt.Errorf("err:XPTY0004: %s: %s takes exactly one item, got %d", fn, param, n)
-	}
-	return nil
 }
 
 // nsErr is the namespace of the standard XPath/XQuery/XSLT error codes.

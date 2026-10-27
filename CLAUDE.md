@@ -57,7 +57,8 @@ dragging in the GUI's Wails/CGo dependencies:
   patterns + default priorities), `value.go` (XPath-1.0 value model), the F&O
   3.1 catalog split across `fn_*.go` family files (registered into
   `coreFuncs`/`mapFuncs`/`arrayFuncs`/`mathFuncs` via `init()` — API contract:
-  `internal/xpath/FNAPI.md`), `streamability.go` (posture/sweep
+  `internal/xpath/FNAPI.md`; each built-in also needs its signature line in
+  `fn_catalog.go`, see the first Conventions bullet), `streamability.go` (posture/sweep
   classification, XSLT 3.0 §19/Appendix J), `schema_names.go` (schema-aware
   name resolution for `element(N,T)`/`schema-element(N)`), `static_axes.go`
   (XPath 3.1's *optional* Static Typing Feature — narrow static-emptiness
@@ -245,6 +246,21 @@ Desktop GUI (**run from `desktop/`**):
 
 ## Conventions / gotchas
 
+- **Built-in function arguments are checked centrally** (XPath 3.1 §3.1.5.2,
+  issue #9): `dispatchFunc` looks the function up in the signature catalogue
+  (`internal/xpath/fn_catalog.go`, F&O 3.1's own `$name as type` lines, one per
+  arity; XSLT's `current`/`key`/`document`/… in `xsltSigSrc`,
+  `internal/xslt/functions.go`) and `fn_argcheck.go` atomizes, casts
+  `xs:untypedAtomic`, accepts numeric/anyURI promotion and matches the declared
+  type BEFORE the implementation runs — XPTY0004 on a type or cardinality
+  mismatch, XPTY0117 untypedAtomic→QName, the cast's FORG0001, FOTY0013 for a
+  map/function. Static calls, `name#N`, `fn:function-lookup`, partial
+  application and dynamic calls all pass through it. A matching argument is
+  passed on untouched (no allocation; keep `argSpec.fast` that way — measure
+  with `BenchmarkBuiltinCall`). A new function without a catalogue line fails
+  `TestBuiltinCatalogComplete`; do not add ad-hoc argument-type checks to an
+  implementation. Function-typed parameters are checked as `function(*)`;
+  `Context.BC10` skips the check (the old lenient behaviour).
 - **Optional features are per stylesheet** (`internal/xslt/features.go`,
   `engine.Features{SchemaAware, BackwardsCompatible, StrictStreaming}` on
   `Request`): `xslt.CompileWith(…, CompileOptions{Features})` stores them on

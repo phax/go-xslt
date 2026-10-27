@@ -964,13 +964,8 @@ func init() {
 	mathFuncs["atan"] = math1(math.Atan)
 	mathFuncs["atan2"] = func(c *Context, a []Object) (Object, error) {
 		// math:atan2($y as xs:double, $x as xs:double): neither parameter is
-		// optional, so an empty argument is XPTY0004, not an empty result
-		// (F&O 3.1 §4.8.14 — issue #9).
-		for i, name := range []string{"$y", "$x"} {
-			if err := requireOne(a, i, "math:atan2", name); err != nil {
-				return nil, err
-			}
-		}
+		// optional; the function conversion rules reject an empty argument
+		// (XPTY0004, fn_argcheck.go) before this runs.
 		return NewDouble(math.Atan2(ToNumber(arg(a, 0)), ToNumber(arg(a, 1)))), nil
 	}
 }
@@ -1829,6 +1824,9 @@ func numToBigInt(o Object) *big.Int {
 		}
 	}
 	f := ToNumber(o)
+	if math.IsNaN(f) { // big.NewFloat panics on NaN (reachable under 1.0 compatibility, which skips the argument check)
+		return big.NewInt(0)
+	}
 	bi, _ := big.NewFloat(f).Int(nil)
 	if bi == nil {
 		return big.NewInt(0)

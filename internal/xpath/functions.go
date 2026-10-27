@@ -159,26 +159,24 @@ func dispatchFunc(prefix, local string, args []Object, ctx *Context) (Object, er
 			return v, err
 		}
 	case "", "fn":
-		if fn, ok := coreFuncs[local]; ok {
-			if err := checkStdArity(nsFn, local, len(args)); err != nil {
-				return nil, err
-			}
-			return fn(ctx, args)
+		ensureCatalog()
+		if v, ok, err := callBuiltin(sigFn, coreFuncs, nsFn, local, args, ctx); ok {
+			return v, err
 		}
 	case "math":
-		if fn, ok := mathFuncs[local]; ok {
-			if err := checkStdArity(nsMath, local, len(args)); err != nil {
-				return nil, err
-			}
-			return fn(ctx, args)
+		ensureCatalog()
+		if v, ok, err := callBuiltin(sigMath, mathFuncs, nsMath, local, args, ctx); ok {
+			return v, err
 		}
 	case "map":
-		if fn, ok := mapFuncs[local]; ok {
-			return fn(ctx, args)
+		ensureCatalog()
+		if v, ok, err := callBuiltin(sigMap, mapFuncs, nsMap, local, args, ctx); ok {
+			return v, err
 		}
 	case "array":
-		if fn, ok := arrayFuncs[local]; ok {
-			return fn(ctx, args)
+		ensureCatalog()
+		if v, ok, err := callBuiltin(sigArray, arrayFuncs, nsArray, local, args, ctx); ok {
+			return v, err
 		}
 	}
 	if ctx.Funcs != nil {

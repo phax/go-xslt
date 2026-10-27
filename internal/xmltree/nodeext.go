@@ -244,6 +244,17 @@ func (n *Node) ext() *nodeExt {
 	return n.extPtr
 }
 
+// Untyped reports whether n is an ordinary node with no type information at
+// all — no schema annotation, no nilled or list marking, no item it stands
+// for. Its typed value is then its string value as xs:untypedAtomic (as an
+// xs:string for a comment, processing instruction or namespace node), which
+// the function-argument fast path relies on without atomizing it.
+func (n *Node) Untyped() bool {
+	e := n.extPtr
+	return e == nil || (e.TypeAnno == 0 && e.SchemaType == nil && e.ValueType == nil &&
+		!e.Nilled && !e.ListTyped && e.RealItem == nil)
+}
+
 func (n *Node) RealItem() interface{} {
 	if n.extPtr == nil {
 		return nil
