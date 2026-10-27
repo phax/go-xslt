@@ -83,7 +83,7 @@ export function FileEditorView({ tab }: { tab: FileTab }) {
             />
           </Suspense>
         ) : (
-          <Editor value={buf.text} onChange={(v) => buffers.setText(tab.projectId, tab.path, v)} />
+          <Editor value={buf.text} onChange={(v) => buffers.setText(tab.projectId, tab.path, v)} language={/\.json$/i.test(tab.path) ? "json" : "xml"} />
         )}
       </div>
     </div>

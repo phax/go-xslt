@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ReadOnlyViewer } from "./Editor";
-import { formatXml } from "../lib/format";
+import { formatJson, formatXml } from "../lib/format";
 import type { Diagnostic, TransformResult } from "../lib/api";
 import { DiagnosticsList, MessagesList, SecondaryOutputsList } from "./ResultParts";
 import { useT } from "../i18n";
@@ -20,13 +20,20 @@ export function OutputPane({ result, running, onDiagnosticClick }: OutputPanePro
   const method = result?.method || "xml";
   const canRender = method === "html";
   const isMarkup = method === "xml" || method === "html";
+  const isJson = method === "json";
+  const formattable = isMarkup || isJson;
   const messages = result?.messages ?? [];
   const secondary = result?.secondaryOutputs ?? [];
 
   const raw = result?.output ?? "";
   const shown = useMemo(
-    () => (pretty && isMarkup ? formatXml(raw) : raw),
-    [raw, pretty, isMarkup],
+    () => {
+      if (!pretty) return raw;
+      if (isMarkup) return formatXml(raw);
+      if (isJson) return formatJson(raw) ?? raw;
+      return raw;
+    },
+    [raw, pretty, isMarkup, isJson],
   );
 
   return (
@@ -43,7 +50,7 @@ export function OutputPane({ result, running, onDiagnosticClick }: OutputPanePro
             </button>
           )}
         </div>
-        {isMarkup && tab === "output" && (
+        {formattable && tab === "output" && (
           <label className="auto" title={t("formatTitle")}>
             <input type="checkbox" checked={pretty} onChange={(e) => setPretty(e.target.checked)} /> {t("format")}
           </label>
@@ -59,7 +66,7 @@ export function OutputPane({ result, running, onDiagnosticClick }: OutputPanePro
       <div className="output-body">
         {running && <div className="placeholder">{t("running")}</div>}
         {!running && tab === "output" && (
-          <ReadOnlyViewer value={shown} />
+          <ReadOnlyViewer value={shown} language={isJson ? "json" : "xml"} />
         )}
         {!running && tab === "rendered" && canRender && (
           <iframe className="render-frame" title={t("renderedFrame")} sandbox="" srcDoc={raw} />

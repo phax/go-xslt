@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useTheme, useWrapLines } from "../state/prefs";
 import CodeMirror from "@uiw/react-codemirror";
+import { json } from "@codemirror/lang-json";
 import { xml } from "@codemirror/lang-xml";
 import { linter, lintGutter, type Diagnostic as CMDiagnostic } from "@codemirror/lint";
 import { EditorState } from "@codemirror/state";
@@ -14,6 +15,8 @@ interface EditorProps {
   /** Engine diagnostics to render in the gutter / inline (already filtered to this document). */
   diagnostics?: Diagnostic[];
   readOnly?: boolean;
+  /** Syntax highlighting mode; XML (also used for XSLT/XSD) unless told otherwise. */
+  language?: "xml" | "json";
 }
 
 /** Convert a 1-based (line, col) to a 0-based document offset. */
@@ -32,7 +35,7 @@ const hideCaret = EditorView.theme({ ".cm-cursor, .cm-dropCursor": { display: "n
  * *state*, not `editable: false`: a non-editable CodeMirror cannot take focus,
  * so Ctrl/Cmd+A (select all), Ctrl/Cmd+C and keyboard selection never reached
  * it. This one is focusable and selectable, it just refuses edits. */
-export function ReadOnlyViewer({ value }: { value: string }) {
+export function ReadOnlyViewer({ value, language = "xml" }: { value: string; language?: "xml" | "json" }) {
   const wrap = useWrapLines();
   const cmTheme = useTheme() === "light" ? githubLight : githubDark;
   return (
@@ -41,7 +44,7 @@ export function ReadOnlyViewer({ value }: { value: string }) {
       theme={cmTheme}
       height="100%"
       style={{ height: "100%", fontSize: 13 }}
-      extensions={[xml(), ...(wrap ? [EditorView.lineWrapping] : []), EditorState.readOnly.of(true), hideCaret]}
+      extensions={[language === "json" ? json() : xml(), ...(wrap ? [EditorView.lineWrapping] : []), EditorState.readOnly.of(true), hideCaret]}
       basicSetup={{
         lineNumbers: true,
         foldGutter: true,
@@ -52,8 +55,9 @@ export function ReadOnlyViewer({ value }: { value: string }) {
   );
 }
 
-/** XSLT is XML, so the XML language mode + a diagnostics linter cover it. */
-export function Editor({ value, onChange, diagnostics = [], readOnly = false }: EditorProps) {
+/** XSLT is XML, so the XML language mode + a diagnostics linter cover it;
+ * `.json` files get the JSON mode (`language="json"`). */
+export function Editor({ value, onChange, diagnostics = [], readOnly = false, language = "xml" }: EditorProps) {
   const wrap = useWrapLines();
   const cmTheme = useTheme() === "light" ? githubLight : githubDark;
   const lintExt = useMemo(
@@ -84,7 +88,7 @@ export function Editor({ value, onChange, diagnostics = [], readOnly = false }: 
       theme={cmTheme}
       height="100%"
       style={{ height: "100%", fontSize: 13 }}
-      extensions={[xml(), lintGutter(), lintExt, ...(wrap ? [EditorView.lineWrapping] : [])]}
+      extensions={[language === "json" ? json() : xml(), lintGutter(), lintExt, ...(wrap ? [EditorView.lineWrapping] : [])]}
       onChange={onChange}
       readOnly={readOnly}
       basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: !readOnly }}

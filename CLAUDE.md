@@ -198,8 +198,12 @@ dragging in the GUI's Wails/CGo dependencies:
   view's state), sharing `ResultParts.tsx`, `FilePickerField.tsx`/
   `SchemaListEditor.tsx`, and the `Modal`/`ContextMenuHost`/`Toaster` overlay
   trio (`window.prompt`/`confirm` are no-ops in the Wails WKWebView, so every
-  rename/delete goes through these). `lib/api.ts` re-exports the **generated**
-  bindings types directly instead of hand-mirroring the Go structs.
+  rename/delete goes through these). The transform output pane's Format toggle
+  pretty-prints XML/HTML (`formatXml`) and JSON (`formatJson`, display only:
+  parse + re-stringify, falls back to the raw text when it is not valid JSON);
+  `ReadOnlyViewer`/`Editor` take a `language` (xml|json). `lib/api.ts`
+  re-exports the **generated** bindings types directly instead of hand-mirroring
+  the Go structs.
 
 ## Commands
 
